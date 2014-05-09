@@ -324,12 +324,14 @@ int32_t ecm_front_end_ipv6_interface_heirarchy_construct(struct ecm_db_iface_ins
 		 * will use to emit to the destination address.
 		 */
 		do {
+#ifdef ECM_INTERFACE_PPP_SUPPORT
 			int channel_count;
 			struct ppp_channel *ppp_chan[1];
 			const struct ppp_channel_ops *ppp_chan_ops;
 			int channel_protocol;
 			struct pppoe_channel_ops *pppoe_chan_ops;
 			struct pppoe_opt addressing;
+#endif
 
 			DEBUG_TRACE("Net device: %p is type: %d, name: %s\n", dest_dev, dest_dev_type, dest_dev_name);
 			next_dev = NULL;
@@ -508,6 +510,9 @@ int32_t ecm_front_end_ipv6_interface_heirarchy_construct(struct ecm_db_iface_ins
 				break;
 			}
 
+#ifndef ECM_INTERFACE_PPP_SUPPORT
+			DEBUG_TRACE("Net device: %p is UNKNOWN (PPP Unsupported) type: %d\n", dest_dev, dest_dev_type);
+#else
 			/*
 			 * PPP - but what is the channel type?
 			 * First: If this is multi-link then we do not support it
@@ -571,6 +576,7 @@ int32_t ecm_front_end_ipv6_interface_heirarchy_construct(struct ecm_db_iface_ins
 			 * Release the channel.  Note that next_dev is still (correctly) held.
 			 */
 			ppp_release_channels(ppp_chan, 1);
+#endif
 		} while (false);
 
 		/*
