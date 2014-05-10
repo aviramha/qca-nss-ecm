@@ -530,6 +530,7 @@ static void ecm_interface_ipsec_tunnel_iface_final(void *arg)
 	wake_up_process(ecm_interface_thread);
 }
 
+#ifdef CONFIG_IPV6_SIT_6RD
 /*
  * ecm_interface_sit_iface_final()
  *	An interface object we created has been destroyed
@@ -547,6 +548,7 @@ static void ecm_interface_sit_iface_final(void *arg)
 	spin_unlock_bh(&ecm_interface_lock);
 	wake_up_process(ecm_interface_thread);
 }
+#endif
 
 /*
  * ecm_interface_tunipip6_iface_final()
@@ -1026,6 +1028,7 @@ static struct ecm_db_iface_instance *ecm_interface_ipsec_tunnel_interface_establ
 	return nii;
 }
 
+#ifdef CONFIG_IPV6_SIT_6RD
 /*
  * ecm_interface_sit_interface_establish()
  *	Returns a reference to a iface of the SIT type, possibly creating one if necessary.
@@ -1082,6 +1085,7 @@ static struct ecm_db_iface_instance *ecm_interface_sit_interface_establish(struc
 	DEBUG_TRACE("%p: sit iface established\n", nii);
 	return nii;
 }
+#endif
 
 /*
  * ecm_interface_tunipip6_interface_establish()
@@ -1292,6 +1296,7 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct net_device 
 		return ii;
 	}
 
+#ifdef CONFIG_IPV6_SIT_6RD
 	/*
 	 * SIT (6-in-4)?
 	 */
@@ -1325,6 +1330,7 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct net_device 
 		ii = ecm_interface_sit_interface_establish(&type_info.sit, dev_name, dev_interface_num, nss_interface_num, dev_mtu);
 		return ii;
 	}
+#endif
 
 	/*
 	 * IPIP6 Tunnel?
