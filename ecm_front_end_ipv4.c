@@ -617,8 +617,10 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_accelerate(struct ecm_fr
 	/*
 	 * Initialize VLAN tag information
 	 */
-	create.ingress_vlan_tag = ECM_NSS_CONNMGR_VLAN_ID_NOT_CONFIGURED;
-	create.egress_vlan_tag = ECM_NSS_CONNMGR_VLAN_ID_NOT_CONFIGURED;
+	create.in_vlan_tag[0] = ECM_NSS_CONNMGR_VLAN_ID_NOT_CONFIGURED;
+	create.out_vlan_tag[0] = ECM_NSS_CONNMGR_VLAN_ID_NOT_CONFIGURED;
+	create.in_vlan_tag[1] = ECM_NSS_CONNMGR_VLAN_ID_NOT_CONFIGURED;
+	create.out_vlan_tag[1] = ECM_NSS_CONNMGR_VLAN_ID_NOT_CONFIGURED;
 
 	/*
 	 * Get the interface lists of the connection, we must have at least one interface in the list to continue
@@ -744,16 +746,16 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_accelerate(struct ecm_fr
 			break;
 		case ECM_DB_IFACE_TYPE_VLAN:
 			DEBUG_TRACE("%p: VLAN\n", fecti);
-			if (interface_type_counts[ii_type] != 0) {
+			if (interface_type_counts[ii_type] > 1) {
 				/*
-				 * Can only support one vlan
+				 * Can only support two vlans
 				 */
 				rule_invalid = true;
 				DEBUG_TRACE("%p: VLAN - additional unsupported\n", fecti);
 				break;
 			}
 			ecm_db_iface_vlan_info_get(ii, &vlan_info);
-			create.ingress_vlan_tag = vlan_info.vlan_tag;
+			create.in_vlan_tag[interface_type_counts[ii_type]] = ((vlan_info.vlan_tpid << 16) | vlan_info.vlan_tag);
 
 			/*
 			 * If we have not yet got an ethernet mac then take this one (very unlikely as mac should have been propagated to the slave (outer) device
@@ -763,7 +765,7 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_accelerate(struct ecm_fr
 				interface_type_counts[ECM_DB_IFACE_TYPE_ETHERNET]++;
 				DEBUG_TRACE("%p: VLAN use mac: %pM\n", fecti, from_nss_iface_address);
 			}
-			DEBUG_TRACE("%p: vlan tag: %x\n", fecti, create.ingress_vlan_tag);
+			DEBUG_TRACE("%p: vlan tag: %x\n", fecti, create.in_vlan_tag[interface_type_counts[ii_type]]);
 			break;
 		case ECM_DB_IFACE_TYPE_IPSEC_TUNNEL:
 			DEBUG_TRACE("%p: IPSEC\n", fecti);
@@ -862,16 +864,16 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_accelerate(struct ecm_fr
 			break;
 		case ECM_DB_IFACE_TYPE_VLAN:
 			DEBUG_TRACE("%p: VLAN\n", fecti);
-			if (interface_type_counts[ii_type] != 0) {
+			if (interface_type_counts[ii_type] > 1) {
 				/*
-				 * Can only support one vlan
+				 * Can only support two vlans
 				 */
 				rule_invalid = true;
 				DEBUG_TRACE("%p: VLAN - additional unsupported\n", fecti);
 				break;
 			}
 			ecm_db_iface_vlan_info_get(ii, &vlan_info);
-			create.egress_vlan_tag = vlan_info.vlan_tag;
+			create.out_vlan_tag[interface_type_counts[ii_type]] = ((vlan_info.vlan_tpid << 16) | vlan_info.vlan_tag);
 
 			/*
 			 * If we have not yet got an ethernet mac then take this one (very unlikely as mac should have been propagated to the slave (outer) device
@@ -881,7 +883,7 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_accelerate(struct ecm_fr
 				interface_type_counts[ECM_DB_IFACE_TYPE_ETHERNET]++;
 				DEBUG_TRACE("%p: VLAN use mac: %pM\n", fecti, to_nss_iface_address);
 			}
-			DEBUG_TRACE("%p: vlan tag: %x\n", fecti, create.egress_vlan_tag);
+			DEBUG_TRACE("%p: vlan tag: %x\n", fecti, create.out_vlan_tag[interface_type_counts[ii_type]]);
 			break;
 		case ECM_DB_IFACE_TYPE_IPSEC_TUNNEL:
 			DEBUG_TRACE("%p: IPSEC\n", fecti);
@@ -1124,8 +1126,10 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_accelerate(struct ecm_fr
 			"return_max_window: %u\n"
 			"return_end: %u\n"
 			"return_max_end: %u\n"
-			"ingress_vlan_tag: %u\n"
-			"egress_vlan_tag: %u\n"
+			"ingress_inner_vlan_tag: %u\n"
+			"egress_inner_vlan_tag: %u\n"
+			"ingress_outer_vlan_tag: %u\n"
+			"egress_outer_vlan_tag: %u\n"
 			"vlan_itag: %x\n"
 			"vlan_imask: %x\n"
 			"vlan_omask: %x\n"
@@ -1163,8 +1167,10 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_accelerate(struct ecm_fr
 			create.return_max_window,
 			create.return_end,
 			create.return_max_end,
-			create.ingress_vlan_tag,
-			create.egress_vlan_tag,
+			create.in_vlan_tag[0],
+			create.out_vlan_tag[1],
+			create.in_vlan_tag[1],
+			create.out_vlan_tag[0],
 			create.vlan_itag,
 			create.vlan_imask,
 			create.vlan_omask,
@@ -1511,8 +1517,10 @@ static void ecm_front_end_ipv4_connection_udp_front_end_accelerate(struct ecm_fr
 	/*
 	 * Initialize VLAN tag information
 	 */
-	create.ingress_vlan_tag = ECM_NSS_CONNMGR_VLAN_ID_NOT_CONFIGURED;
-	create.egress_vlan_tag = ECM_NSS_CONNMGR_VLAN_ID_NOT_CONFIGURED;
+	create.in_vlan_tag[0] = ECM_NSS_CONNMGR_VLAN_ID_NOT_CONFIGURED;
+	create.out_vlan_tag[0] = ECM_NSS_CONNMGR_VLAN_ID_NOT_CONFIGURED;
+	create.in_vlan_tag[1] = ECM_NSS_CONNMGR_VLAN_ID_NOT_CONFIGURED;
+	create.out_vlan_tag[1] = ECM_NSS_CONNMGR_VLAN_ID_NOT_CONFIGURED;
 
 	/*
 	 * Get the interface lists of the connection, we must have at least one interface in the list to continue
@@ -1638,16 +1646,16 @@ static void ecm_front_end_ipv4_connection_udp_front_end_accelerate(struct ecm_fr
 			break;
 		case ECM_DB_IFACE_TYPE_VLAN:
 			DEBUG_TRACE("%p: VLAN\n", fecui);
-			if (interface_type_counts[ii_type] != 0) {
+			if (interface_type_counts[ii_type] > 1) {
 				/*
-				 * Can only support one vlan
+				 * Can only support two vlans
 				 */
 				rule_invalid = true;
 				DEBUG_TRACE("%p: VLAN - additional unsupported\n", fecui);
 				break;
 			}
 			ecm_db_iface_vlan_info_get(ii, &vlan_info);
-			create.ingress_vlan_tag = vlan_info.vlan_tag;
+			create.in_vlan_tag[interface_type_counts[ii_type]] = ((vlan_info.vlan_tpid << 16) | vlan_info.vlan_tag);
 
 			/*
 			 * If we have not yet got an ethernet mac then take this one (very unlikely as mac should have been propagated to the slave (outer) device
@@ -1657,7 +1665,7 @@ static void ecm_front_end_ipv4_connection_udp_front_end_accelerate(struct ecm_fr
 				interface_type_counts[ECM_DB_IFACE_TYPE_ETHERNET]++;
 				DEBUG_TRACE("%p: VLAN use mac: %pM\n", fecui, from_nss_iface_address);
 			}
-			DEBUG_TRACE("%p: vlan tag: %x\n", fecui, create.ingress_vlan_tag);
+			DEBUG_TRACE("%p: vlan tag: %x\n", fecui, create.in_vlan_tag[interface_type_counts[ii_type]]);
 			break;
 		case ECM_DB_IFACE_TYPE_IPSEC_TUNNEL:
 			DEBUG_TRACE("%p: IPSEC\n", fecui);
@@ -1756,16 +1764,16 @@ static void ecm_front_end_ipv4_connection_udp_front_end_accelerate(struct ecm_fr
 			break;
 		case ECM_DB_IFACE_TYPE_VLAN:
 			DEBUG_TRACE("%p: VLAN\n", fecui);
-			if (interface_type_counts[ii_type] != 0) {
+			if (interface_type_counts[ii_type] > 1) {
 				/*
-				 * Can only support one vlan
+				 * Can only support two vlans
 				 */
 				rule_invalid = true;
 				DEBUG_TRACE("%p: VLAN - additional unsupported\n", fecui);
 				break;
 			}
 			ecm_db_iface_vlan_info_get(ii, &vlan_info);
-			create.egress_vlan_tag = vlan_info.vlan_tag;
+			create.out_vlan_tag[interface_type_counts[ii_type]] = ((vlan_info.vlan_tpid << 16) | vlan_info.vlan_tag);
 
 			/*
 			 * If we have not yet got an ethernet mac then take this one (very unlikely as mac should have been propagated to the slave (outer) device
@@ -1775,7 +1783,7 @@ static void ecm_front_end_ipv4_connection_udp_front_end_accelerate(struct ecm_fr
 				interface_type_counts[ECM_DB_IFACE_TYPE_ETHERNET]++;
 				DEBUG_TRACE("%p: VLAN use mac: %pM\n", fecui, to_nss_iface_address);
 			}
-			DEBUG_TRACE("%p: vlan tag: %x\n", fecui, create.egress_vlan_tag);
+			DEBUG_TRACE("%p: vlan tag: %x\n", fecui, create.out_vlan_tag[interface_type_counts[ii_type]]);
 			break;
 		case ECM_DB_IFACE_TYPE_IPSEC_TUNNEL:
 			DEBUG_TRACE("%p: IPSEC\n", fecui);
@@ -1987,8 +1995,10 @@ static void ecm_front_end_ipv4_connection_udp_front_end_accelerate(struct ecm_fr
 			"to_mac_xlate: %pM\n"
 			"src_iface_num: %u\n"
 			"dest_iface_num: %u\n"
-			"ingress_vlan_tag: %u\n"
-			"egress_vlan_tag: %u\n"
+			"ingress_inner_vlan_tag: %u\n"
+			"egress_inner_vlan_tag: %u\n"
+			"ingress_outer_vlan_tag: %u\n"
+			"egress_outer_vlan_tag: %u\n"
 			"vlan_itag: %x\n"
 			"vlan_imask: %x\n"
 			"vlan_omask: %x\n"
@@ -2018,8 +2028,10 @@ static void ecm_front_end_ipv4_connection_udp_front_end_accelerate(struct ecm_fr
 			create.dest_mac_xlate,
 			create.src_interface_num,
 			create.dest_interface_num,
-			create.ingress_vlan_tag,
-			create.egress_vlan_tag,
+			create.in_vlan_tag[0],
+			create.out_vlan_tag[0],
+			create.in_vlan_tag[1],
+			create.out_vlan_tag[1],
 			create.vlan_itag,
 			create.vlan_imask,
 			create.vlan_omask,
@@ -2376,8 +2388,10 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_accelerate(struct
 	/*
 	 * Initialize VLAN tag information
 	 */
-	create.ingress_vlan_tag = ECM_NSS_CONNMGR_VLAN_ID_NOT_CONFIGURED;
-	create.egress_vlan_tag = ECM_NSS_CONNMGR_VLAN_ID_NOT_CONFIGURED;
+	create.in_vlan_tag[0] = ECM_NSS_CONNMGR_VLAN_ID_NOT_CONFIGURED;
+	create.out_vlan_tag[0] = ECM_NSS_CONNMGR_VLAN_ID_NOT_CONFIGURED;
+	create.in_vlan_tag[1] = ECM_NSS_CONNMGR_VLAN_ID_NOT_CONFIGURED;
+	create.out_vlan_tag[1] = ECM_NSS_CONNMGR_VLAN_ID_NOT_CONFIGURED;
 
 	/*
 	 * Get the interface lists of the connection, we must have at least one interface in the list to continue
@@ -2503,16 +2517,16 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_accelerate(struct
 			break;
 		case ECM_DB_IFACE_TYPE_VLAN:
 			DEBUG_TRACE("%p: VLAN\n", fecnpi);
-			if (interface_type_counts[ii_type] != 0) {
+			if (interface_type_counts[ii_type] > 1) {
 				/*
-				 * Can only support one vlan
+				 * Can only support two vlans
 				 */
 				rule_invalid = true;
 				DEBUG_TRACE("%p: VLAN - additional unsupported\n", fecnpi);
 				break;
 			}
 			ecm_db_iface_vlan_info_get(ii, &vlan_info);
-			create.ingress_vlan_tag = vlan_info.vlan_tag;
+			create.in_vlan_tag[interface_type_counts[ii_type]] = ((vlan_info.vlan_tpid << 16) | vlan_info.vlan_tag);
 
 			/*
 			 * If we have not yet got an ethernet mac then take this one (very unlikely as mac should have been propagated to the slave (outer) device
@@ -2522,7 +2536,7 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_accelerate(struct
 				interface_type_counts[ECM_DB_IFACE_TYPE_ETHERNET]++;
 				DEBUG_TRACE("%p: VLAN use mac: %pM\n", fecnpi, from_nss_iface_address);
 			}
-			DEBUG_TRACE("%p: vlan tag: %x\n", fecnpi, create.ingress_vlan_tag);
+			DEBUG_TRACE("%p: vlan tag: %x\n", fecnpi, create.in_vlan_tagi[interface_type_counts[ii_type]]);
 			break;
 		case ECM_DB_IFACE_TYPE_IPSEC_TUNNEL:
 			DEBUG_TRACE("%p: IPSEC\n", fecnpi);
@@ -2621,16 +2635,16 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_accelerate(struct
 			break;
 		case ECM_DB_IFACE_TYPE_VLAN:
 			DEBUG_TRACE("%p: VLAN\n", fecnpi);
-			if (interface_type_counts[ii_type] != 0) {
+			if (interface_type_counts[ii_type] > 1) {
 				/*
-				 * Can only support one vlan
+				 * Can only support two vlans
 				 */
 				rule_invalid = true;
 				DEBUG_TRACE("%p: VLAN - additional unsupported\n", fecnpi);
 				break;
 			}
 			ecm_db_iface_vlan_info_get(ii, &vlan_info);
-			create.egress_vlan_tag = vlan_info.vlan_tag;
+			create.out_vlan_tag[interface_type_counts[ii_type]] = ((vlan_info.vlan_tpid << 16) | vlan_info.vlan_tag);
 
 			/*
 			 * If we have not yet got an ethernet mac then take this one (very unlikely as mac should have been propagated to the slave (outer) device
@@ -2640,7 +2654,7 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_accelerate(struct
 				interface_type_counts[ECM_DB_IFACE_TYPE_ETHERNET]++;
 				DEBUG_TRACE("%p: VLAN use mac: %pM\n", fecnpi, to_nss_iface_address);
 			}
-			DEBUG_TRACE("%p: vlan tag: %x\n", fecnpi, create.egress_vlan_tag);
+			DEBUG_TRACE("%p: vlan tag: %x\n", fecnpi, create.out_vlan_tag[interface_type_counts[ii_type]]);
 			break;
 		case ECM_DB_IFACE_TYPE_IPSEC_TUNNEL:
 			DEBUG_TRACE("%p: IPSEC\n", fecnpi);
@@ -2852,8 +2866,10 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_accelerate(struct
 			"to_mac_xlate: %pM\n"
 			"src_iface_num: %u\n"
 			"dest_iface_num: %u\n"
-			"ingress_vlan_tag: %u\n"
-			"egress_vlan_tag: %u\n"
+			"ingress_inner_vlan_tag: %u\n"
+			"egress_inner_vlan_tag: %u\n"
+			"ingress_outer_vlan_tag: %u\n"
+			"egress_outer_vlan_tag: %u\n"
 			"vlan_itag: %x\n"
 			"vlan_imask: %x\n"
 			"vlan_omask: %x\n"
@@ -2883,8 +2899,10 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_accelerate(struct
 			create.dest_mac_xlate,
 			create.src_interface_num,
 			create.dest_interface_num,
-			create.ingress_vlan_tag,
-			create.egress_vlan_tag,
+			create.in_vlan_tag[0],
+			create.out_vlan_tag[0],
+			create.in_vlan_tag[1],
+			create.out_vlan_tag[1],
 			create.vlan_itag,
 			create.vlan_imask,
 			create.vlan_omask,

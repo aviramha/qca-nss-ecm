@@ -210,6 +210,7 @@ struct ecm_db_interface_info_ethernet {			/* type == ECM_DB_IFACE_TYPE_ETHERNET 
 
 struct ecm_db_interface_info_vlan {			/* type == ECM_DB_IFACE_TYPE_VLAN */
 	uint8_t address[ETH_ALEN];			/* MAC Address of this Interface */
+	uint16_t vlan_tpid;				/* VLAN tag protocol id */
 	uint16_t vlan_tag;				/* VLAN tag of this interface */
 };
 

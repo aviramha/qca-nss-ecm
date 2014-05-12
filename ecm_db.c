@@ -305,7 +305,7 @@ struct ecm_db_host_instance {
 	struct ecm_db_node_instance *node;		/* The node to which this host relates */
 	struct ecm_db_host_instance *host_next;		/* The next host within the nodes hosts list */
 	struct ecm_db_host_instance *host_prev;		/* The previous host within the nodes hosts list */
-	
+
 	uint64_t from_data_total;			/* Total of data sent by this host */
 	uint64_t to_data_total;				/* Total of data sent to this host */
 	uint64_t from_packet_total;			/* Total of packets sent by this host */
@@ -433,7 +433,7 @@ struct ecm_db_connection_instance {
 	struct ecm_db_connection_instance *hash_next;		/* Next connection in chain */
 	struct ecm_db_connection_instance *hash_prev;		/* Previous connection in chain */
 	ecm_db_connection_hash_t hash_index;			/* The hash table slot whose chain of connections this is inserted into */
-	
+
 	struct ecm_db_connection_instance *serial_hash_next;	/* Next connection in serial hash chain */
 	struct ecm_db_connection_instance *serial_hash_prev;	/* Previous connection in serial hash chain */
 	ecm_db_connection_hash_t serial_hash_index;		/* The hash table slot whose chain of connections this is inserted into */
@@ -560,7 +560,7 @@ struct ecm_db_connection_instance {
 #define ECM_DB_CONNECTION_FLAGS_INSERTED 1			/* Connection is inserted into connection database tables */
 
 /*
- * struct ecm_db_listener_instance 
+ * struct ecm_db_listener_instance
  *	listener instances
  */
 struct ecm_db_listener_instance {
@@ -677,7 +677,7 @@ static char *ecm_db_interface_type_names[ECM_DB_IFACE_TYPE_COUNT] = {
 	"BRIDGE",
 	"LOOPBACK",
 	"IPSEC_TUNNEL",
-	"UNKNOWN",		
+	"UNKNOWN",
 };
 
 /*
@@ -715,7 +715,7 @@ int32_t ecm_db_iface_mtu_reset(struct ecm_db_iface_instance *ii, int32_t mtu)
 	ii->mtu = mtu;
 	spin_unlock_bh(&ecm_db_lock);
 	DEBUG_INFO("%p: Mtu change from %d to %d\n", ii, mtu_old, mtu);
-	
+
 	return mtu_old;
 }
 EXPORT_SYMBOL(ecm_db_iface_mtu_reset);
@@ -1613,7 +1613,7 @@ static bool _ecm_db_timer_group_entry_remove(struct ecm_db_timer_group_entry *tg
 		 */
 		DEBUG_ASSERT(timer_group->head == tge, "%p: bad head, expecting %p, got %p\n", timer_group, tge, timer_group->head);
 		timer_group->head = tge->next;
-	}	
+	}
 
 	if (tge->next) {
 		tge->next->prev = tge->prev;
@@ -1945,7 +1945,7 @@ static struct ecm_db_connection_instance *ecm_db_connections_get_and_ref_first(v
 	ci = ecm_db_connections;
 	if (ci) {
 		_ecm_db_connection_ref(ci);
-	}	
+	}
 	spin_unlock_bh(&ecm_db_lock);
 	return ci;
 }
@@ -1963,7 +1963,7 @@ struct ecm_db_connection_instance *ecm_db_connection_get_and_ref_next(struct ecm
 	cin = ci->next;
 	if (cin) {
 		_ecm_db_connection_ref(cin);
-	}	
+	}
 	spin_unlock_bh(&ecm_db_lock);
 	return cin;
 }
@@ -1980,7 +1980,7 @@ struct ecm_db_mapping_instance *ecm_db_mappings_get_and_ref_first(void)
 	mi = ecm_db_mappings;
 	if (mi) {
 		_ecm_db_mapping_ref(mi);
-	}	
+	}
 	spin_unlock_bh(&ecm_db_lock);
 	return mi;
 }
@@ -1998,7 +1998,7 @@ struct ecm_db_mapping_instance *ecm_db_mapping_get_and_ref_next(struct ecm_db_ma
 	min = mi->next;
 	if (min) {
 		_ecm_db_mapping_ref(min);
-	}	
+	}
 	spin_unlock_bh(&ecm_db_lock);
 	return min;
 }
@@ -2015,7 +2015,7 @@ struct ecm_db_host_instance *ecm_db_hosts_get_and_ref_first(void)
 	hi = ecm_db_hosts;
 	if (hi) {
 		_ecm_db_host_ref(hi);
-	}	
+	}
 	spin_unlock_bh(&ecm_db_lock);
 	return hi;
 }
@@ -2033,7 +2033,7 @@ struct ecm_db_host_instance *ecm_db_host_get_and_ref_next(struct ecm_db_host_ins
 	hin = hi->next;
 	if (hin) {
 		_ecm_db_host_ref(hin);
-	}	
+	}
 	spin_unlock_bh(&ecm_db_lock);
 	return hin;
 }
@@ -2050,7 +2050,7 @@ static struct ecm_db_listener_instance *ecm_db_listeners_get_and_ref_first(void)
 	li = ecm_db_listeners;
 	if (li) {
 		_ecm_db_listener_ref(li);
-	}	
+	}
 	spin_unlock_bh(&ecm_db_lock);
 	return li;
 }
@@ -2067,7 +2067,7 @@ static struct ecm_db_listener_instance *ecm_db_listener_get_and_ref_next(struct 
 	lin = li->next;
 	if (lin) {
 		_ecm_db_listener_ref(lin);
-	}	
+	}
 	spin_unlock_bh(&ecm_db_lock);
 	return lin;
 }
@@ -2083,7 +2083,7 @@ struct ecm_db_node_instance *ecm_db_nodes_get_and_ref_first(void)
 	ni = ecm_db_nodes;
 	if (ni) {
 		_ecm_db_node_ref(ni);
-	}	
+	}
 	spin_unlock_bh(&ecm_db_lock);
 	return ni;
 }
@@ -2101,7 +2101,7 @@ struct ecm_db_node_instance *ecm_db_node_get_and_ref_next(struct ecm_db_node_ins
 	nin = ni->next;
 	if (nin) {
 		_ecm_db_node_ref(nin);
-	}	
+	}
 	spin_unlock_bh(&ecm_db_lock);
 	return nin;
 }
@@ -2118,7 +2118,7 @@ struct ecm_db_iface_instance *ecm_db_interfaces_get_and_ref_first(void)
 	ii = ecm_db_interfaces;
 	if (ii) {
 		_ecm_db_iface_ref(ii);
-	}	
+	}
 	spin_unlock_bh(&ecm_db_lock);
 	return ii;
 }
@@ -2136,7 +2136,7 @@ struct ecm_db_iface_instance *ecm_db_interface_get_and_ref_next(struct ecm_db_if
 	iin = ii->next;
 	if (iin) {
 		_ecm_db_iface_ref(iin);
-	}	
+	}
 	spin_unlock_bh(&ecm_db_lock);
 	return iin;
 }
@@ -3099,7 +3099,7 @@ void ecm_db_connection_defunct_all(void)
 
 		DEBUG_TRACE("%p: defunct\n", ci);
 		ecm_db_connection_make_defunct(ci);
-		
+
 		cin = ecm_db_connection_get_and_ref_next(ci);
 		ecm_db_connection_deref(ci);
 		ci = cin;
@@ -3396,6 +3396,7 @@ void ecm_db_iface_vlan_info_get(struct ecm_db_iface_instance *ii, struct ecm_db_
 	spin_lock_bh(&ecm_db_lock);
 	memcpy(vlan_info->address, ii->type_info.vlan.address, sizeof(ii->type_info.vlan.address));
 	vlan_info->vlan_tag = ii->type_info.vlan.vlan_tag;
+	vlan_info->vlan_tpid = ii->type_info.vlan.vlan_tpid;
 	spin_unlock_bh(&ecm_db_lock);
 }
 EXPORT_SYMBOL(ecm_db_iface_vlan_info_get);
@@ -3404,12 +3405,12 @@ EXPORT_SYMBOL(ecm_db_iface_vlan_info_get);
  * ecm_db_iface_find_and_ref_vlan()
  *	Lookup and return a iface reference if any
  */
-struct ecm_db_iface_instance *ecm_db_iface_find_and_ref_vlan(uint8_t *address, uint16_t vlan_tag)
+struct ecm_db_iface_instance *ecm_db_iface_find_and_ref_vlan(uint8_t *address, uint16_t vlan_tag, uint16_t vlan_tpid)
 {
 	ecm_db_iface_hash_t hash_index;
 	struct ecm_db_iface_instance *ii;
 
-	DEBUG_TRACE("Lookup vlan iface with addr %pM, vlan tag: %x\n", address, vlan_tag);
+	DEBUG_TRACE("Lookup vlan iface with addr %pM, vlan tag: %x vlan tpid\n", address, vlan_tag, vlan_tpid);
 
 	/*
 	 * Compute the hash chain index and prepare to walk the chain
@@ -3423,6 +3424,7 @@ struct ecm_db_iface_instance *ecm_db_iface_find_and_ref_vlan(uint8_t *address, u
 	ii = ecm_db_iface_table[hash_index];
 	while (ii) {
 		if ((ii->type != ECM_DB_IFACE_TYPE_VLAN) || (ii->type_info.vlan.vlan_tag != vlan_tag)
+				|| (ii->type_info.vlan.vlan_tpid != vlan_tpid)
 				|| memcmp(ii->type_info.vlan.address, address, ETH_ALEN)) {
 			ii = ii->hash_next;
 			continue;
@@ -4120,7 +4122,7 @@ struct ecm_db_node_instance *ecm_db_connection_node_to_get_and_ref(struct ecm_db
 	struct ecm_db_node_instance *ni;
 
 	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed\n", ci);
-	
+
 	spin_lock_bh(&ecm_db_lock);
 	ni = ci->mapping_to->host->node;
 	DEBUG_CHECK_MAGIC(ni, ECM_DB_NODE_INSTANCE_MAGIC, "%p: magic failed\n", ni);
@@ -4512,7 +4514,7 @@ int ecm_db_node_host_count_get(struct ecm_db_node_instance *ni)
 	int count;
 
 	DEBUG_CHECK_MAGIC(ni, ECM_DB_NODE_INSTANCE_MAGIC, "%p: magic failed\n", ni);
-	
+
 	spin_lock_bh(&ecm_db_lock);
 	count = ni->host_count;
 	spin_unlock_bh(&ecm_db_lock);
@@ -4529,7 +4531,7 @@ int ecm_db_iface_node_count_get(struct ecm_db_iface_instance *ii)
 	int count;
 
 	DEBUG_CHECK_MAGIC(ii, ECM_DB_IFACE_INSTANCE_MAGIC, "%p: magic failed\n", ii);
-	
+
 	spin_lock_bh(&ecm_db_lock);
 	count = ii->node_count;
 	spin_unlock_bh(&ecm_db_lock);
@@ -4546,7 +4548,7 @@ int ecm_db_host_mapping_count_get(struct ecm_db_host_instance *hi)
 	int count;
 
 	DEBUG_CHECK_MAGIC(hi, ECM_DB_HOST_INSTANCE_MAGIC, "%p: magic failed\n", hi);
-	
+
 	spin_lock_bh(&ecm_db_lock);
 	count = hi->mapping_count;
 	spin_unlock_bh(&ecm_db_lock);
@@ -4563,7 +4565,7 @@ int ecm_db_mapping_connections_total_count_get(struct ecm_db_mapping_instance *m
 	int count;
 
 	DEBUG_CHECK_MAGIC(mi, ECM_DB_MAPPING_INSTANCE_MAGIC, "%p: magic failed\n", mi);
-	
+
 	spin_lock_bh(&ecm_db_lock);
 	count = mi->from + mi->to + mi->nat_from + mi->nat_to;
 	DEBUG_ASSERT(count >= 0, "%p: Count overflow from: %d, to: %d, nat_from: %d, nat_to: %d\n", mi, mi->from, mi->to, mi->nat_from, mi->nat_to);
@@ -4581,7 +4583,7 @@ struct ecm_db_mapping_instance *ecm_db_connection_mapping_from_get_and_ref(struc
 	struct ecm_db_mapping_instance *mi;
 
 	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed\n", ci);
-	
+
 	spin_lock_bh(&ecm_db_lock);
 	mi = ci->mapping_from;
 	_ecm_db_mapping_ref(mi);
@@ -4599,7 +4601,7 @@ struct ecm_db_mapping_instance *ecm_db_connection_mapping_nat_from_get_and_ref(s
 	struct ecm_db_mapping_instance *mi;
 
 	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed\n", ci);
-	
+
 	spin_lock_bh(&ecm_db_lock);
 	mi = ci->mapping_nat_from;
 	_ecm_db_mapping_ref(mi);
@@ -4617,7 +4619,7 @@ struct ecm_db_mapping_instance *ecm_db_connection_mapping_to_get_and_ref(struct 
 	struct ecm_db_mapping_instance *mi;
 
 	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed\n", ci);
-	
+
 	spin_lock_bh(&ecm_db_lock);
 	mi = ci->mapping_to;
 	_ecm_db_mapping_ref(mi);
@@ -4635,7 +4637,7 @@ struct ecm_db_mapping_instance *ecm_db_connection_mapping_nat_to_get_and_ref(str
 	struct ecm_db_mapping_instance *mi;
 
 	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed\n", ci);
-	
+
 	spin_lock_bh(&ecm_db_lock);
 	mi = ci->mapping_nat_to;
 	_ecm_db_mapping_ref(mi);
@@ -4653,7 +4655,7 @@ struct ecm_db_node_instance *ecm_db_connection_node_from_get_and_ref(struct ecm_
 	struct ecm_db_node_instance *ni;
 
 	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed\n", ci);
-	
+
 	spin_lock_bh(&ecm_db_lock);
 	ni = ci->mapping_from->host->node;
 	_ecm_db_node_ref(ni);
@@ -4707,7 +4709,7 @@ static uint32_t ecm_db_timer_groups_check(uint32_t time_now)
 				 */
 				DEBUG_ASSERT(timer_group->head == tge, "%p: bad head, expecting %p got %p\n", timer_group, tge, timer_group->head);
 				timer_group->head = NULL;
-			}	
+			}
 			timer_group->tail = tge->prev;
 			tge->group = ECM_DB_TIMER_GROUPS_MAX;
 			spin_unlock_bh(&ecm_db_lock);
@@ -6611,11 +6613,13 @@ static int ecm_db_iface_vlan_xml_state_get(struct ecm_db_iface_instance *ii, cha
 	int total;
 	uint8_t address[ETH_ALEN];
 	uint16_t vlan_tag;
+	uint16_t vlan_tpid;
 
 	DEBUG_CHECK_MAGIC(ii, ECM_DB_IFACE_INSTANCE_MAGIC, "%p: magic failed\n", ii);
 	spin_lock_bh(&ecm_db_lock);
 	memcpy(address, ii->type_info.vlan.address, ETH_ALEN);
 	vlan_tag = ii->type_info.vlan.vlan_tag;
+	vlan_tpid = ii->type_info.vlan.vlan_tpid;
 	spin_unlock_bh(&ecm_db_lock);
 
 	/*
@@ -6631,7 +6635,7 @@ static int ecm_db_iface_vlan_xml_state_get(struct ecm_db_iface_instance *ii, cha
 	/*
 	 * Write out type specific data
 	 */
-	count = snprintf(buf + total, buf_sz - total, "<vlan address=\"%pM\" vlan_tag=\"%x\"/>\n", address, vlan_tag);
+	count = snprintf(buf + total, buf_sz - total, "<vlan address=\"%pM\" vlan_tag=\"%x\" vlan_tpid=\"%x\"/>\n", address, vlan_tag, vlan_tpid);
 	if ((count <= 0) || (count >= (buf_sz - total))) {
 		return -1;
 	}
@@ -6652,7 +6656,7 @@ static int ecm_db_iface_vlan_xml_state_get(struct ecm_db_iface_instance *ii, cha
  * ecm_db_iface_add_vlan()
  *	Add a iface instance into the database
  */
-void ecm_db_iface_add_vlan(struct ecm_db_iface_instance *ii, uint8_t *address, uint16_t vlan_tag, char *name, int32_t mtu,
+void ecm_db_iface_add_vlan(struct ecm_db_iface_instance *ii, uint8_t *address, uint16_t vlan_tag, uint16_t vlan_tpid, char *name, int32_t mtu,
 					int32_t interface_identifier, int32_t nss_interface_identifier,
 					ecm_db_iface_final_callback_t final, void *arg)
 {
@@ -6685,6 +6689,7 @@ void ecm_db_iface_add_vlan(struct ecm_db_iface_instance *ii, uint8_t *address, u
 	 */
 	type_info = &ii->type_info.vlan;
 	type_info->vlan_tag = vlan_tag;
+	type_info->vlan_tpid = vlan_tpid;
 	memcpy(type_info->address, address, ETH_ALEN);
 
 	/*
@@ -8175,7 +8180,7 @@ static int ecm_db_connection_heirarchy_xml_state_get(char *element, struct ecm_d
 	int count;
 	int total;
 	int i;
-	
+
 	/*
 	 * Output the opening element
 	 */
@@ -8305,7 +8310,7 @@ static bool ecm_db_char_dev_conn_msg_prep(struct ecm_db_state_file_instance *sfi
 
 	/*
 	 * Use fresh buffer
-	 */	
+	 */
 	sfi->msgp = sfi->msg_buffer;
 
 	/*
@@ -8422,7 +8427,7 @@ static bool ecm_db_char_dev_conn_msg_prep(struct ecm_db_state_file_instance *sfi
 		return false;
 	}
 	msg_len += extra_msg_len;
- 
+
 	/*
 	 * Record the message length
 	 */
@@ -8484,7 +8489,7 @@ static bool ecm_db_char_dev_mapping_msg_prep(struct ecm_db_state_file_instance *
 
 	/*
 	 * Use fresh buffer
-	 */	
+	 */
 	sfi->msgp = sfi->msg_buffer;
 
 	/*
@@ -8569,7 +8574,7 @@ static bool ecm_db_char_dev_host_msg_prep(struct ecm_db_state_file_instance *sfi
 
 	/*
 	 * Use fresh buffer
-	 */	
+	 */
 	sfi->msgp = sfi->msg_buffer;
 
 	/*
@@ -8639,7 +8644,7 @@ static bool ecm_db_char_dev_node_msg_prep(struct ecm_db_state_file_instance *sfi
 
 	/*
 	 * Use fresh buffer
-	 */	
+	 */
 	sfi->msgp = sfi->msg_buffer;
 
 	/*
@@ -8682,7 +8687,7 @@ static bool ecm_db_char_dev_iface_msg_prep(struct ecm_db_state_file_instance *sf
 
 	/*
 	 * Use fresh buffer
-	 */	
+	 */
 	sfi->msgp = sfi->msg_buffer;
 
 	/*
@@ -8721,7 +8726,7 @@ static bool ecm_db_char_dev_conn_chain_msg_prep(struct ecm_db_state_file_instanc
 
 	/*
 	 * Use fresh buffer
-	 */	
+	 */
 	sfi->msgp = sfi->msg_buffer;
 
 	/*
@@ -8760,7 +8765,7 @@ static bool ecm_db_char_dev_mapping_chain_msg_prep(struct ecm_db_state_file_inst
 
 	/*
 	 * Use fresh buffer
-	 */	
+	 */
 	sfi->msgp = sfi->msg_buffer;
 
 	/*
@@ -8799,7 +8804,7 @@ static bool ecm_db_char_dev_host_chain_msg_prep(struct ecm_db_state_file_instanc
 
 	/*
 	 * Use fresh buffer
-	 */	
+	 */
 	sfi->msgp = sfi->msg_buffer;
 
 	/*
@@ -8838,7 +8843,7 @@ static bool ecm_db_char_dev_node_chain_msg_prep(struct ecm_db_state_file_instanc
 
 	/*
 	 * Use fresh buffer
-	 */	
+	 */
 	sfi->msgp = sfi->msg_buffer;
 
 	/*
@@ -8877,7 +8882,7 @@ static bool ecm_db_char_dev_iface_chain_msg_prep(struct ecm_db_state_file_instan
 
 	/*
 	 * Use fresh buffer
-	 */	
+	 */
 	sfi->msgp = sfi->msg_buffer;
 
 	/*
@@ -8916,7 +8921,7 @@ static bool ecm_db_char_dev_protocol_count_msg_prep(struct ecm_db_state_file_ins
 
 	/*
 	 * Use fresh buffer
-	 */	
+	 */
 	sfi->msgp = sfi->msg_buffer;
 
 	/*
@@ -8938,7 +8943,7 @@ static bool ecm_db_char_dev_protocol_count_msg_prep(struct ecm_db_state_file_ins
 /*
  * ecm_db_char_device_open()
  *	Opens the special char device file which we use to dump our state.
- * 
+ *
  */
 static int ecm_db_char_device_open(struct inode *inode, struct file *file)
 {
@@ -9129,7 +9134,7 @@ static ssize_t ecm_db_char_device_read(struct file *file,	/* see include/linux/f
 			hin = ecm_db_host_get_and_ref_next(sfi->hi);
 			ecm_db_host_deref(sfi->hi);
 			sfi->hi = hin;
-			
+
 			break;
 		}
 
@@ -9145,7 +9150,7 @@ static ssize_t ecm_db_char_device_read(struct file *file,	/* see include/linux/f
 			nin = ecm_db_node_get_and_ref_next(sfi->ni);
 			ecm_db_node_deref(sfi->ni);
 			sfi->ni = nin;
-		
+
 			break;
 		}
 
@@ -9241,7 +9246,7 @@ static ssize_t ecm_db_char_device_read(struct file *file,	/* see include/linux/f
 
 	DEBUG_TRACE("State read done, bytes_read %d bytes\n", bytes_read);
 
-	/* 
+	/*
 	 * Most read functions return the number of bytes put into the buffer
 	 */
 	return bytes_read;

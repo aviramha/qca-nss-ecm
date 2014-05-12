@@ -189,7 +189,7 @@ static bool ecm_interface_mac_addr_get_ipv4(ip_addr_t addr, uint8_t *mac_addr, b
 	struct rtable *rt;
 	struct dst_entry *dst;
 	__be32 ipv4_addr;
-	
+
 	/*
 	 * Get the MAC address that corresponds to IP address given.
 	 * We look up the rtable entries and, from its neighbour structure, obtain the hardware address.
@@ -362,7 +362,7 @@ static bool ecm_interface_find_route_by_addr_ipv6(ip_addr_t addr, struct ecm_int
 bool ecm_interface_find_route_by_addr(ip_addr_t addr, struct ecm_interface_route *ecm_rt)
 {
 	char __attribute__((unused)) addr_str[40];
-	
+
 	ecm_ip_addr_to_string(addr_str, addr);
 	DEBUG_TRACE("Locate route to: %s\n", addr_str);
 
@@ -579,13 +579,13 @@ static struct ecm_db_iface_instance *ecm_interface_vlan_interface_establish(stru
 	struct ecm_db_iface_instance *nii;
 	struct ecm_db_iface_instance *ii;
 
-	DEBUG_INFO("Establish VLAN iface: %s with address: %pM, vlan tag: %u, MTU: %d, if num: %d, nss if id: %d\n",
-			dev_name, type_info->address, type_info->vlan_tag, mtu, dev_interface_num, nss_interface_num);
+	DEBUG_INFO("Establish VLAN iface: %s with address: %pM, vlan tag: %u, vlan_tpid: %x MTU: %d, if num: %d, nss if id: %d\n",
+			dev_name, type_info->address, type_info->vlan_tag, type_info->vlan_tpid, mtu, dev_interface_num, nss_interface_num);
 
 	/*
 	 * Locate the iface
 	 */
-	ii = ecm_db_iface_find_and_ref_vlan(type_info->address, type_info->vlan_tag);
+	ii = ecm_db_iface_find_and_ref_vlan(type_info->address, type_info->vlan_tag, type_info->vlan_tpid);
 	if (ii) {
 		DEBUG_TRACE("%p: iface established\n", ii);
 		return ii;
@@ -604,13 +604,13 @@ static struct ecm_db_iface_instance *ecm_interface_vlan_interface_establish(stru
 	 * Add iface into the database, atomically to avoid races creating the same thing
 	 */
 	spin_lock_bh(&ecm_interface_lock);
-	ii = ecm_db_iface_find_and_ref_vlan(type_info->address, type_info->vlan_tag);
+	ii = ecm_db_iface_find_and_ref_vlan(type_info->address, type_info->vlan_tag, type_info->vlan_tpid);
 	if (ii) {
 		spin_unlock_bh(&ecm_interface_lock);
 		ecm_db_iface_deref(nii);
 		return ii;
 	}
-	ecm_db_iface_add_vlan(nii, type_info->address, type_info->vlan_tag, dev_name,
+	ecm_db_iface_add_vlan(nii, type_info->address, type_info->vlan_tag, type_info->vlan_tpid, dev_name,
 			mtu, dev_interface_num, nss_interface_num, ecm_interface_vlan_iface_final, nii);
 
 	/*
@@ -1211,9 +1211,10 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct net_device 
 			 * GGG No locking needed here, ASSUMPTION is that real_dev is held for as long as we have dev.
 			 */
 			memcpy(type_info.vlan.address, dev->dev_addr, 6);
-			type_info.vlan.vlan_tag = vlan_dev_priv(dev)->vlan_id;
-			DEBUG_TRACE("Net device: %p is VLAN, mac: %pM, vlan_id: %x\n",
-					dev, type_info.vlan.address, type_info.vlan.vlan_tag);
+			type_info.vlan.vlan_tag = vlan_dev_vlan_id(dev);
+			type_info.vlan.vlan_tpid = VLAN_CTAG_TPID;
+			DEBUG_TRACE("Net device: %p is VLAN, mac: %pM, vlan_id: %x vlan_tpid: %x\n",
+					dev, type_info.vlan.address, type_info.vlan.vlan_tag, type_info.vlan.vlan_tpid);
 
 			/*
 			 * Establish this type of interface
@@ -1326,7 +1327,7 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct net_device 
 		type_info.sit.prefix[3] = ntohl(ip6rd->prefix.s6_addr32[3]);
 		type_info.sit.ttl = tiph->ttl;
 		type_info.sit.tos = tiph->tos;
-		
+
 		ii = ecm_interface_sit_interface_establish(&type_info.sit, dev_name, dev_interface_num, nss_interface_num, dev_mtu);
 		return ii;
 	}
@@ -1352,7 +1353,7 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct net_device 
 		type_info.tunipip6.hop_limit = tunnel->parms.hop_limit;
 		type_info.tunipip6.flags = ntohl(tunnel->parms.flags);
 		type_info.tunipip6.flowlabel = fl6->flowlabel;  /* flow Label In kernel is stored in big endian format */
-		
+
 		ii = ecm_interface_tunipip6_interface_establish(&type_info.tunipip6, dev_name, dev_interface_num, nss_interface_num, dev_mtu);
 		return ii;
 	}
@@ -1628,7 +1629,7 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfac
 					 * VLAN master
 					 * No locking needed here, ASSUMPTION is that real_dev is held for as long as we have dev.
 					 */
-					next_dev = vlan_dev_priv(dest_dev)->real_dev;
+					next_dev = vlan_dev_real_dev(dest_dev);
 					dev_hold(next_dev);
 					DEBUG_TRACE("Net device: %p is VLAN, slave dev: %p (%s)\n",
 							dest_dev, next_dev, next_dev->name);
@@ -1751,7 +1752,7 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfac
 				 */
 				DEBUG_TRACE("Net device: %p is ETHERNET\n", dest_dev);
 				break;
-			} 
+			}
 
 			/*
 			 * LOOPBACK?
@@ -1827,7 +1828,7 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfac
 			if (channel_protocol != PX_PROTO_OE) {
 				DEBUG_TRACE("Net device: %p PPP channel protocol: %d - Unknown to the ECM\n",
 						dest_dev, channel_protocol);
-				
+
 				/*
 				 * Release the channel
 				 */
@@ -1840,7 +1841,7 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfac
 			 * PPPoE channel
 			 */
 			DEBUG_TRACE("Net device: %p PPP channel is PPPoE\n", dest_dev);
-	
+
 			/*
 			 * Get PPPoE session information and the underlying device it is using.
 			 * NOTE: We know this is PPPoE so we can cast the ppp_chan_ops to pppoe_chan_ops and

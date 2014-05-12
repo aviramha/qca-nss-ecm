@@ -121,7 +121,7 @@ void ecm_db_iface_vlan_info_get(struct ecm_db_iface_instance *ii, struct ecm_db_
 
 struct ecm_db_iface_instance *ecm_db_iface_find_and_ref_ethernet(uint8_t *address);
 struct ecm_db_iface_instance *ecm_db_iface_find_and_ref_lag(uint8_t *address);
-struct ecm_db_iface_instance *ecm_db_iface_find_and_ref_vlan(uint8_t *address, uint16_t vlan_tag);
+struct ecm_db_iface_instance *ecm_db_iface_find_and_ref_vlan(uint8_t *address, uint16_t vlan_tag, uint16_t vlan_tpid);
 struct ecm_db_iface_instance *ecm_db_iface_find_and_ref_bridge(uint8_t *address);
 struct ecm_db_iface_instance *ecm_db_iface_find_and_ref_unknown(uint32_t os_specific_ident);
 struct ecm_db_iface_instance *ecm_db_iface_find_and_ref_pppoe(uint16_t pppoe_session_id, uint8_t *remote_mac);
@@ -206,7 +206,7 @@ void ecm_db_listener_add(struct ecm_db_listener_instance *li, ecm_db_iface_liste
 void ecm_db_iface_add_ethernet(struct ecm_db_iface_instance *ii, uint8_t *address, char *name, int32_t mtu, int32_t interface_identifier, int32_t nss_interface_identifier, ecm_db_iface_final_callback_t final, void *arg);
 void ecm_db_iface_add_lag(struct ecm_db_iface_instance *ii, uint8_t *address, char *name, int32_t mtu, int32_t interface_identifier, int32_t nss_interface_identifier, ecm_db_iface_final_callback_t final, void *arg);
 void ecm_db_iface_add_bridge(struct ecm_db_iface_instance *ii, uint8_t *address, char *name, int32_t mtu, int32_t interface_identifier, int32_t nss_interface_identifier, ecm_db_iface_final_callback_t final, void *arg);
-void ecm_db_iface_add_vlan(struct ecm_db_iface_instance *ii, uint8_t *address, uint16_t vlan_tag, char *name, int32_t mtu, int32_t interface_identifier, int32_t nss_interface_identifier, ecm_db_iface_final_callback_t final, void *arg);
+void ecm_db_iface_add_vlan(struct ecm_db_iface_instance *ii, uint8_t *address, uint16_t vlan_tag, uint16_t vlan_tpid, char *name, int32_t mtu, int32_t interface_identifier, int32_t nss_interface_identifier, ecm_db_iface_final_callback_t final, void *arg);
 void ecm_db_iface_add_pppoe(struct ecm_db_iface_instance *ii, uint16_t pppoe_session_id, uint8_t *remote_mac, char *name, int32_t mtu, int32_t interface_identifier, int32_t nss_interface_identifier, ecm_db_iface_final_callback_t final, void *arg);
 void ecm_db_iface_add_unknown(struct ecm_db_iface_instance *ii, uint32_t os_specific_ident, char *name, int32_t mtu, int32_t interface_identifier, int32_t nss_interface_identifier, ecm_db_iface_final_callback_t final, void *arg);
 void ecm_db_iface_add_loopback(struct ecm_db_iface_instance *ii, uint32_t os_specific_ident, char *name, int32_t mtu, int32_t interface_identifier, int32_t nss_interface_identifier, ecm_db_iface_final_callback_t final, void *arg);
