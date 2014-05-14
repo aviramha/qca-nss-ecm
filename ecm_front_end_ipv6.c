@@ -1051,16 +1051,23 @@ static void ecm_front_end_ipv6_connection_tcp_front_end_accelerate(struct ecm_fr
 	create.egress_vlan_tag = ECM_NSS_CONNMGR_VLAN_ID_NOT_CONFIGURED;
 
 	/*
-	 * Get the interface lists of the connection
+	 * Get the interface lists of the connection, we must have at least one interface in the list to continue
 	 */
 	from_ifaces_first = ecm_db_connection_from_interfaces_get_and_ref(fecti->ci, from_ifaces);
-	to_ifaces_first = ecm_db_connection_to_interfaces_get_and_ref(fecti->ci, to_ifaces);
+	if (from_ifaces_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
+		DEBUG_WARN("%p: Accel attempt failed - no interfaces in from_interfaces list!\n", fecti);
+		spin_lock_bh(&fecti->lock);
+		if (fecti->accel_mode == ECM_CLASSIFIER_ACCELERATION_MODE_ACCEL) {
+			fecti->accel_mode = ECM_CLASSIFIER_ACCELERATION_MODE_NO;
+		}
+		spin_unlock_bh(&fecti->lock);
+		return;
+	}
 
-	/*
-	 * Must have at least one interface in each list
-	 */
-	if ((from_ifaces_first == ECM_DB_IFACE_HEIRARCHY_MAX) || (to_ifaces_first == ECM_DB_IFACE_HEIRARCHY_MAX)) {
-		DEBUG_WARN("%p: Accel attempt failed - no interfaces in lists?!\n", fecti);
+	to_ifaces_first = ecm_db_connection_to_interfaces_get_and_ref(fecti->ci, to_ifaces);
+	if (to_ifaces_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
+		DEBUG_WARN("%p: Accel attempt failed - no interfaces in to_interfaces list!\n", fecti);
+		ecm_db_connection_interfaces_deref(from_ifaces, from_ifaces_first);
 		spin_lock_bh(&fecti->lock);
 		if (fecti->accel_mode == ECM_CLASSIFIER_ACCELERATION_MODE_ACCEL) {
 			fecti->accel_mode = ECM_CLASSIFIER_ACCELERATION_MODE_NO;
@@ -1900,16 +1907,23 @@ static void ecm_front_end_ipv6_connection_udp_front_end_accelerate(struct ecm_fr
 	create.egress_vlan_tag = ECM_NSS_CONNMGR_VLAN_ID_NOT_CONFIGURED;
 
 	/*
-	 * Get the interface lists of the connection
+	 * Get the interface lists of the connection, we must have at least one interface in the list to continue
 	 */
 	from_ifaces_first = ecm_db_connection_from_interfaces_get_and_ref(fecui->ci, from_ifaces);
-	to_ifaces_first = ecm_db_connection_to_interfaces_get_and_ref(fecui->ci, to_ifaces);
+	if (from_ifaces_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
+		DEBUG_WARN("%p: Accel attempt failed - no interfaces in from_interfaces list!\n", fecui);
+		spin_lock_bh(&fecui->lock);
+		if (fecui->accel_mode == ECM_CLASSIFIER_ACCELERATION_MODE_ACCEL) {
+			fecui->accel_mode = ECM_CLASSIFIER_ACCELERATION_MODE_NO;
+		}
+		spin_unlock_bh(&fecui->lock);
+		return;
+	}
 
-	/*
-	 * Must have at least one interface in each list
-	 */
-	if ((from_ifaces_first == ECM_DB_IFACE_HEIRARCHY_MAX) || (to_ifaces_first == ECM_DB_IFACE_HEIRARCHY_MAX)) {
-		DEBUG_WARN("%p: Accel attempt failed - no interfaces in lists?!\n", fecui);
+	to_ifaces_first = ecm_db_connection_to_interfaces_get_and_ref(fecui->ci, to_ifaces);
+	if (to_ifaces_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
+		DEBUG_WARN("%p: Accel attempt failed - no interfaces in to_interfaces list!\n", fecui);
+		ecm_db_connection_interfaces_deref(from_ifaces, from_ifaces_first);
 		spin_lock_bh(&fecui->lock);
 		if (fecui->accel_mode == ECM_CLASSIFIER_ACCELERATION_MODE_ACCEL) {
 			fecui->accel_mode = ECM_CLASSIFIER_ACCELERATION_MODE_NO;
@@ -2729,16 +2743,23 @@ static void ecm_front_end_ipv6_connection_non_ported_front_end_accelerate(struct
 	create.egress_vlan_tag = ECM_NSS_CONNMGR_VLAN_ID_NOT_CONFIGURED;
 
 	/*
-	 * Get the interface lists of the connection
+	 * Get the interface lists of the connection, we must have at least one interface in the list to continue
 	 */
 	from_ifaces_first = ecm_db_connection_from_interfaces_get_and_ref(fecnpi->ci, from_ifaces);
-	to_ifaces_first = ecm_db_connection_to_interfaces_get_and_ref(fecnpi->ci, to_ifaces);
+	if (from_ifaces_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
+		DEBUG_WARN("%p: Accel attempt failed - no interfaces in from_interfaces list!\n", fecnpi);
+		spin_lock_bh(&fecnpi->lock);
+		if (fecnpi->accel_mode == ECM_CLASSIFIER_ACCELERATION_MODE_ACCEL) {
+			fecnpi->accel_mode = ECM_CLASSIFIER_ACCELERATION_MODE_NO;
+		}
+		spin_unlock_bh(&fecnpi->lock);
+		return;
+	}
 
-	/*
-	 * Must have at least one interface in each list
-	 */
-	if ((from_ifaces_first == ECM_DB_IFACE_HEIRARCHY_MAX) || (to_ifaces_first == ECM_DB_IFACE_HEIRARCHY_MAX)) {
-		DEBUG_WARN("%p: Accel attempt failed - no interfaces in lists?!\n", fecnpi);
+	to_ifaces_first = ecm_db_connection_to_interfaces_get_and_ref(fecnpi->ci, to_ifaces);
+	if (to_ifaces_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
+		DEBUG_WARN("%p: Accel attempt failed - no interfaces in to_interfaces list!\n", fecnpi);
+		ecm_db_connection_interfaces_deref(from_ifaces, from_ifaces_first);
 		spin_lock_bh(&fecnpi->lock);
 		if (fecnpi->accel_mode == ECM_CLASSIFIER_ACCELERATION_MODE_ACCEL) {
 			fecnpi->accel_mode = ECM_CLASSIFIER_ACCELERATION_MODE_NO;
