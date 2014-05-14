@@ -621,7 +621,7 @@ static struct task_struct *ecm_db_thread = NULL;			/* Control thread */
 /*
  * Character device stuff - used to communicate status back to user space
  */
-#define ECM_DB_STATE_FILE_BUFFER_SIZE 4096
+#define ECM_DB_STATE_FILE_BUFFER_SIZE 8192
 static int ecm_db_dev_major_id = 0;			/* Major ID of registered char dev from which we can dump out state to userspace */
 
 #define ECM_DB_STATE_FILE_OUTPUT_CONNECTIONS 1
@@ -8257,7 +8257,7 @@ static bool ecm_db_char_dev_conn_msg_prep(struct ecm_db_state_file_instance *sfi
 	int32_t first_interface;
 	struct ecm_db_iface_instance *interfaces[ECM_DB_IFACE_HEIRARCHY_MAX];
 
-	DEBUG_TRACE("%p: Prep mapping msg for %p\n", sfi, sfi->mi);
+	DEBUG_TRACE("%p: Prep conn msg for %p\n", sfi, sfi->ci);
 
 	/*
 	 * Identify expiration
