@@ -1864,9 +1864,8 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfac
 		} while (false);
 
 		/*
-		 * No longer need dev
+		 * No longer need dest_dev as it may become next_dev
 		 */
-		dev_put(src_dev);
 		dev_put(dest_dev);
 
 		/*
@@ -1881,9 +1880,18 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfac
 						i, interfaces[i], ecm_db_connection_iface_type_get(interfaces[i]), ecm_db_interface_type_to_string(ecm_db_connection_iface_type_get(interfaces[i])));
 			}
 #endif
+
+			/*
+			 * Release src_dev now
+			 */
+			dev_put(src_dev);
+
 			return current_interface_index;
 		}
 
+		/*
+		 * dest_dev becomes next_dev
+		 */
 		dest_dev = next_dev;
 		dest_dev_name = dest_dev->name;
 		dest_dev_type = dest_dev->type;
