@@ -745,6 +745,7 @@ static struct ecm_db_host_instance *ecm_front_end_ipv6_host_establish_and_ref(st
 		 * However the sending will no doubt re-try the transmission and by that time we shall have the MAC for it.
 		 */
 #endif
+		DEBUG_WARN("%p: Unable to get the MAC address\n", dev);
 		return NULL;
 	}
 
@@ -1071,7 +1072,7 @@ static void ecm_front_end_ipv6_connection_tcp_front_end_accelerate(struct ecm_fr
 				break;
 			}
 			ecm_db_iface_vlan_info_get(ii, &vlan_info);
-			create.in_vlan_tag[interface_type_counts[ii_type]] = ((vlan_info.vlan_tpid >> 16) | vlan_info.vlan_tag);
+			create.in_vlan_tag[interface_type_counts[ii_type]] = ((vlan_info.vlan_tpid << 16) | vlan_info.vlan_tag);
 
 			/*
 			 * If we have not yet got an ethernet mac then take this one (very unlikely as mac should have been propagated to the slave (outer) device
@@ -4885,11 +4886,10 @@ static unsigned int ecm_front_end_ipv6_ip_process(struct net_device *out_dev, st
 		reply_tuple = ct->tuplehash[IP_CT_DIR_REPLY].tuple;
 		ct_dir = CTINFO2DIR(ctinfo);
 
-#if 0
 		/*
 		 * Is this a related connection?
 		 */
-		if (unlikely(ctinfo - IP_CT_IS_REPLY) == IP_CT_RELATED) {
+		if ((ctinfo == IP_CT_RELATED) || (ctinfo == IP_CT_RELATED_REPLY)) {
 			/*
 			 * ct is related to the packet at hand.
 			 * We can use the IP src/dest information and the direction information.
@@ -4898,7 +4898,6 @@ static unsigned int ecm_front_end_ipv6_ip_process(struct net_device *out_dev, st
 			orig_tuple.dst.protonum = ip_hdr.protocol;
 			DEBUG_TRACE("%p: related ct, actual protocol: %u\n", skb, orig_tuple.dst.protonum);
 		}
-#endif
 	}
 
 	if (ct_dir == IP_CT_DIR_ORIGINAL) {

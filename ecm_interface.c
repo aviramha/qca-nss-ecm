@@ -143,19 +143,29 @@ static bool ecm_interface_mac_addr_get_ipv6(ip_addr_t addr, uint8_t *mac_addr, b
 	rcu_read_lock();
 	dst = ecm_rt.dst;
 	neigh = dst_get_neighbour_noref(dst);
+	if (neigh) {
+		neigh_hold(neigh);
+	} else {
+		neigh = neigh_lookup(&nd_tbl, &daddr, dst->dev);
+	}
 	if (!neigh) {
 		rcu_read_unlock();
 		ecm_interface_route_release(&ecm_rt);
+		DEBUG_WARN("No neigh reference\n");
 		return false;
 	}
 	if (!(neigh->nud_state & NUD_VALID)) {
 		rcu_read_unlock();
+		neigh_release(neigh);
 		ecm_interface_route_release(&ecm_rt);
+		DEBUG_WARN("NUD invalid\n");
 		return false;
 	}
 	if (!neigh->dev) {
 		rcu_read_unlock();
+		neigh_release(neigh);
 		ecm_interface_route_release(&ecm_rt);
+		DEBUG_WARN("Neigh dev invalid\n");
 		return false;
 	}
 
@@ -170,6 +180,7 @@ static bool ecm_interface_mac_addr_get_ipv6(ip_addr_t addr, uint8_t *mac_addr, b
 		memcpy(mac_addr, neigh->ha, 6);
 	}
 	rcu_read_unlock();
+	neigh_release(neigh);
 	ecm_interface_route_release(&ecm_rt);
 
 	DEBUG_TRACE(ECM_IP_ADDR_OCTAL_FMT " maps to %pM\n", ECM_IP_ADDR_TO_OCTAL(addr), mac_addr);

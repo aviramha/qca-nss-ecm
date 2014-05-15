@@ -2400,7 +2400,7 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_accelerate(struct
 				interface_type_counts[ECM_DB_IFACE_TYPE_ETHERNET]++;
 				DEBUG_TRACE("%p: VLAN use mac: %pM\n", fecnpi, from_nss_iface_address);
 			}
-			DEBUG_TRACE("%p: vlan tag: %x\n", fecnpi, create.in_vlan_tagi[interface_type_counts[ii_type]]);
+			DEBUG_TRACE("%p: vlan tag: %x\n", fecnpi, create.in_vlan_tag[interface_type_counts[ii_type]]);
 			break;
 		case ECM_DB_IFACE_TYPE_IPSEC_TUNNEL:
 			DEBUG_TRACE("%p: IPSEC\n", fecnpi);
