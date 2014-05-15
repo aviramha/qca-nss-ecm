@@ -475,7 +475,7 @@ static int ecm_bond_notifier_thread_fn(void *arg)
 
 	while (ecm_bond_notifier_thread_refs) {
 		/*
-		 * Sleep and wait for an instruction 
+		 * Sleep and wait for an instruction
 		 */
 		spin_unlock_bh(&ecm_bond_notifier_lock);
 		DEBUG_TRACE("ecm_bond_notifier sleep\n");

@@ -86,7 +86,7 @@ struct ecm_classifier_default_internal_instance {
 
 	struct ecm_db_connection_instance *ci;			/* RO: Connection pointer, note that this is a copy of the connection pointer not a ref to it as this instance is ref'd by the connection itself. */
 	uint32_t serial;					/* RO: Linkage to the connection the cdii is associated with. */
-	
+
 	struct ecm_classifier_process_response process_response;
 								/* Last process response computed */
 
@@ -881,7 +881,7 @@ static int ecm_classifier_default_thread_fn(void *arg)
 
 	while (ecm_classifier_default_thread_refs) {
 		/*
-		 * Sleep and wait for an instruction 
+		 * Sleep and wait for an instruction
 		 */
 		spin_unlock_bh(&ecm_classifier_default_lock);
 		DEBUG_TRACE("Default classifier SLEEP\n");

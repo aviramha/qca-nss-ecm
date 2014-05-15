@@ -234,7 +234,7 @@ static void ecm_tracker_datagram_discard_all_callback(struct ecm_tracker_instanc
  */
 static void ecm_tracker_datagram_ref(struct ecm_tracker_datagram_internal_instance *dtii)
 {
-	
+
 	DEBUG_CHECK_MAGIC(dtii, ECM_TRACKER_DATAGRAM_INSTANCE_MAGIC, "%p: magic failed", dtii);
 
 	spin_lock_bh(&dtii->lock);
@@ -260,7 +260,7 @@ static void ecm_tracker_datagram_ref_callback(struct ecm_tracker_instance *ti)
  */
 static int ecm_tracker_datagram_deref(struct ecm_tracker_datagram_internal_instance *dtii)
 {
-	
+
 	int refs;
 	DEBUG_CHECK_MAGIC(dtii, ECM_TRACKER_DATAGRAM_INSTANCE_MAGIC, "%p: magic failed", dtii);
 
@@ -363,7 +363,7 @@ static void ecm_tracker_datagram_datagram_discard_callback(struct ecm_tracker_in
 static int32_t ecm_tracker_datagram_datagram_size_get(struct ecm_tracker_datagram_instance *uti, ecm_tracker_sender_type_t sender, int32_t i)
 {
 	struct ecm_tracker_datagram_internal_instance *dtii = (struct ecm_tracker_datagram_internal_instance *)uti;
-	
+
 	int32_t size;
 	struct sk_buff *skb;
 	DEBUG_CHECK_MAGIC(dtii, ECM_TRACKER_DATAGRAM_INSTANCE_MAGIC, "%p: magic failed", dtii);
@@ -687,7 +687,7 @@ void ecm_tracker_datagram_init(struct ecm_tracker_datagram_instance *uti, int32_
 	struct ecm_tracker_datagram_internal_instance *dtii = (struct ecm_tracker_datagram_internal_instance *)uti;
 	DEBUG_CHECK_MAGIC(dtii, ECM_TRACKER_DATAGRAM_INSTANCE_MAGIC, "%p: magic failed", dtii);
 	DEBUG_TRACE("%p: init tracker\n", uti);
-	
+
 	spin_lock_bh(&dtii->lock);
 	dtii->data_limit = data_limit;
 	spin_unlock_bh(&dtii->lock);
