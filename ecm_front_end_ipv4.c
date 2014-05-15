@@ -181,8 +181,6 @@ static int ecm_front_end_ipv4_stopped = 0;			/* When non-zero further traffic wi
  * Management thread control
  */
 static bool ecm_front_end_ipv4_terminate_pending = false;		/* True when the user has signalled we should quit */
-static int ecm_front_end_ipv4_thread_refs = 0;			/* >0 when the thread must stay active */
-static struct task_struct *ecm_front_end_ipv4_thread = NULL;		/* Control thread */
 
 static void *ecm_front_end_ipv4_nss_ipv4_context = NULL;		/* Registration for IPv4 rules */
 
@@ -191,102 +189,6 @@ static void *ecm_front_end_ipv4_nss_ipv4_context = NULL;		/* Registration for IP
  */
 extern int nf_ct_tcp_no_window_check;
 extern int nf_ct_tcp_be_liberal;
-
-/*
- * ecm_front_end_ipv4_connection_final_tcp()
- *	Invoked when the connection becomes finalised
- */
-static void ecm_front_end_ipv4_connection_final_tcp(void *arg)
-{
-	/*
-	 * No longer need the ref to the thread
-	 */
-	spin_lock_bh(&ecm_front_end_ipv4_lock);
-	ecm_front_end_ipv4_thread_refs--;
-	DEBUG_ASSERT(ecm_front_end_ipv4_thread_refs >= 0, "Thread refs wrap %d\n", ecm_front_end_ipv4_thread_refs);
-	spin_unlock_bh(&ecm_front_end_ipv4_lock);
-	wake_up_process(ecm_front_end_ipv4_thread);
-}
-
-/*
- * ecm_front_end_ipv4_connection_final_udp()
- *	Invoked when the connection becomes finalised
- */
-static void ecm_front_end_ipv4_connection_final_udp(void *arg)
-{
-	/*
-	 * No longer need the ref to the thread
-	 */
-	spin_lock_bh(&ecm_front_end_ipv4_lock);
-	ecm_front_end_ipv4_thread_refs--;
-	DEBUG_ASSERT(ecm_front_end_ipv4_thread_refs >= 0, "Thread refs wrap %d\n", ecm_front_end_ipv4_thread_refs);
-	spin_unlock_bh(&ecm_front_end_ipv4_lock);
-	wake_up_process(ecm_front_end_ipv4_thread);
-}
-
-/*
- * ecm_front_end_ipv4_connection_final_non_ported()
- *	Invoked when the connection becomes finalised
- */
-static void ecm_front_end_ipv4_connection_final_non_ported(void *arg)
-{
-	/*
-	 * No longer need the ref to the thread
-	 */
-	spin_lock_bh(&ecm_front_end_ipv4_lock);
-	ecm_front_end_ipv4_thread_refs--;
-	DEBUG_ASSERT(ecm_front_end_ipv4_thread_refs >= 0, "Thread refs wrap %d\n", ecm_front_end_ipv4_thread_refs);
-	spin_unlock_bh(&ecm_front_end_ipv4_lock);
-	wake_up_process(ecm_front_end_ipv4_thread);
-}
-
-/*
- * ecm_front_end_ipv4_node_final()
- *	A node object we created has been destroyed
- */
-static void ecm_front_end_ipv4_node_final(void *arg)
-{
-	/*
-	 * No longer need the ref to the thread
-	 */
-	spin_lock_bh(&ecm_front_end_ipv4_lock);
-	ecm_front_end_ipv4_thread_refs--;
-	DEBUG_ASSERT(ecm_front_end_ipv4_thread_refs >= 0, "Thread refs wrap %d\n", ecm_front_end_ipv4_thread_refs);
-	spin_unlock_bh(&ecm_front_end_ipv4_lock);
-	wake_up_process(ecm_front_end_ipv4_thread);
-}
-
-/*
- * ecm_front_end_ipv4_host_final()
- *	A host object we created has been destroyed
- */
-static void ecm_front_end_ipv4_host_final(void *arg)
-{
-	/*
-	 * No longer need the ref to the thread
-	 */
-	spin_lock_bh(&ecm_front_end_ipv4_lock);
-	ecm_front_end_ipv4_thread_refs--;
-	DEBUG_ASSERT(ecm_front_end_ipv4_thread_refs >= 0, "Thread refs wrap %d\n", ecm_front_end_ipv4_thread_refs);
-	spin_unlock_bh(&ecm_front_end_ipv4_lock);
-	wake_up_process(ecm_front_end_ipv4_thread);
-}
-
-/*
- * ecm_front_end_ipv4_mapping_final()
- *	A mapping object we created has been destroyed
- */
-static void ecm_front_end_ipv4_mapping_final(void *arg)
-{
-	/*
-	 * No longer need the ref to the thread
-	 */
-	spin_lock_bh(&ecm_front_end_ipv4_lock);
-	ecm_front_end_ipv4_thread_refs--;
-	DEBUG_ASSERT(ecm_front_end_ipv4_thread_refs >= 0, "Thread refs wrap %d\n", ecm_front_end_ipv4_thread_refs);
-	spin_unlock_bh(&ecm_front_end_ipv4_lock);
-	wake_up_process(ecm_front_end_ipv4_thread);
-}
 
 /*
  * ecm_front_end_ipv4_node_establish_and_ref()
@@ -342,19 +244,13 @@ static struct ecm_db_node_instance *ecm_front_end_ipv4_node_establish_and_ref(st
 		return ni;
 	}
 
-	ecm_db_node_add(nni, ii, node_mac_addr, ecm_front_end_ipv4_node_final, nni);
+	ecm_db_node_add(nni, ii, node_mac_addr, NULL, nni);
 
 	/*
 	 * Don't need iface instance now
 	 */
 	ecm_db_iface_deref(ii);
 
-	/*
-	 * Ensure our thread persists (and hence this module) for as long as the connection and its supporting framework is alive
-	 * as we could get callbacks from the database
-	 */
-	ecm_front_end_ipv4_thread_refs++;
-	DEBUG_ASSERT(ecm_front_end_ipv4_thread_refs > 0, "Thread refs wrap %d\n", ecm_front_end_ipv4_thread_refs);
 	spin_unlock_bh(&ecm_front_end_ipv4_lock);
 
 	DEBUG_TRACE("%p: node established\n", nni);
@@ -451,14 +347,8 @@ static struct ecm_db_host_instance *ecm_front_end_ipv4_host_establish_and_ref(st
 		return hi;
 	}
 
-	ecm_db_host_add(nhi, ni, addr, on_link, ecm_front_end_ipv4_host_final, nhi);
+	ecm_db_host_add(nhi, ni, addr, on_link, NULL, nhi);
 
-	/*
-	 * Ensure our thread persists (and hence this module) for as long as the connection and its supporting framework is alive
-	 * as we could get callbacks from the database
-	 */
-	ecm_front_end_ipv4_thread_refs++;
-	DEBUG_ASSERT(ecm_front_end_ipv4_thread_refs > 0, "Thread refs wrap %d\n", ecm_front_end_ipv4_thread_refs);
 	spin_unlock_bh(&ecm_front_end_ipv4_lock);
 
 	/*
@@ -524,14 +414,8 @@ static struct ecm_db_mapping_instance *ecm_front_end_ipv4_mapping_establish_and_
 		return mi;
 	}
 
-	ecm_db_mapping_add(nmi, hi, port, ecm_front_end_ipv4_mapping_final, nmi);
+	ecm_db_mapping_add(nmi, hi, port, NULL, nmi);
 
-	/*
-	 * Ensure our thread persists (and hence this module) for as long as the connection and its supporting framework is alive
-	 * as we could get callbacks from the database
-	 */
-	ecm_front_end_ipv4_thread_refs++;
-	DEBUG_ASSERT(ecm_front_end_ipv4_thread_refs > 0, "Thread refs wrap %d\n", ecm_front_end_ipv4_thread_refs);
 	spin_unlock_bh(&ecm_front_end_ipv4_lock);
 
 	/*
@@ -1355,17 +1239,8 @@ static int ecm_front_end_ipv4_connection_tcp_front_end_deref(struct ecm_front_en
 	DEBUG_CLEAR_MAGIC(fecti);
 
 	/*
-	 * No longer need ref to thread for this object
-	 */
-	spin_lock_bh(&ecm_front_end_ipv4_lock);
-	ecm_front_end_ipv4_thread_refs--;
-	DEBUG_ASSERT(ecm_front_end_ipv4_thread_refs >= 0, "Thread refs wrap %d\n", ecm_front_end_ipv4_thread_refs);
-	spin_unlock_bh(&ecm_front_end_ipv4_lock);
-
-	/*
 	 * Thread may be able to exit on object destruction
 	 */
-	wake_up_process(ecm_front_end_ipv4_thread);
 	return 0;
 }
 
@@ -1446,14 +1321,6 @@ static struct ecm_front_end_ipv4_connection_tcp_instance *ecm_front_end_ipv4_con
 	fecti->base.accel_ceased = ecm_front_end_ipv4_connection_tcp_front_end_accel_ceased;
 	fecti->base.xml_state_get = ecm_front_end_ipv4_connection_tcp_front_end_xml_state_get;
 
-	/*
-	 * Ensure our thread persists (and hence this module) for as long as the connection and its supporting framework is alive
-	 * as we could get callbacks from the database
-	 */
-	spin_lock_bh(&ecm_front_end_ipv4_lock);
-	ecm_front_end_ipv4_thread_refs++;
-	DEBUG_ASSERT(ecm_front_end_ipv4_thread_refs > 0, "Thread refs wrap %d\n", ecm_front_end_ipv4_thread_refs);
-	spin_unlock_bh(&ecm_front_end_ipv4_lock);
 	return fecti;
 }
 
@@ -2217,17 +2084,8 @@ static int ecm_front_end_ipv4_connection_udp_front_end_deref(struct ecm_front_en
 	DEBUG_CLEAR_MAGIC(fecui);
 
 	/*
-	 * No longer need ref to thread for this object
-	 */
-	spin_lock_bh(&ecm_front_end_ipv4_lock);
-	ecm_front_end_ipv4_thread_refs--;
-	DEBUG_ASSERT(ecm_front_end_ipv4_thread_refs >= 0, "Thread refs wrap %d\n", ecm_front_end_ipv4_thread_refs);
-	spin_unlock_bh(&ecm_front_end_ipv4_lock);
-
-	/*
 	 * Thread may be able to exit on object destruction
 	 */
-	wake_up_process(ecm_front_end_ipv4_thread);
 	return 0;
 }
 
@@ -2308,14 +2166,6 @@ static struct ecm_front_end_ipv4_connection_udp_instance *ecm_front_end_ipv4_con
 	fecui->base.accel_ceased = ecm_front_end_ipv4_connection_udp_front_end_accel_ceased;
 	fecui->base.xml_state_get = ecm_front_end_ipv4_connection_udp_front_end_xml_state_get;
 
-	/*
-	 * Ensure our thread persists (and hence this module) for as long as the connection and its supporting framework is alive
-	 * as we could get callbacks from the database
-	 */
-	spin_lock_bh(&ecm_front_end_ipv4_lock);
-	ecm_front_end_ipv4_thread_refs++;
-	DEBUG_ASSERT(ecm_front_end_ipv4_thread_refs > 0, "Thread refs wrap %d\n", ecm_front_end_ipv4_thread_refs);
-	spin_unlock_bh(&ecm_front_end_ipv4_lock);
 	return fecui;
 }
 
@@ -3100,17 +2950,8 @@ static int ecm_front_end_ipv4_connection_non_ported_front_end_deref(struct ecm_f
 	DEBUG_CLEAR_MAGIC(fecnpi);
 
 	/*
-	 * No longer need ref to thread for this object
-	 */
-	spin_lock_bh(&ecm_front_end_ipv4_lock);
-	ecm_front_end_ipv4_thread_refs--;
-	DEBUG_ASSERT(ecm_front_end_ipv4_thread_refs >= 0, "Thread refs wrap %d\n", ecm_front_end_ipv4_thread_refs);
-	spin_unlock_bh(&ecm_front_end_ipv4_lock);
-
-	/*
 	 * Thread may be able to exit on object destruction
 	 */
-	wake_up_process(ecm_front_end_ipv4_thread);
 	return 0;
 }
 
@@ -3184,14 +3025,6 @@ static struct ecm_front_end_ipv4_connection_non_ported_instance *ecm_front_end_i
 	fecnpi->base.accel_ceased = ecm_front_end_ipv4_connection_non_ported_front_end_accel_ceased;
 	fecnpi->base.xml_state_get = ecm_front_end_ipv4_connection_non_ported_front_end_xml_state_get;
 
-	/*
-	 * Ensure our thread persists (and hence this module) for as long as the connection and its supporting framework is alive
-	 * as we could get callbacks from the database
-	 */
-	spin_lock_bh(&ecm_front_end_ipv4_lock);
-	ecm_front_end_ipv4_thread_refs++;
-	DEBUG_ASSERT(ecm_front_end_ipv4_thread_refs > 0, "Thread refs wrap %d\n", ecm_front_end_ipv4_thread_refs);
-	spin_unlock_bh(&ecm_front_end_ipv4_lock);
 	return fecnpi;
 }
 
@@ -3587,15 +3420,8 @@ static unsigned int ecm_front_end_ipv4_tcp_process(struct net_device *out_dev, s
 			ecm_db_connection_add(nci, feci, dci,
 					src_mi, dest_mi, src_nat_mi, dest_nat_mi,
 					IPPROTO_TCP, ecm_dir,
-					ecm_front_end_ipv4_connection_final_tcp,
+					NULL /* final callback */,
 					tg, is_routed, nci);
-
-			/*
-			 * Ensure our thread persists (and hence this module) for as long as the connection and its supporting framework is alive
-			 * as we could get callbacks or methods invoked
-			 */
-			ecm_front_end_ipv4_thread_refs++;
-			DEBUG_ASSERT(ecm_front_end_ipv4_thread_refs > 0, "Thread refs wrap %d\n", ecm_front_end_ipv4_thread_refs);
 
 			spin_unlock_bh(&ecm_front_end_ipv4_lock);
 
@@ -4152,15 +3978,8 @@ static unsigned int ecm_front_end_ipv4_udp_process(struct net_device *out_dev, s
 			ecm_db_connection_add(nci, feci, dci,
 					src_mi, dest_mi, src_nat_mi, dest_nat_mi,
 					IPPROTO_UDP, ecm_dir,
-					ecm_front_end_ipv4_connection_final_udp,
+					NULL /* final callback */,
 					tg, is_routed, nci);
-
-			/*
-			 * Ensure our thread persists (and hence this module) for as long as the connection and its supporting framework is alive
-			 * as we could get callbacks or methods invoked
-			 */
-			ecm_front_end_ipv4_thread_refs++;
-			DEBUG_ASSERT(ecm_front_end_ipv4_thread_refs > 0, "Thread refs wrap %d\n", ecm_front_end_ipv4_thread_refs);
 
 			spin_unlock_bh(&ecm_front_end_ipv4_lock);
 
@@ -4664,15 +4483,8 @@ static unsigned int ecm_front_end_ipv4_non_ported_process(struct net_device *out
 			ecm_db_connection_add(nci, feci, dci,
 					src_mi, dest_mi, src_nat_mi, dest_nat_mi,
 					protocol, ecm_dir,
-					ecm_front_end_ipv4_connection_final_non_ported,
+					NULL /* final callback */,
 					tg, is_routed, nci);
-
-			/*
-			 * Ensure our thread persists (and hence this module) for as long as the connection and its supporting framework is alive
-			 * as we could get callbacks or methods invoked
-			 */
-			ecm_front_end_ipv4_thread_refs++;
-			DEBUG_ASSERT(ecm_front_end_ipv4_thread_refs > 0, "Thread refs wrap %d\n", ecm_front_end_ipv4_thread_refs);
 
 			spin_unlock_bh(&ecm_front_end_ipv4_lock);
 
@@ -5769,50 +5581,6 @@ int ecm_front_end_ipv4_conntrack_event(unsigned long events, struct nf_conn *ct)
 EXPORT_SYMBOL(ecm_front_end_ipv4_conntrack_event);
 
 /*
- * ecm_front_end_ipv4_get_terminate()
- */
-static ssize_t ecm_front_end_ipv4_get_terminate(struct sys_device *dev,
-				  struct sysdev_attribute *attr,
-				  char *buf)
-{
-	ssize_t count;
-	unsigned int n;
-
-	spin_lock_bh(&ecm_front_end_ipv4_lock);
-	n = ecm_front_end_ipv4_terminate_pending;
-	spin_unlock_bh(&ecm_front_end_ipv4_lock);
-	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%u\n", n);
-	return count;
-}
-
-/*
- * ecm_front_end_ipv4_set_terminate()
- *	Writing anything to this 'file' will cause the default classifier to terminate
- */
-static ssize_t ecm_front_end_ipv4_set_terminate(struct sys_device *dev,
-				  struct sysdev_attribute *attr,
-				  const char *buf, size_t count)
-{
-	DEBUG_INFO("Terminate\n");
-
-	/*
-	 * Are we already signalled to terminate?
-	 */
-	spin_lock_bh(&ecm_front_end_ipv4_lock);
-	if (ecm_front_end_ipv4_terminate_pending) {
-		spin_unlock_bh(&ecm_front_end_ipv4_lock);
-		return 0;
-	}
-
-	ecm_front_end_ipv4_terminate_pending = true;
-	ecm_front_end_ipv4_thread_refs--;
-	DEBUG_ASSERT(ecm_front_end_ipv4_thread_refs >= 0, "Thread ref wrap %d\n", ecm_front_end_ipv4_thread_refs);
-	wake_up_process(ecm_front_end_ipv4_thread);
-	spin_unlock_bh(&ecm_front_end_ipv4_lock);
-	return count;
-}
-
-/*
  * ecm_front_end_ipv4_get_stop()
  */
 static ssize_t ecm_front_end_ipv4_get_stop(struct sys_device *dev,
@@ -5832,6 +5600,18 @@ static ssize_t ecm_front_end_ipv4_get_stop(struct sys_device *dev,
 	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", num);
 	return count;
 }
+
+void ecm_front_end_ipv4_stop(int num)
+{
+	/*
+	 * Operate under our locks and stop further processing of packets
+	 */
+	spin_lock_bh(&ecm_front_end_ipv4_lock);
+	ecm_front_end_ipv4_stopped = num;
+	spin_unlock_bh(&ecm_front_end_ipv4_lock);
+
+}
+EXPORT_SYMBOL(ecm_front_end_ipv4_stop);
 
 /*
  * ecm_front_end_ipv4_set_stop()
@@ -5854,12 +5634,7 @@ static ssize_t ecm_front_end_ipv4_set_stop(struct sys_device *dev,
 	sscanf(num_buf, "%d", &num);
 	DEBUG_TRACE("ecm_front_end_ipv4_stop = %d\n", num);
 
-	/*
-	 * Operate under our locks and stop further processing of packets
-	 */
-	spin_lock_bh(&ecm_front_end_ipv4_lock);
-	ecm_front_end_ipv4_stopped = num;
-	spin_unlock_bh(&ecm_front_end_ipv4_lock);
+	ecm_front_end_ipv4_stop(num);
 
 	return count;
 }
@@ -5867,7 +5642,6 @@ static ssize_t ecm_front_end_ipv4_set_stop(struct sys_device *dev,
 /*
  * SysFS attributes for the default classifier itself.
  */
-static SYSDEV_ATTR(terminate, 0644, ecm_front_end_ipv4_get_terminate, ecm_front_end_ipv4_set_terminate);
 static SYSDEV_ATTR(stop, 0644, ecm_front_end_ipv4_get_stop, ecm_front_end_ipv4_set_stop);
 
 /*
@@ -5879,21 +5653,17 @@ static struct sysdev_class ecm_front_end_ipv4_sysclass = {
 };
 
 /*
- * ecm_front_end_ipv4_thread_fn()
- *	A thread to handle tasks that can only be done in thread context.
+ * ecm_front_end_ipv4_init()
  */
-static int ecm_front_end_ipv4_thread_fn(void *arg)
+int ecm_front_end_ipv4_init(void)
 {
 	int result;
-
-	DEBUG_INFO("Thread start\n");
+	DEBUG_INFO("ECM Front end IPv4 init\n");
 
 	/*
-	 * Get reference to this module - we release it when the thread exits
+	 * Initialise our global lock
 	 */
-	if (!try_module_get(THIS_MODULE)) {
-		return -EINVAL;
-	}
+	spin_lock_init(&ecm_front_end_ipv4_lock);
 
 	/*
 	 * Register the sysfs class
@@ -5901,7 +5671,7 @@ static int ecm_front_end_ipv4_thread_fn(void *arg)
 	result = sysdev_class_register(&ecm_front_end_ipv4_sysclass);
 	if (result) {
 		DEBUG_ERROR("Failed to register SysFS class %d\n", result);
-		goto task_cleanup_1;
+		return result;
 	}
 
 	/*
@@ -5913,31 +5683,25 @@ static int ecm_front_end_ipv4_thread_fn(void *arg)
 	result = sysdev_register(&ecm_front_end_ipv4_sys_dev);
 	if (result) {
 		DEBUG_ERROR("Failed to register SysFS device %d\n", result);
-		goto task_cleanup_2;
+		goto task_cleanup_1;
 	}
 
 	/*
 	 * Create files, one for each parameter supported by this module
 	 */
-	result = sysdev_create_file(&ecm_front_end_ipv4_sys_dev, &attr_terminate);
+	result = sysdev_create_file(&ecm_front_end_ipv4_sys_dev, &attr_stop);
 	if (result) {
-		DEBUG_ERROR("Failed to register terminate file %d\n", result);
-		goto task_cleanup_3;
+		DEBUG_ERROR("Failed to register stop file %d\n", result);
+		goto task_cleanup_2;
 	}
 
 	/*
 	 * Register netfilter hooks
 	 */
-        result = nf_register_hooks(ecm_front_end_ipv4_netfilter_hooks, ARRAY_SIZE(ecm_front_end_ipv4_netfilter_hooks));
-        if (result < 0) {
+	result = nf_register_hooks(ecm_front_end_ipv4_netfilter_hooks, ARRAY_SIZE(ecm_front_end_ipv4_netfilter_hooks));
+	if (result < 0) {
 		DEBUG_ERROR("Can't register netfilter hooks.\n");
-		goto task_cleanup_4;
-        }
-
-	result = sysdev_create_file(&ecm_front_end_ipv4_sys_dev, &attr_stop);
-	if (result) {
-		DEBUG_ERROR("Failed to register stop file %d\n", result);
-		goto task_cleanup_5;
+		goto task_cleanup_2;
 	}
 
 	/*
@@ -5945,97 +5709,39 @@ static int ecm_front_end_ipv4_thread_fn(void *arg)
 	 */
 	ecm_front_end_ipv4_nss_ipv4_context = nss_register_ipv4_mgr(ecm_front_end_ipv4_net_dev_callback);
 
-	/*
-	 * Allow wakeup signals
-	 */
-	allow_signal(SIGCONT);
-	set_current_state(TASK_INTERRUPTIBLE);
+	return 0;
 
+task_cleanup_2:
+	sysdev_unregister(&ecm_front_end_ipv4_sys_dev);
+task_cleanup_1:
+	sysdev_class_unregister(&ecm_front_end_ipv4_sysclass);
+
+	return result;
+}
+EXPORT_SYMBOL(ecm_front_end_ipv4_init);
+
+/*
+ * ecm_front_end_ipv4_exit()
+ */
+void ecm_front_end_ipv4_exit(void)
+{
+	DEBUG_INFO("ECM Front end IPv4 Module exit\n");
 	spin_lock_bh(&ecm_front_end_ipv4_lock);
-
-	/*
-	 * Set thread refs to 1 - user must terminate us now.
-	 */
-	ecm_front_end_ipv4_thread_refs = 1;
-
-	while (ecm_front_end_ipv4_thread_refs) {
-		/*
-		 * Sleep and wait for an instruction
-		 */
-		spin_unlock_bh(&ecm_front_end_ipv4_lock);
-		DEBUG_TRACE("ecm_front_end sleep\n");
-		schedule();
-		set_current_state(TASK_INTERRUPTIBLE);
-		spin_lock_bh(&ecm_front_end_ipv4_lock);
-	}
-	DEBUG_INFO("ecm_front_end terminate\n");
-	DEBUG_ASSERT(ecm_front_end_ipv4_terminate_pending, "User has not requested terminate\n");
+	ecm_front_end_ipv4_terminate_pending = true;
 	spin_unlock_bh(&ecm_front_end_ipv4_lock);
 
-	result = 0;
+	/*
+	 * Stop the network stack hooks
+	 */
+	nf_unregister_hooks(ecm_front_end_ipv4_netfilter_hooks,
+			    ARRAY_SIZE(ecm_front_end_ipv4_netfilter_hooks));
 
 	/*
 	 * Unregister from the na
 	 */
 	nss_unregister_ipv4_mgr();
 
-	/*
-	 * Unregister stop file and other stuff
-	 */
-	sysdev_remove_file(&ecm_front_end_ipv4_sys_dev, &attr_stop);
-task_cleanup_5:
-	nf_unregister_hooks(ecm_front_end_ipv4_netfilter_hooks, ARRAY_SIZE(ecm_front_end_ipv4_netfilter_hooks));
-task_cleanup_4:
-	sysdev_remove_file(&ecm_front_end_ipv4_sys_dev, &attr_terminate);
-task_cleanup_3:
 	sysdev_unregister(&ecm_front_end_ipv4_sys_dev);
-task_cleanup_2:
 	sysdev_class_unregister(&ecm_front_end_ipv4_sysclass);
-task_cleanup_1:
-
-	module_put(THIS_MODULE);
-	return result;
 }
-
-/*
- * ecm_front_end_ipv4_init()
- */
-static int __init ecm_front_end_ipv4_init(void)
-{
-	DEBUG_INFO("ECM Front end IPv4 init\n");
-
-	/*
-	 * Initialise our global lock
-	 */
-	spin_lock_init(&ecm_front_end_ipv4_lock);
-
-	/*
-	 * Create a thread to handle the start/stop of the database.
-	 * NOTE: We use a thread as some things we need to do cannot be done in this context
-	 */
-	ecm_front_end_ipv4_thread = kthread_create(ecm_front_end_ipv4_thread_fn, NULL, "%s", "ecm_front_end_ipv4");
-	if (!ecm_front_end_ipv4_thread) {
-		return -EINVAL;
-	}
-	wake_up_process(ecm_front_end_ipv4_thread);
-	return 0;
-}
-
-/*
- * ecm_front_end_ipv4_exit()
- */
-static void __exit ecm_front_end_ipv4_exit(void)
-{
-	DEBUG_INFO("ECM Front end IPv4 Module exit\n");
-	DEBUG_ASSERT(!ecm_front_end_ipv4_thread_refs, "Thread has refs %d\n", ecm_front_end_ipv4_thread_refs);
-}
-
-module_init(ecm_front_end_ipv4_init)
-module_exit(ecm_front_end_ipv4_exit)
-
-MODULE_AUTHOR("Qualcomm Atheros, Inc.");
-MODULE_DESCRIPTION("ECM Front end IPv4");
-#ifdef MODULE_LICENSE
-MODULE_LICENSE("Dual BSD/GPL");
-#endif
-
+EXPORT_SYMBOL(ecm_front_end_ipv4_exit);

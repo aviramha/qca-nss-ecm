@@ -98,13 +98,6 @@ static struct sys_device ecm_conntrack_notifier_sys_dev;		/* SysFS linkage */
  */
 static int ecm_conntrack_notifier_stopped = 0;				/* When non-zero further traffic will not be processed */
 
-/*
- * Management thread control
- */
-static bool ecm_conntrack_notifier_terminate_pending = false;		/* True when the user has signalled we should quit */
-static int ecm_conntrack_notifier_thread_refs = 0;			/* >0 when the thread must stay active */
-static struct task_struct *ecm_conntrack_notifier_thread = NULL;	/* Control thread */
-
 #ifdef CONFIG_NF_CONNTRACK_EVENTS
 /*
  * ecm_conntrack_event()
@@ -177,52 +170,6 @@ static struct nf_ct_event_notifier ecm_conntrack_notifier = {
 #endif
 
 /*
- * ecm_conntrack_notifier_get_terminate()
- */
-static ssize_t ecm_conntrack_notifier_get_terminate(struct sys_device *dev,
-				  struct sysdev_attribute *attr,
-				  char *buf)
-{
-	ssize_t count;
-	unsigned int n;
-
-	DEBUG_INFO("Conntrack notifier get terminate\n");
-
-	spin_lock_bh(&ecm_conntrack_notifier_lock);
-	n = ecm_conntrack_notifier_terminate_pending;
-	spin_unlock_bh(&ecm_conntrack_notifier_lock);
-	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%u\n", n);
-	return count;
-}
-
-/*
- * ecm_conntrack_notifier_set_terminate()
- *	Writing anything to this 'file' will cause the default classifier to terminate
- */
-static ssize_t ecm_conntrack_notifier_set_terminate(struct sys_device *dev,
-				  struct sysdev_attribute *attr,
-				  const char *buf, size_t count)
-{
-	DEBUG_INFO("Conntrack notifier set terminate\n");
-
-	/*
-	 * Are we already signalled to terminate?
-	 */
-	spin_lock_bh(&ecm_conntrack_notifier_lock);
-	if (ecm_conntrack_notifier_terminate_pending) {
-		spin_unlock_bh(&ecm_conntrack_notifier_lock);
-		return 0;
-	}
-
-	ecm_conntrack_notifier_terminate_pending = true;
-	ecm_conntrack_notifier_thread_refs--;
-	DEBUG_ASSERT(ecm_conntrack_notifier_thread_refs >= 0, "Thread ref wrap %d\n", ecm_conntrack_notifier_thread_refs);
-	wake_up_process(ecm_conntrack_notifier_thread);
-	spin_unlock_bh(&ecm_conntrack_notifier_lock);
-	return count;
-}
-
-/*
  * ecm_conntrack_notifier_get_stop()
  */
 static ssize_t ecm_conntrack_notifier_get_stop(struct sys_device *dev,
@@ -242,6 +189,17 @@ static ssize_t ecm_conntrack_notifier_get_stop(struct sys_device *dev,
 	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", num);
 	return count;
 }
+
+void ecm_conntrack_notifier_stop(int num)
+{
+	/*
+	 * Operate under our locks and stop further processing of packets
+	 */
+	spin_lock_bh(&ecm_conntrack_notifier_lock);
+	ecm_conntrack_notifier_stopped = num;
+	spin_unlock_bh(&ecm_conntrack_notifier_lock);
+}
+EXPORT_SYMBOL(ecm_conntrack_notifier_stop);
 
 /*
  * ecm_conntrack_notifier_set_stop()
@@ -264,12 +222,7 @@ static ssize_t ecm_conntrack_notifier_set_stop(struct sys_device *dev,
 	sscanf(num_buf, "%d", &num);
 	DEBUG_TRACE("ecm_conntrack_notifier_stop = %d\n", num);
 
-	/*
-	 * Operate under our locks and stop further processing of packets
-	 */
-	spin_lock_bh(&ecm_conntrack_notifier_lock);
-	ecm_conntrack_notifier_stopped = num;
-	spin_unlock_bh(&ecm_conntrack_notifier_lock);
+	ecm_conntrack_notifier_stop(num);
 
 	return count;
 }
@@ -277,7 +230,6 @@ static ssize_t ecm_conntrack_notifier_set_stop(struct sys_device *dev,
 /*
  * SysFS attributes.
  */
-static SYSDEV_ATTR(terminate, 0644, ecm_conntrack_notifier_get_terminate, ecm_conntrack_notifier_set_terminate);
 static SYSDEV_ATTR(stop, 0644, ecm_conntrack_notifier_get_stop, ecm_conntrack_notifier_set_stop);
 
 /*
@@ -289,21 +241,17 @@ static struct sysdev_class ecm_conntrack_notifier_sysclass = {
 };
 
 /*
- * ecm_conntrack_notifier_thread_fn()
- *	A thread to handle tasks that can only be done in thread context.
+ * ecm_conntrack_notifier_init()
  */
-static int ecm_conntrack_notifier_thread_fn(void *arg)
+int ecm_conntrack_notifier_init(void)
 {
 	int result;
-
-	DEBUG_INFO("Thread start\n");
+	DEBUG_INFO("ECM Conntrack Notifier init\n");
 
 	/*
-	 * Get reference to this module - we release it when the thread exits
+	 * Initialise our global lock
 	 */
-	if (!try_module_get(THIS_MODULE)) {
-		return -EINVAL;
-	}
+	spin_lock_init(&ecm_conntrack_notifier_lock);
 
 	/*
 	 * Register the sysfs class
@@ -311,7 +259,7 @@ static int ecm_conntrack_notifier_thread_fn(void *arg)
 	result = sysdev_class_register(&ecm_conntrack_notifier_sysclass);
 	if (result) {
 		DEBUG_ERROR("Failed to register SysFS class %d\n", result);
-		goto task_cleanup_1;
+		return result;
 	}
 
 	/*
@@ -323,22 +271,16 @@ static int ecm_conntrack_notifier_thread_fn(void *arg)
 	result = sysdev_register(&ecm_conntrack_notifier_sys_dev);
 	if (result) {
 		DEBUG_ERROR("Failed to register SysFS device %d\n", result);
-		goto task_cleanup_2;
+		goto task_cleanup_1;
 	}
 
 	/*
 	 * Create files, one for each parameter supported by this module
 	 */
-	result = sysdev_create_file(&ecm_conntrack_notifier_sys_dev, &attr_terminate);
-	if (result) {
-		DEBUG_ERROR("Failed to register terminate file %d\n", result);
-		goto task_cleanup_3;
-	}
-
 	result = sysdev_create_file(&ecm_conntrack_notifier_sys_dev, &attr_stop);
 	if (result) {
 		DEBUG_ERROR("Failed to register stop file %d\n", result);
-		goto task_cleanup_4;
+		goto task_cleanup_2;
 	}
 
 #ifdef CONFIG_NF_CONNTRACK_EVENTS
@@ -348,95 +290,31 @@ static int ecm_conntrack_notifier_thread_fn(void *arg)
 	result = nf_conntrack_register_notifier(&init_net, &ecm_conntrack_notifier);
 	if (result < 0) {
 		DEBUG_ERROR("Can't register nf notifier hook.\n");
-		goto task_cleanup_5;
+		goto task_cleanup_2;
 	}
 #endif
 
-	/*
-	 * Allow wakeup signals
-	 */
-	allow_signal(SIGCONT);
-	set_current_state(TASK_INTERRUPTIBLE);
+	return 0;
 
-	spin_lock_bh(&ecm_conntrack_notifier_lock);
-
-	/*
-	 * Set thread refs to 1 - user must terminate us now.
-	 */
-	ecm_conntrack_notifier_thread_refs = 1;
-
-	while (ecm_conntrack_notifier_thread_refs) {
-		/*
-		 * Sleep and wait for an instruction
-		 */
-		spin_unlock_bh(&ecm_conntrack_notifier_lock);
-		DEBUG_TRACE("ecm_conntrack_notifier sleep\n");
-		schedule();
-		set_current_state(TASK_INTERRUPTIBLE);
-		spin_lock_bh(&ecm_conntrack_notifier_lock);
-	}
-	DEBUG_INFO("ecm_conntrack_notifier terminate\n");
-	DEBUG_ASSERT(ecm_conntrack_notifier_terminate_pending, "User has not requested terminate\n");
-	spin_unlock_bh(&ecm_conntrack_notifier_lock);
-
-	result = 0;
-
-#ifdef CONFIG_NF_CONNTRACK_EVENTS
-	nf_conntrack_unregister_notifier(&init_net, &ecm_conntrack_notifier);
-#endif
-task_cleanup_5:
-	sysdev_remove_file(&ecm_conntrack_notifier_sys_dev, &attr_stop);
-task_cleanup_4:
-	sysdev_remove_file(&ecm_conntrack_notifier_sys_dev, &attr_terminate);
-task_cleanup_3:
-	sysdev_unregister(&ecm_conntrack_notifier_sys_dev);
 task_cleanup_2:
-	sysdev_class_unregister(&ecm_conntrack_notifier_sysclass);
+	sysdev_unregister(&ecm_conntrack_notifier_sys_dev);
 task_cleanup_1:
+	sysdev_class_unregister(&ecm_conntrack_notifier_sysclass);
 
-	module_put(THIS_MODULE);
 	return result;
 }
-
-/*
- * ecm_conntrack_notifier_init()
- */
-static int __init ecm_conntrack_notifier_init(void)
-{
-	DEBUG_INFO("ECM Conntrack Notifier init\n");
-
-	/*
-	 * Initialise our global lock
-	 */
-	spin_lock_init(&ecm_conntrack_notifier_lock);
-
-	/*
-	 * Create a thread to handle the start/stop of the database.
-	 * NOTE: We use a thread as some things we need to do cannot be done in this context
-	 */
-	ecm_conntrack_notifier_thread = kthread_create(ecm_conntrack_notifier_thread_fn, NULL, "%s", "ecm_conn_ntfr");
-	if (!ecm_conntrack_notifier_thread) {
-		return -EINVAL;
-	}
-	wake_up_process(ecm_conntrack_notifier_thread);
-	return 0;
-}
+EXPORT_SYMBOL(ecm_conntrack_notifier_init);
 
 /*
  * ecm_conntrack_notifier_exit()
  */
-static void __exit ecm_conntrack_notifier_exit(void)
+void ecm_conntrack_notifier_exit(void)
 {
 	DEBUG_INFO("ECM Conntrack Notifier exit\n");
-	DEBUG_ASSERT(!ecm_conntrack_notifier_thread_refs, "Thread has refs %d\n", ecm_conntrack_notifier_thread_refs);
-}
-
-module_init(ecm_conntrack_notifier_init)
-module_exit(ecm_conntrack_notifier_exit)
-
-MODULE_AUTHOR("Qualcomm Atheros Inc");
-MODULE_DESCRIPTION("ECM Conntrack notifier");
-#ifdef MODULE_LICENSE
-MODULE_LICENSE("Dual BSD/GPL");
+#ifdef CONFIG_NF_CONNTRACK_EVENTS
+	nf_conntrack_unregister_notifier(&init_net, &ecm_conntrack_notifier);
 #endif
-
+	sysdev_unregister(&ecm_conntrack_notifier_sys_dev);
+	sysdev_class_unregister(&ecm_conntrack_notifier_sysclass);
+}
+EXPORT_SYMBOL(ecm_conntrack_notifier_exit);

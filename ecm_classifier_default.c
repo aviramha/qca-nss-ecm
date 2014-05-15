@@ -118,9 +118,6 @@ static bool ecm_classifier_default_enabled = true;		/* When disabled the qos alg
  * Management thread control
  */
 static bool ecm_classifier_default_terminate_pending = false;	/* True when the user wants us to terminate */
-static int ecm_classifier_default_thread_refs = 0;		/* Signal to tell the control thread to terminate */
-static struct task_struct *ecm_classifier_default_thread = NULL;
-								/* Control thread */
 
 /*
  * Character device stuff - used to communicate status back to user space
@@ -191,11 +188,6 @@ static int ecm_classifier_default_deref(struct ecm_classifier_instance *ci)
 	ecm_classifier_default_count--;
 	DEBUG_ASSERT(ecm_classifier_default_count >= 0, "%p: ecm_classifier_default_count wrap\n", cdii);
 
-	/*
-	 * Release ref to thread
-	 */
-	ecm_classifier_default_thread_refs--;
-	DEBUG_ASSERT(ecm_classifier_default_thread_refs >= 0, "Thread refs wrap %d\n", ecm_classifier_default_thread_refs);
 	spin_unlock_bh(&ecm_classifier_default_lock);
 
 	/*
@@ -208,7 +200,6 @@ static int ecm_classifier_default_deref(struct ecm_classifier_instance *ci)
 	 */
 	DEBUG_INFO("%p: Final default classifier instance\n", cdii);
 	kfree(cdii);
-	wake_up_process(ecm_classifier_default_thread);
 
 	return 0;
 }
@@ -636,12 +627,6 @@ struct ecm_classifier_default_instance *ecm_classifier_default_instance_alloc(st
 	}
 
 	/*
-	 * Ensure our thread persists now
-	 */
-	ecm_classifier_default_thread_refs++;
-	DEBUG_ASSERT(ecm_classifier_default_thread_refs > 0, "Thread refs wrap %d\n", ecm_classifier_default_thread_refs);
-
-	/*
 	 * Increment stats
 	 */
 	ecm_classifier_default_count++;
@@ -660,52 +645,6 @@ EXPORT_SYMBOL(ecm_classifier_default_instance_alloc);
 static struct sysdev_class ecm_classifier_default_sysclass = {
 	.name = "ecm_classifier_default",
 };
-
-/*
- * ecm_classifier_default_get_terminate()
- */
-static ssize_t ecm_classifier_default_get_terminate(struct sys_device *dev,
-				  struct sysdev_attribute *attr,
-				  char *buf)
-{
-	unsigned int n;
-	ssize_t count;
-
-	DEBUG_INFO("ecm_classifier_default_get_terminate\n");
-	spin_lock_bh(&ecm_classifier_default_lock);
-	n = ecm_classifier_default_terminate_pending;
-	spin_unlock_bh(&ecm_classifier_default_lock);
-	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%u\n", n);
-	return count;
-}
-
-/*
- * ecm_classifier_default_set_terminate()
- *	Writing anything to this 'file' will cause the default classifier to terminate
- */
-static ssize_t ecm_classifier_default_set_terminate(struct sys_device *dev,
-				  struct sysdev_attribute *attr,
-				  const char *buf, size_t count)
-{
-	DEBUG_INFO("Default classifier terminate\n");
-	spin_lock_bh(&ecm_classifier_default_lock);
-
-	/*
-	 * Are we already signalled to terminate?
-	 */
-	if (ecm_classifier_default_terminate_pending) {
-		spin_unlock_bh(&ecm_classifier_default_lock);
-		return 0;
-	}
-
-	ecm_classifier_default_terminate_pending = true;
-	ecm_classifier_default_thread_refs--;
-	DEBUG_ASSERT(ecm_classifier_default_thread_refs >= 0, "Thread ref wrap %d\n", ecm_classifier_default_thread_refs);
-	wake_up_process(ecm_classifier_default_thread);
-	spin_unlock_bh(&ecm_classifier_default_lock);
-
-	return count;
-}
 
 /*
  * ecm_classifier_default_get_accel_mode()
@@ -803,26 +742,23 @@ static ssize_t ecm_classifier_default_set_enabled(struct sys_device *dev,
 	return count;
 }
 
-static SYSDEV_ATTR(terminate, 0644, ecm_classifier_default_get_terminate, ecm_classifier_default_set_terminate);
 static SYSDEV_ATTR(accel_mode, 0644, ecm_classifier_default_get_accel_mode, ecm_classifier_default_set_accel_mode);
 static SYSDEV_ATTR(enabled, 0644, ecm_classifier_default_get_enabled, ecm_classifier_default_set_enabled);
 
 /*
- * ecm_classifier_default_thread_fn()
- *	A thread to handle tasks that can only be done in thread context.
+ * ecm_classifier_default_init()
  */
-static int ecm_classifier_default_thread_fn(void *arg)
+int ecm_classifier_default_init(void)
 {
 	int result;
+	DEBUG_INFO("Default classifier Module init\n");
 
-	DEBUG_TRACE("Default classifier Thread START\n");
+	DEBUG_ASSERT(ECM_CLASSIFIER_TYPE_DEFAULT == 0, "DO NOT CHANGE DEFAULT PRIORITY");
 
 	/*
-	 * Get reference to this module - release it when thread exits
+	 * Initialise our global lock
 	 */
-	if (!try_module_get(THIS_MODULE)) {
-		return -EINVAL;
-	}
+	spin_lock_init(&ecm_classifier_default_lock);
 
 	/*
 	 * Register the sysfs class
@@ -830,7 +766,7 @@ static int ecm_classifier_default_thread_fn(void *arg)
 	result = sysdev_class_register(&ecm_classifier_default_sysclass);
 	if (result) {
 		DEBUG_TRACE("Failed to register SysFS class\n");
-		goto classifier_thread_cleanup_1;
+		return result;
 	}
 
 	/*
@@ -842,121 +778,46 @@ static int ecm_classifier_default_thread_fn(void *arg)
 	result = sysdev_register(&ecm_classifier_default_sys_dev);
 	if (result) {
 		DEBUG_TRACE("Failed to register SysFS device\n");
-		goto classifier_thread_cleanup_2;
+		goto classifier_task_cleanup_1;
 	}
 
 	/*
 	 * Create files, one for each parameter supported by this module
 	 */
-	result = sysdev_create_file(&ecm_classifier_default_sys_dev, &attr_terminate);
-	if (result) {
-		DEBUG_TRACE("Failed to register terminate SysFS file\n");
-		goto classifier_thread_cleanup_3;
-	}
-
 	result = sysdev_create_file(&ecm_classifier_default_sys_dev, &attr_accel_mode);
 	if (result) {
 		DEBUG_TRACE("Failed to register accel_mode SysFS file\n");
-		goto classifier_thread_cleanup_4;
+		goto classifier_task_cleanup_2;
 	}
 
 	result = sysdev_create_file(&ecm_classifier_default_sys_dev, &attr_enabled);
 	if (result) {
 		DEBUG_TRACE("Failed to register enabled SysFS file\n");
-		goto classifier_thread_cleanup_5;
+		goto classifier_task_cleanup_2;
 	}
 
-	/*
-	 * Allow wakeup signals
-	 */
-	allow_signal(SIGCONT);
-	set_current_state(TASK_INTERRUPTIBLE);
+	return 0;
 
-	spin_lock_bh(&ecm_classifier_default_lock);
-
-	/*
-	 * Set thread refs to 1 - user must terminate us now.
-	 */
-	ecm_classifier_default_thread_refs = 1;
-
-	while (ecm_classifier_default_thread_refs) {
-		/*
-		 * Sleep and wait for an instruction
-		 */
-		spin_unlock_bh(&ecm_classifier_default_lock);
-		DEBUG_TRACE("Default classifier SLEEP\n");
-		schedule();
-		set_current_state(TASK_INTERRUPTIBLE);
-		spin_lock_bh(&ecm_classifier_default_lock);
-	}
-	DEBUG_TRACE("Default classifier TERMINATE\n");
-	DEBUG_ASSERT(ecm_classifier_default_terminate_pending, "User has not requested terminate\n");
-
-	/*
-	 * If we are terminating then there should be no state remaining - or our linkage into the database will be messed up.
-	 */
-	DEBUG_ASSERT(ecm_classifier_default_count == 0, "state is still active\n");
-
-	spin_unlock_bh(&ecm_classifier_default_lock);
-
-	result = 0;
-
-	sysdev_remove_file(&ecm_classifier_default_sys_dev, &attr_enabled);
-classifier_thread_cleanup_5:
-	sysdev_remove_file(&ecm_classifier_default_sys_dev, &attr_accel_mode);
-classifier_thread_cleanup_4:
-	sysdev_remove_file(&ecm_classifier_default_sys_dev, &attr_terminate);
-classifier_thread_cleanup_3:
+classifier_task_cleanup_2:
 	sysdev_unregister(&ecm_classifier_default_sys_dev);
-classifier_thread_cleanup_2:
+classifier_task_cleanup_1:
 	sysdev_class_unregister(&ecm_classifier_default_sysclass);
-classifier_thread_cleanup_1:
 
-	module_put(THIS_MODULE);
 	return result;
 }
-
-/*
- * ecm_classifier_default_init()
- */
-static int __init ecm_classifier_default_init(void)
-{
-	DEBUG_INFO("Default classifier Module init\n");
-
-	DEBUG_ASSERT(ECM_CLASSIFIER_TYPE_DEFAULT == 0, "DO NOT CHANGE DEFAULT PRIORITY");
-
-	/*
-	 * Initialise our global lock
-	 */
-	spin_lock_init(&ecm_classifier_default_lock);
-
-	/*
-	 * Create a thread to handle the start/stop of operation.
-	 * NOTE: We use a thread as some things we need to do cannot be done in this context
-	 */
-	ecm_classifier_default_thread = kthread_create(ecm_classifier_default_thread_fn, NULL, "%s", "ecm_classifier_default");
-	if (!ecm_classifier_default_thread) {
-		return -EINVAL;
-	}
-	wake_up_process(ecm_classifier_default_thread);
-	return 0;
-}
+EXPORT_SYMBOL(ecm_classifier_default_init);
 
 /*
  * ecm_classifier_default_exit()
  */
-static void __exit ecm_classifier_default_exit(void)
+void ecm_classifier_default_exit(void)
 {
 	DEBUG_INFO("Default classifier Module exit\n");
-	DEBUG_ASSERT(!ecm_classifier_default_thread_refs, "Thread has refs %d\n", ecm_classifier_default_thread_refs);
+	spin_lock_bh(&ecm_classifier_default_lock);
+	ecm_classifier_default_terminate_pending = true;
+	spin_unlock_bh(&ecm_classifier_default_lock);
+
+	sysdev_unregister(&ecm_classifier_default_sys_dev);
+	sysdev_class_unregister(&ecm_classifier_default_sysclass);
 }
-
-module_init(ecm_classifier_default_init)
-module_exit(ecm_classifier_default_exit)
-
-MODULE_AUTHOR("Qualcomm Atheros, Inc.");
-MODULE_DESCRIPTION("ECM Default classifier");
-#ifdef MODULE_LICENSE
-MODULE_LICENSE("Dual BSD/GPL");
-#endif
-
+EXPORT_SYMBOL(ecm_classifier_default_exit);

@@ -100,13 +100,6 @@ static struct sys_device ecm_bond_notifier_sys_dev;		/* SysFS linkage */
 static int ecm_bond_notifier_stopped = 0;			/* When non-zero further traffic will not be processed */
 
 /*
- * Management thread control
- */
-static bool ecm_bond_notifier_terminate_pending = false;	/* True when the user has signalled we should quit */
-static int ecm_bond_notifier_thread_refs = 0;			/* >0 when the thread must stay active */
-static struct task_struct *ecm_bond_notifier_thread = NULL;	/* Control thread */
-
-/*
  * ecm_bond_notifier_bond_cb
  *	Bond driver notifier
  */
@@ -282,52 +275,6 @@ static void ecm_bond_notifier_lag_event_cb(void *if_ctx, struct nss_lag_msg *msg
 }
 
 /*
- * ecm_bond_notifier_get_terminate()
- */
-static ssize_t ecm_bond_notifier_get_terminate(struct sys_device *dev,
-				  struct sysdev_attribute *attr,
-				  char *buf)
-{
-	ssize_t count;
-	unsigned int n;
-
-	DEBUG_INFO("Bonding notifier get terminate\n");
-
-	spin_lock_bh(&ecm_bond_notifier_lock);
-	n = ecm_bond_notifier_terminate_pending;
-	spin_unlock_bh(&ecm_bond_notifier_lock);
-	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%u\n", n);
-	return count;
-}
-
-/*
- * ecm_bond_notifier_set_terminate()
- *	Writing anything to this 'file' will cause the default classifier to terminate
- */
-static ssize_t ecm_bond_notifier_set_terminate(struct sys_device *dev,
-				  struct sysdev_attribute *attr,
-				  const char *buf, size_t count)
-{
-	DEBUG_INFO("Bonding notifier set terminate\n");
-
-	/*
-	 * Are we already signalled to terminate?
-	 */
-	spin_lock_bh(&ecm_bond_notifier_lock);
-	if (ecm_bond_notifier_terminate_pending) {
-		spin_unlock_bh(&ecm_bond_notifier_lock);
-		return 0;
-	}
-
-	ecm_bond_notifier_terminate_pending = true;
-	ecm_bond_notifier_thread_refs--;
-	DEBUG_ASSERT(ecm_bond_notifier_thread_refs >= 0, "Thread ref wrap %d\n", ecm_bond_notifier_thread_refs);
-	wake_up_process(ecm_bond_notifier_thread);
-	spin_unlock_bh(&ecm_bond_notifier_lock);
-	return count;
-}
-
-/*
  * ecm_bond_notifier_get_stop()
  */
 static ssize_t ecm_bond_notifier_get_stop(struct sys_device *dev,
@@ -347,6 +294,17 @@ static ssize_t ecm_bond_notifier_get_stop(struct sys_device *dev,
 	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", num);
 	return count;
 }
+
+void ecm_bond_notifier_stop(int num)
+{
+	/*
+	 * Operate under our locks and stop further processing of packets
+	 */
+	spin_lock_bh(&ecm_bond_notifier_lock);
+	ecm_bond_notifier_stopped = num;
+	spin_unlock_bh(&ecm_bond_notifier_lock);
+}
+EXPORT_SYMBOL(ecm_bond_notifier_stop);
 
 /*
  * ecm_bond_notifier_set_stop()
@@ -369,12 +327,7 @@ static ssize_t ecm_bond_notifier_set_stop(struct sys_device *dev,
 	sscanf(num_buf, "%d", &num);
 	DEBUG_TRACE("ecm_bond_notifier_stop = %d\n", num);
 
-	/*
-	 * Operate under our locks and stop further processing of packets
-	 */
-	spin_lock_bh(&ecm_bond_notifier_lock);
-	ecm_bond_notifier_stopped = num;
-	spin_unlock_bh(&ecm_bond_notifier_lock);
+	ecm_bond_notifier_stop(num);
 
 	return count;
 }
@@ -382,7 +335,6 @@ static ssize_t ecm_bond_notifier_set_stop(struct sys_device *dev,
 /*
  * SysFS attributes for the default classifier itself.
  */
-static SYSDEV_ATTR(terminate, 0644, ecm_bond_notifier_get_terminate, ecm_bond_notifier_set_terminate);
 static SYSDEV_ATTR(stop, 0644, ecm_bond_notifier_get_stop, ecm_bond_notifier_set_stop);
 
 /*
@@ -394,21 +346,17 @@ static struct sysdev_class ecm_bond_notifier_sysclass = {
 };
 
 /*
- * ecm_bond_notifier_thread_fn()
- *	A thread to handle tasks that can only be done in thread context.
+ * ecm_bond_notifier_init()
  */
-static int ecm_bond_notifier_thread_fn(void *arg)
+int ecm_bond_notifier_init(void)
 {
 	int result;
-
-	DEBUG_INFO("Thread start\n");
+	DEBUG_INFO("ECM Bonding Notifier init\n");
 
 	/*
-	 * Get reference to this module - we release it when the thread exits
+	 * Initialise our global lock
 	 */
-	if (!try_module_get(THIS_MODULE)) {
-		return -EINVAL;
-	}
+	spin_lock_init(&ecm_bond_notifier_lock);
 
 	/*
 	 * Register the sysfs class
@@ -416,7 +364,7 @@ static int ecm_bond_notifier_thread_fn(void *arg)
 	result = sysdev_class_register(&ecm_bond_notifier_sysclass);
 	if (result) {
 		DEBUG_ERROR("Failed to register SysFS class %d\n", result);
-		goto task_cleanup_1;
+		return result;
 	}
 
 	/*
@@ -428,22 +376,13 @@ static int ecm_bond_notifier_thread_fn(void *arg)
 	result = sysdev_register(&ecm_bond_notifier_sys_dev);
 	if (result) {
 		DEBUG_ERROR("Failed to register SysFS device %d\n", result);
-		goto task_cleanup_2;
-	}
-
-	/*
-	 * Create files, one for each parameter supported by this module
-	 */
-	result = sysdev_create_file(&ecm_bond_notifier_sys_dev, &attr_terminate);
-	if (result) {
-		DEBUG_ERROR("Failed to register terminate file %d\n", result);
-		goto task_cleanup_3;
+		goto task_cleanup_1;
 	}
 
 	result = sysdev_create_file(&ecm_bond_notifier_sys_dev, &attr_stop);
 	if (result) {
 		DEBUG_ERROR("Failed to register stop file %d\n", result);
-		goto task_cleanup_4;
+		goto task_cleanup_2;
 	}
 
 	/*
@@ -460,34 +399,23 @@ static int ecm_bond_notifier_thread_fn(void *arg)
 	ecm_bond_notifier_bond_cb.bond_cb_enslave = ecm_bond_notifier_bond_enslave;
 	bond_register_cb(&ecm_bond_notifier_bond_cb);
 
-	/*
-	 * Allow wakeup signals
-	 */
-	allow_signal(SIGCONT);
-	set_current_state(TASK_INTERRUPTIBLE);
+	return 0;
 
-	spin_lock_bh(&ecm_bond_notifier_lock);
+task_cleanup_2:
+	sysdev_unregister(&ecm_bond_notifier_sys_dev);
+task_cleanup_1:
+	sysdev_class_unregister(&ecm_bond_notifier_sysclass);
 
-	/*
-	 * Set thread refs to 1 - user must terminate us now.
-	 */
-	ecm_bond_notifier_thread_refs = 1;
+	return result;
+}
+EXPORT_SYMBOL(ecm_bond_notifier_init);
 
-	while (ecm_bond_notifier_thread_refs) {
-		/*
-		 * Sleep and wait for an instruction
-		 */
-		spin_unlock_bh(&ecm_bond_notifier_lock);
-		DEBUG_TRACE("ecm_bond_notifier sleep\n");
-		schedule();
-		set_current_state(TASK_INTERRUPTIBLE);
-		spin_lock_bh(&ecm_bond_notifier_lock);
-	}
-	DEBUG_INFO("ecm_bond_notifier terminate\n");
-	DEBUG_ASSERT(ecm_bond_notifier_terminate_pending, "User has not requested terminate\n");
-	spin_unlock_bh(&ecm_bond_notifier_lock);
-
-	result = 0;
+/*
+ * ecm_bond_notifier_exit()
+ */
+void ecm_bond_notifier_exit(void)
+{
+	DEBUG_INFO("ECM Bonding Notifier exit\n");
 
 	/*
 	 * Unregister from the bond driver
@@ -500,58 +428,8 @@ static int ecm_bond_notifier_thread_fn(void *arg)
 	nss_unregister_lag_if(NSS_LAG0_INTERFACE_NUM);
 	nss_unregister_lag_if(NSS_LAG1_INTERFACE_NUM);
 
-	sysdev_remove_file(&ecm_bond_notifier_sys_dev, &attr_stop);
-task_cleanup_4:
-	sysdev_remove_file(&ecm_bond_notifier_sys_dev, &attr_terminate);
-task_cleanup_3:
 	sysdev_unregister(&ecm_bond_notifier_sys_dev);
-task_cleanup_2:
 	sysdev_class_unregister(&ecm_bond_notifier_sysclass);
-task_cleanup_1:
 
-	module_put(THIS_MODULE);
-	return result;
 }
-
-/*
- * ecm_bond_notifier_init()
- */
-static int __init ecm_bond_notifier_init(void)
-{
-	DEBUG_INFO("ECM Bonding Notifier init\n");
-
-	/*
-	 * Initialise our global lock
-	 */
-	spin_lock_init(&ecm_bond_notifier_lock);
-
-	/*
-	 * Create a thread to handle the start/stop of the database.
-	 * NOTE: We use a thread as some things we need to do cannot be done in this context
-	 */
-	ecm_bond_notifier_thread = kthread_create(ecm_bond_notifier_thread_fn, NULL, "%s", "ecm_bond_ntfr");
-	if (!ecm_bond_notifier_thread) {
-		return -EINVAL;
-	}
-	wake_up_process(ecm_bond_notifier_thread);
-	return 0;
-}
-
-/*
- * ecm_bond_notifier_exit()
- */
-static void __exit ecm_bond_notifier_exit(void)
-{
-	DEBUG_INFO("ECM Bonding Notifier exit\n");
-	DEBUG_ASSERT(!ecm_bond_notifier_thread_refs, "Thread has refs %d\n", ecm_bond_notifier_thread_refs);
-}
-
-module_init(ecm_bond_notifier_init)
-module_exit(ecm_bond_notifier_exit)
-
-MODULE_AUTHOR("Qualcomm Atheros Inc");
-MODULE_DESCRIPTION("ECM Bonding notifier");
-#ifdef MODULE_LICENSE
-MODULE_LICENSE("Dual BSD/GPL");
-#endif
-
+EXPORT_SYMBOL(ecm_bond_notifier_exit);

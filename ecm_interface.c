@@ -103,8 +103,6 @@ static int ecm_interface_stopped = 0;			/* When non-zero further traffic will no
  * Management thread control
  */
 static bool ecm_interface_terminate_pending = false;		/* True when the user has signalled we should quit */
-static int ecm_interface_thread_refs = 0;			/* >0 when the thread must stay active */
-static struct task_struct *ecm_interface_thread = NULL;		/* Control thread */
 
 /*
  * ecm_interface_mac_addr_get_ipv6()
@@ -385,190 +383,6 @@ void ecm_interface_route_release(struct ecm_interface_route *rt)
 EXPORT_SYMBOL(ecm_interface_route_release);
 
 /*
- * ecm_interface_bridge_iface_final()
- *	An interface object we created has been destroyed
- */
-static void ecm_interface_bridge_iface_final(void *arg)
-{
-	DEBUG_INFO("Bridge interface final: %p\n", arg);
-
-	/*
-	 * No longer need the ref to the thread
-	 */
-	spin_lock_bh(&ecm_interface_lock);
-	ecm_interface_thread_refs--;
-	DEBUG_ASSERT(ecm_interface_thread_refs >= 0, "Thread refs wrap %d\n", ecm_interface_thread_refs);
-	spin_unlock_bh(&ecm_interface_lock);
-	wake_up_process(ecm_interface_thread);
-}
-
-/*
- * ecm_interface_vlan_iface_final()
- *	An interface object we created has been destroyed
- */
-static void ecm_interface_vlan_iface_final(void *arg)
-{
-	DEBUG_INFO("VLAN interface final: %p\n", arg);
-
-	/*
-	 * No longer need the ref to the thread
-	 */
-	spin_lock_bh(&ecm_interface_lock);
-	ecm_interface_thread_refs--;
-	DEBUG_ASSERT(ecm_interface_thread_refs >= 0, "Thread refs wrap %d\n", ecm_interface_thread_refs);
-	spin_unlock_bh(&ecm_interface_lock);
-	wake_up_process(ecm_interface_thread);
-}
-
-/*
- * ecm_interface_lag_iface_final()
- *	An interface object we created has been destroyed
- */
-static void ecm_interface_lag_iface_final(void *arg)
-{
-	DEBUG_INFO("LAG interface final: %p\n", arg);
-
-	/*
-	 * No longer need the ref to the thread
-	 */
-	spin_lock_bh(&ecm_interface_lock);
-	ecm_interface_thread_refs--;
-	DEBUG_ASSERT(ecm_interface_thread_refs >= 0, "Thread refs wrap %d\n", ecm_interface_thread_refs);
-	spin_unlock_bh(&ecm_interface_lock);
-	wake_up_process(ecm_interface_thread);
-}
-
-/*
- * ecm_interface_ethernet_iface_final()
- *	An interface object we created has been destroyed
- */
-static void ecm_interface_ethernet_iface_final(void *arg)
-{
-	DEBUG_INFO("ETHERNET interface final: %p\n", arg);
-
-	/*
-	 * No longer need the ref to the thread
-	 */
-	spin_lock_bh(&ecm_interface_lock);
-	ecm_interface_thread_refs--;
-	DEBUG_ASSERT(ecm_interface_thread_refs >= 0, "Thread refs wrap %d\n", ecm_interface_thread_refs);
-	spin_unlock_bh(&ecm_interface_lock);
-	wake_up_process(ecm_interface_thread);
-}
-
-#ifdef ECM_INTERFACE_PPP_SUPPORT
-/*
- * ecm_interface_pppoe_iface_final()
- *	An interface object we created has been destroyed
- */
-static void ecm_interface_pppoe_iface_final(void *arg)
-{
-	DEBUG_INFO("PPPoE interface final: %p\n", arg);
-
-	/*
-	 * No longer need the ref to the thread
-	 */
-	spin_lock_bh(&ecm_interface_lock);
-	ecm_interface_thread_refs--;
-	DEBUG_ASSERT(ecm_interface_thread_refs >= 0, "Thread refs wrap %d\n", ecm_interface_thread_refs);
-	spin_unlock_bh(&ecm_interface_lock);
-	wake_up_process(ecm_interface_thread);
-}
-#endif
-
-/*
- * ecm_interface_unknown_iface_final()
- *	An interface object we created has been destroyed
- */
-static void ecm_interface_unknown_iface_final(void *arg)
-{
-	DEBUG_INFO("UNKNOWN type interface final: %p\n", arg);
-
-	/*
-	 * No longer need the ref to the thread
-	 */
-	spin_lock_bh(&ecm_interface_lock);
-	ecm_interface_thread_refs--;
-	DEBUG_ASSERT(ecm_interface_thread_refs >= 0, "Thread refs wrap %d\n", ecm_interface_thread_refs);
-	spin_unlock_bh(&ecm_interface_lock);
-	wake_up_process(ecm_interface_thread);
-}
-
-/*
- * ecm_interface_loopback_iface_final()
- *	An interface object we created has been destroyed
- */
-static void ecm_interface_loopback_iface_final(void *arg)
-{
-	DEBUG_INFO("LOOPBACK type interface final: %p\n", arg);
-
-	/*
-	 * No longer need the ref to the thread
-	 */
-	spin_lock_bh(&ecm_interface_lock);
-	ecm_interface_thread_refs--;
-	DEBUG_ASSERT(ecm_interface_thread_refs >= 0, "Thread refs wrap %d\n", ecm_interface_thread_refs);
-	spin_unlock_bh(&ecm_interface_lock);
-	wake_up_process(ecm_interface_thread);
-}
-
-/*
- * ecm_interface_ipsec_tunnel_iface_final()
- *	An interface object we created has been destroyed
- */
-static void ecm_interface_ipsec_tunnel_iface_final(void *arg)
-{
-	DEBUG_INFO("IPSEC TUNNEL type interface final: %p\n", arg);
-
-	/*
-	 * No longer need the ref to the thread
-	 */
-	spin_lock_bh(&ecm_interface_lock);
-	ecm_interface_thread_refs--;
-	DEBUG_ASSERT(ecm_interface_thread_refs >= 0, "Thread refs wrap %d\n", ecm_interface_thread_refs);
-	spin_unlock_bh(&ecm_interface_lock);
-	wake_up_process(ecm_interface_thread);
-}
-
-#ifdef CONFIG_IPV6_SIT_6RD
-/*
- * ecm_interface_sit_iface_final()
- *	An interface object we created has been destroyed
- */
-static void ecm_interface_sit_iface_final(void *arg)
-{
-	DEBUG_INFO("SIT (6-in-4) type interface final: %p\n", arg);
-
-	/*
-	 * No longer need the ref to the thread
-	 */
-	spin_lock_bh(&ecm_interface_lock);
-	ecm_interface_thread_refs--;
-	DEBUG_ASSERT(ecm_interface_thread_refs >= 0, "Thread refs wrap %d\n", ecm_interface_thread_refs);
-	spin_unlock_bh(&ecm_interface_lock);
-	wake_up_process(ecm_interface_thread);
-}
-#endif
-
-/*
- * ecm_interface_tunipip6_iface_final()
- *	An interface object we created has been destroyed
- */
-static void ecm_interface_tunipip6_iface_final(void *arg)
-{
-	DEBUG_INFO("TUNIPIP6 type interface final: %p\n", arg);
-
-	/*
-	 * No longer need the ref to the thread
-	 */
-	spin_lock_bh(&ecm_interface_lock);
-	ecm_interface_thread_refs--;
-	DEBUG_ASSERT(ecm_interface_thread_refs >= 0, "Thread refs wrap %d\n", ecm_interface_thread_refs);
-	spin_unlock_bh(&ecm_interface_lock);
-	wake_up_process(ecm_interface_thread);
-}
-
-/*
  * ecm_interface_vlan_interface_establish()
  *	Returns a reference to a iface of the VLAN type, possibly creating one if necessary.
  * Returns NULL on failure or a reference to interface.
@@ -611,14 +425,7 @@ static struct ecm_db_iface_instance *ecm_interface_vlan_interface_establish(stru
 		return ii;
 	}
 	ecm_db_iface_add_vlan(nii, type_info->address, type_info->vlan_tag, type_info->vlan_tpid, dev_name,
-			mtu, dev_interface_num, nss_interface_num, ecm_interface_vlan_iface_final, nii);
-
-	/*
-	 * Ensure our thread persists (and hence this module) for as long as the interface is referenced as we could get
-	 * callbacks from the database at any time.
-	 */
-	ecm_interface_thread_refs++;
-	DEBUG_ASSERT(ecm_interface_thread_refs > 0, "Thread refs wrap %d\n", ecm_interface_thread_refs);
+			mtu, dev_interface_num, nss_interface_num, NULL, nii);
 	spin_unlock_bh(&ecm_interface_lock);
 
 	DEBUG_TRACE("%p: vlan iface established\n", nii);
@@ -668,14 +475,7 @@ static struct ecm_db_iface_instance *ecm_interface_bridge_interface_establish(st
 		return ii;
 	}
 	ecm_db_iface_add_bridge(nii, type_info->address, dev_name,
-			mtu, dev_interface_num, nss_interface_num, ecm_interface_bridge_iface_final, nii);
-
-	/*
-	 * Ensure our thread persists (and hence this module) for as long as the interface is referenced as we could get
-	 * callbacks from the database at any time.
-	 */
-	ecm_interface_thread_refs++;
-	DEBUG_ASSERT(ecm_interface_thread_refs > 0, "Thread refs wrap %d\n", ecm_interface_thread_refs);
+			mtu, dev_interface_num, nss_interface_num, NULL, nii);
 	spin_unlock_bh(&ecm_interface_lock);
 
 	DEBUG_TRACE("%p: bridge iface established\n", nii);
@@ -725,14 +525,7 @@ static struct ecm_db_iface_instance *ecm_interface_lag_interface_establish(struc
 		return ii;
 	}
 	ecm_db_iface_add_lag(nii, type_info->address, dev_name,
-			mtu, dev_interface_num, nss_interface_num, ecm_interface_lag_iface_final, nii);
-
-	/*
-	 * Ensure our thread persists (and hence this module) for as long as the interface is referenced as we could get
-	 * callbacks from the database at any time.
-	 */
-	ecm_interface_thread_refs++;
-	DEBUG_ASSERT(ecm_interface_thread_refs > 0, "Thread refs wrap %d\n", ecm_interface_thread_refs);
+			mtu, dev_interface_num, nss_interface_num, NULL, nii);
 	spin_unlock_bh(&ecm_interface_lock);
 
 	DEBUG_TRACE("%p: lag iface established\n", nii);
@@ -782,14 +575,7 @@ static struct ecm_db_iface_instance *ecm_interface_ethernet_interface_establish(
 		return ii;
 	}
 	ecm_db_iface_add_ethernet(nii, type_info->address, dev_name,
-			mtu, dev_interface_num, nss_interface_num, ecm_interface_ethernet_iface_final, nii);
-
-	/*
-	 * Ensure our thread persists (and hence this module) for as long as the interface is referenced as we could get
-	 * callbacks from the database at any time.
-	 */
-	ecm_interface_thread_refs++;
-	DEBUG_ASSERT(ecm_interface_thread_refs > 0, "Thread refs wrap %d\n", ecm_interface_thread_refs);
+			mtu, dev_interface_num, nss_interface_num, NULL, nii);
 	spin_unlock_bh(&ecm_interface_lock);
 
 	DEBUG_TRACE("%p: ethernet iface established\n", nii);
@@ -840,14 +626,7 @@ static struct ecm_db_iface_instance *ecm_interface_pppoe_interface_establish(str
 		return ii;
 	}
 	ecm_db_iface_add_pppoe(nii, type_info->pppoe_session_id, type_info->remote_mac, dev_name,
-			mtu, dev_interface_num, nss_interface_num, ecm_interface_pppoe_iface_final, nii);
-
-	/*
-	 * Ensure our thread persists (and hence this module) for as long as the interface is referenced as we could get
-	 * callbacks from the database at any time.
-	 */
-	ecm_interface_thread_refs++;
-	DEBUG_ASSERT(ecm_interface_thread_refs > 0, "Thread refs wrap %d\n", ecm_interface_thread_refs);
+			mtu, dev_interface_num, nss_interface_num, NULL, nii);
 	spin_unlock_bh(&ecm_interface_lock);
 
 	DEBUG_TRACE("%p: pppoe iface established\n", nii);
@@ -898,14 +677,7 @@ static struct ecm_db_iface_instance *ecm_interface_unknown_interface_establish(s
 		return ii;
 	}
 	ecm_db_iface_add_unknown(nii, type_info->os_specific_ident, dev_name,
-			mtu, dev_interface_num, nss_interface_num, ecm_interface_unknown_iface_final, nii);
-
-	/*
-	 * Ensure our thread persists (and hence this module) for as long as the interface is referenced as we could get
-	 * callbacks from the database at any time.
-	 */
-	ecm_interface_thread_refs++;
-	DEBUG_ASSERT(ecm_interface_thread_refs > 0, "Thread refs wrap %d\n", ecm_interface_thread_refs);
+			mtu, dev_interface_num, nss_interface_num, NULL, nii);
 	spin_unlock_bh(&ecm_interface_lock);
 
 	DEBUG_TRACE("%p: unknown iface established\n", nii);
@@ -955,14 +727,7 @@ static struct ecm_db_iface_instance *ecm_interface_loopback_interface_establish(
 		return ii;
 	}
 	ecm_db_iface_add_loopback(nii, type_info->os_specific_ident, dev_name,
-			mtu, dev_interface_num, nss_interface_num, ecm_interface_loopback_iface_final, nii);
-
-	/*
-	 * Ensure our thread persists (and hence this module) for as long as the interface is referenced as we could get
-	 * callbacks from the database at any time.
-	 */
-	ecm_interface_thread_refs++;
-	DEBUG_ASSERT(ecm_interface_thread_refs > 0, "Thread refs wrap %d\n", ecm_interface_thread_refs);
+			mtu, dev_interface_num, nss_interface_num, NULL, nii);
 	spin_unlock_bh(&ecm_interface_lock);
 
 	DEBUG_TRACE("%p: loopback iface established\n", nii);
@@ -1014,14 +779,7 @@ static struct ecm_db_iface_instance *ecm_interface_ipsec_tunnel_interface_establ
 		return ii;
 	}
 	ecm_db_iface_add_ipsec_tunnel(nii, type_info->os_specific_ident, dev_name,
-			mtu, dev_interface_num, nss_interface_num, ecm_interface_ipsec_tunnel_iface_final, nii);
-
-	/*
-	 * Ensure our thread persists (and hence this module) for as long as the interface is referenced as we could get
-	 * callbacks from the database at any time.
-	 */
-	ecm_interface_thread_refs++;
-	DEBUG_ASSERT(ecm_interface_thread_refs > 0, "Thread refs wrap %d\n", ecm_interface_thread_refs);
+			mtu, dev_interface_num, nss_interface_num, NULL, nii);
 	spin_unlock_bh(&ecm_interface_lock);
 
 	DEBUG_TRACE("%p: ipsec_tunnel iface established\n", nii);
@@ -1072,14 +830,7 @@ static struct ecm_db_iface_instance *ecm_interface_sit_interface_establish(struc
 		return ii;
 	}
 	ecm_db_iface_add_sit(nii, type_info, dev_name, mtu, dev_interface_num,
-			nss_interface_num, ecm_interface_sit_iface_final, nii);
-
-	/*
-	 * Ensure our thread persists (and hence this module) for as long as the interface is referenced as we could get
-	 * callbacks from the database at any time.
-	 */
-	ecm_interface_thread_refs++;
-	DEBUG_ASSERT(ecm_interface_thread_refs > 0, "Thread refs wrap %d\n", ecm_interface_thread_refs);
+			nss_interface_num, NULL, nii);
 	spin_unlock_bh(&ecm_interface_lock);
 
 	DEBUG_TRACE("%p: sit iface established\n", nii);
@@ -1130,14 +881,7 @@ static struct ecm_db_iface_instance *ecm_interface_tunipip6_interface_establish(
 		return ii;
 	}
 	ecm_db_iface_add_tunipip6(nii, type_info, dev_name, mtu, dev_interface_num,
-			nss_interface_num, ecm_interface_tunipip6_iface_final, nii);
-
-	/*
-	 * Ensure our thread persists (and hence this module) for as long as the interface is referenced as we could get
-	 * callbacks from the database at any time.
-	 */
-	ecm_interface_thread_refs++;
-	DEBUG_ASSERT(ecm_interface_thread_refs > 0, "Thread refs wrap %d\n", ecm_interface_thread_refs);
+			nss_interface_num, NULL, nii);
 	spin_unlock_bh(&ecm_interface_lock);
 
 	DEBUG_TRACE("%p: tunipip6 iface established\n", nii);
@@ -2081,50 +1825,6 @@ static struct notifier_block ecm_interface_netdev_notifier __read_mostly = {
 };
 
 /*
- * ecm_interface_get_terminate()
- */
-static ssize_t ecm_interface_get_terminate(struct sys_device *dev,
-				  struct sysdev_attribute *attr,
-				  char *buf)
-{
-	ssize_t count;
-	unsigned int n;
-
-	spin_lock_bh(&ecm_interface_lock);
-	n = ecm_interface_terminate_pending;
-	spin_unlock_bh(&ecm_interface_lock);
-	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%u\n", n);
-	return count;
-}
-
-/*
- * ecm_interface_set_terminate()
- *	Writing anything to this 'file' will cause the default classifier to terminate
- */
-static ssize_t ecm_interface_set_terminate(struct sys_device *dev,
-				  struct sysdev_attribute *attr,
-				  const char *buf, size_t count)
-{
-	DEBUG_INFO("Terminate\n");
-
-	/*
-	 * Are we already signalled to terminate?
-	 */
-	spin_lock_bh(&ecm_interface_lock);
-	if (ecm_interface_terminate_pending) {
-		spin_unlock_bh(&ecm_interface_lock);
-		return 0;
-	}
-
-	ecm_interface_terminate_pending = true;
-	ecm_interface_thread_refs--;
-	DEBUG_ASSERT(ecm_interface_thread_refs >= 0, "Thread ref wrap %d\n", ecm_interface_thread_refs);
-	wake_up_process(ecm_interface_thread);
-	spin_unlock_bh(&ecm_interface_lock);
-	return count;
-}
-
-/*
  * ecm_interface_get_stop()
  */
 static ssize_t ecm_interface_get_stop(struct sys_device *dev,
@@ -2144,6 +1844,19 @@ static ssize_t ecm_interface_get_stop(struct sys_device *dev,
 	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", num);
 	return count;
 }
+
+void ecm_interface_stop(int num)
+{
+	/*
+	 * Operate under our locks and stop further processing of packets
+	 */
+	spin_lock_bh(&ecm_interface_lock);
+	ecm_interface_stopped = num;
+	spin_unlock_bh(&ecm_interface_lock);
+
+}
+EXPORT_SYMBOL(ecm_interface_stop);
+
 
 /*
  * ecm_interface_set_stop()
@@ -2166,12 +1879,7 @@ static ssize_t ecm_interface_set_stop(struct sys_device *dev,
 	sscanf(num_buf, "%d", &num);
 	DEBUG_TRACE("ecm_interface_stop = %d\n", num);
 
-	/*
-	 * Operate under our locks and stop further processing of packets
-	 */
-	spin_lock_bh(&ecm_interface_lock);
-	ecm_interface_stopped = num;
-	spin_unlock_bh(&ecm_interface_lock);
+	ecm_interface_stop(num);
 
 	return count;
 }
@@ -2179,7 +1887,6 @@ static ssize_t ecm_interface_set_stop(struct sys_device *dev,
 /*
  * SysFS attributes for the default classifier itself.
  */
-static SYSDEV_ATTR(terminate, 0644, ecm_interface_get_terminate, ecm_interface_set_terminate);
 static SYSDEV_ATTR(stop, 0644, ecm_interface_get_stop, ecm_interface_set_stop);
 
 /*
@@ -2191,21 +1898,17 @@ static struct sysdev_class ecm_interface_sysclass = {
 };
 
 /*
- * ecm_interface_thread_fn()
- *	A thread to handle tasks that can only be done in thread context.
+ * ecm_interface_init()
  */
-static int ecm_interface_thread_fn(void *arg)
+int ecm_interface_init(void)
 {
 	int result;
-
-	DEBUG_INFO("Thread start\n");
+	DEBUG_INFO("ECM Interface init\n");
 
 	/*
-	 * Get reference to this module - we release it when the thread exits
+	 * Initialise our global lock
 	 */
-	if (!try_module_get(THIS_MODULE)) {
-		return -EINVAL;
-	}
+	spin_lock_init(&ecm_interface_lock);
 
 	/*
 	 * Register the sysfs class
@@ -2213,7 +1916,7 @@ static int ecm_interface_thread_fn(void *arg)
 	result = sysdev_class_register(&ecm_interface_sysclass);
 	if (result) {
 		DEBUG_ERROR("Failed to register SysFS class %d\n", result);
-		goto task_cleanup_1;
+		return result;
 	}
 
 	/*
@@ -2225,113 +1928,48 @@ static int ecm_interface_thread_fn(void *arg)
 	result = sysdev_register(&ecm_interface_sys_dev);
 	if (result) {
 		DEBUG_ERROR("Failed to register SysFS device %d\n", result);
-		goto task_cleanup_2;
+		goto task_cleanup_1;
 	}
 
 	/*
 	 * Create files, one for each parameter supported by this module
 	 */
-	result = sysdev_create_file(&ecm_interface_sys_dev, &attr_terminate);
-	if (result) {
-		DEBUG_ERROR("Failed to register terminate file %d\n", result);
-		goto task_cleanup_3;
-	}
-
 	result = sysdev_create_file(&ecm_interface_sys_dev, &attr_stop);
 	if (result) {
 		DEBUG_ERROR("Failed to register stop file %d\n", result);
-		goto task_cleanup_4;
+		goto task_cleanup_2;
 	}
 
 	result = register_netdevice_notifier(&ecm_interface_netdev_notifier);
 	if (result != 0) {
 		DEBUG_ERROR("Failed to register netdevice notifier %d\n", result);
-		goto task_cleanup_5;
+		goto task_cleanup_2;
 	}
 
-	/*
-	 * Allow wakeup signals
-	 */
-	allow_signal(SIGCONT);
-	set_current_state(TASK_INTERRUPTIBLE);
+	return 0;
 
-	spin_lock_bh(&ecm_interface_lock);
-
-	/*
-	 * Set thread refs to 1 - user must terminate us now.
-	 */
-	ecm_interface_thread_refs = 1;
-
-	while (ecm_interface_thread_refs) {
-		/*
-		 * Sleep and wait for an instruction
-		 */
-		spin_unlock_bh(&ecm_interface_lock);
-		DEBUG_TRACE("ecm_interface sleep\n");
-		schedule();
-		set_current_state(TASK_INTERRUPTIBLE);
-		spin_lock_bh(&ecm_interface_lock);
-	}
-	DEBUG_INFO("ecm_interface terminate\n");
-	DEBUG_ASSERT(ecm_interface_terminate_pending, "User has not requested terminate\n");
-	spin_unlock_bh(&ecm_interface_lock);
-
-	result = 0;
-
-	unregister_netdevice_notifier(&ecm_interface_netdev_notifier);
-task_cleanup_5:
-	sysdev_remove_file(&ecm_interface_sys_dev, &attr_stop);
-task_cleanup_4:
-	sysdev_remove_file(&ecm_interface_sys_dev, &attr_terminate);
-task_cleanup_3:
-	sysdev_unregister(&ecm_interface_sys_dev);
 task_cleanup_2:
-	sysdev_class_unregister(&ecm_interface_sysclass);
+	sysdev_unregister(&ecm_interface_sys_dev);
 task_cleanup_1:
+	sysdev_class_unregister(&ecm_interface_sysclass);
 
-	module_put(THIS_MODULE);
 	return result;
 }
-
-/*
- * ecm_interface_init()
- */
-static int __init ecm_interface_init(void)
-{
-	DEBUG_INFO("ECM Interface init\n");
-
-	/*
-	 * Initialise our global lock
-	 */
-	spin_lock_init(&ecm_interface_lock);
-
-	/*
-	 * Create a thread to handle the start/stop of the database.
-	 * NOTE: We use a thread as some things we need to do cannot be done in this context
-	 */
-	ecm_interface_thread = kthread_create(ecm_interface_thread_fn, NULL, "%s", "ecm_interface");
-	if (!ecm_interface_thread) {
-		return -EINVAL;
-	}
-	wake_up_process(ecm_interface_thread);
-	return 0;
-}
+EXPORT_SYMBOL(ecm_interface_init);
 
 /*
  * ecm_interface_exit()
  */
-static void __exit ecm_interface_exit(void)
+void ecm_interface_exit(void)
 {
 	DEBUG_INFO("ECM Interface exit\n");
-	DEBUG_ASSERT(!ecm_interface_thread_refs, "Thread has refs %d\n", ecm_interface_thread_refs);
+
+	spin_lock_bh(&ecm_interface_lock);
+	ecm_interface_terminate_pending  = true;
+	spin_unlock_bh(&ecm_interface_lock);
+
+	unregister_netdevice_notifier(&ecm_interface_netdev_notifier);
+	sysdev_unregister(&ecm_interface_sys_dev);
+	sysdev_class_unregister(&ecm_interface_sysclass);
 }
-
-module_init(ecm_interface_init)
-module_exit(ecm_interface_exit)
-
-MODULE_AUTHOR("Qualcomm Atheros, Inc.");
-MODULE_DESCRIPTION("ECM Interface");
-#ifdef MODULE_LICENSE
-MODULE_LICENSE("Dual BSD/GPL");
-#endif
-
+EXPORT_SYMBOL(ecm_interface_exit);

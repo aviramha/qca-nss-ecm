@@ -120,8 +120,6 @@ static bool ecm_classifier_hyfi_enabled = true;		/* Operational behaviour */
  * Management thread control
  */
 static bool ecm_classifier_hyfi_terminate_pending = false;		/* True when the user wants us to terminate */
-static int ecm_classifier_hyfi_thread_refs = 0;			/* Signal to tell the control thread to terminate */
-static struct task_struct *ecm_classifier_hyfi_thread = NULL;	/* Control thread */
 
 /*
  * Sys dev linkage
@@ -139,23 +137,6 @@ static spinlock_t ecm_classifier_hyfi_lock;			/* Protect SMP access. */
 static struct ecm_classifier_hyfi_instance *ecm_classifier_hyfi_instances = NULL;
 									/* list of all active instances */
 static int ecm_classifier_hyfi_count = 0;					/* Tracks number of instances allocated */
-
-/*
- * ecm_classifier_hyfi_listener_final()
- */
-static void ecm_classifier_hyfi_listener_final(void *arg)
-{
-	DEBUG_INFO("ECM HyFi listener final: %p\n", arg);
-
-	/*
-	 * Reduce the thread refs so we don't block any unloading of our module.
-	 */
-	spin_lock_bh(&ecm_classifier_hyfi_lock);
-	ecm_classifier_hyfi_thread_refs--;
-	DEBUG_ASSERT(ecm_classifier_hyfi_thread_refs >= 0, "Thread ref wrap %d\n", ecm_classifier_hyfi_thread_refs);
-	spin_unlock_bh(&ecm_classifier_hyfi_lock);
-	wake_up_process(ecm_classifier_hyfi_thread);
-}
 
 /*
  * ecm_classifier_hyfi_ref()
@@ -215,11 +196,6 @@ static int ecm_classifier_hyfi_deref(struct ecm_classifier_instance *ci)
 	chfi->next = NULL;
 	chfi->prev = NULL;
 
-	/*
-	 * Release ref to thread
-	 */
-	ecm_classifier_hyfi_thread_refs--;
-	DEBUG_ASSERT(ecm_classifier_hyfi_thread_refs >= 0, "Thread refs wrap %d\n", ecm_classifier_hyfi_thread_refs);
 	spin_unlock_bh(&ecm_classifier_hyfi_lock);
 
 	/*
@@ -227,7 +203,6 @@ static int ecm_classifier_hyfi_deref(struct ecm_classifier_instance *ci)
 	 */
 	DEBUG_INFO("%p: Final HyFi classifier instance\n", chfi);
 	kfree(chfi);
-	wake_up_process(ecm_classifier_hyfi_thread);
 
 	return 0;
 }
@@ -532,12 +507,6 @@ struct ecm_classifier_hyfi_instance *ecm_classifier_hyfi_instance_alloc(struct e
 	}
 
 	/*
-	 * Ensure our thread persists now
-	 */
-	ecm_classifier_hyfi_thread_refs++;
-	DEBUG_ASSERT(ecm_classifier_hyfi_thread_refs > 0, "Thread refs wrap %d\n", ecm_classifier_hyfi_thread_refs);
-
-	/*
 	 * Link the new instance into our list at the head
 	 */
 	chfi->next = ecm_classifier_hyfi_instances;
@@ -699,75 +668,6 @@ static ssize_t ecm_classifier_hyfi_set_command(struct sys_device *dev,
 }
 
 /*
- * ecm_classifier_hyfi_rule_get_terminate()
- */
-static ssize_t ecm_classifier_hyfi_rule_get_terminate(struct sys_device *dev,
-				  struct sysdev_attribute *attr,
-				  char *buf)
-{
-	unsigned int n;
-	ssize_t count;
-
-	DEBUG_INFO("ecm_classifier_hyfi_rule_get_terminate\n");
-
-	spin_lock_bh(&ecm_classifier_hyfi_lock);
-	n = ecm_classifier_hyfi_terminate_pending;
-	spin_unlock_bh(&ecm_classifier_hyfi_lock);
-
-	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%u\n", n);
-	return count;
-}
-
-/*
- * ecm_classifier_hyfi_rule_set_terminate()
- *	Writing anything to this 'file' will cause the user_rule classifier to terminate
- */
-static ssize_t ecm_classifier_hyfi_rule_set_terminate(struct sys_device *dev,
-				  struct sysdev_attribute *attr,
-				  const char *buf, size_t count)
-{
-	struct ecm_db_listener_instance *li;
-
-	DEBUG_TRACE("HyFi classifier terminate\n");
-
-	spin_lock_bh(&ecm_classifier_hyfi_lock);
-
-	/*
-	 * Are we already signalled to terminate?
-	 */
-	if (ecm_classifier_hyfi_terminate_pending) {
-		spin_unlock_bh(&ecm_classifier_hyfi_lock);
-		return 0;
-	}
-
-	/*
-	 * Get the listener instance, if any to be removed from the db
-	 */
-	li = ecm_classifier_hyfi_li;
-	ecm_classifier_hyfi_li = NULL;
-
-	/*
-	 * Drop the ref count keeping our thread from terminating
-	 */
-	ecm_classifier_hyfi_terminate_pending = true;
-	ecm_classifier_hyfi_thread_refs--;
-	DEBUG_ASSERT(ecm_classifier_hyfi_thread_refs >= 0, "Thread ref wrap %d\n", ecm_classifier_hyfi_thread_refs);
-	spin_unlock_bh(&ecm_classifier_hyfi_lock);
-	wake_up_process(ecm_classifier_hyfi_thread);
-
-	/*
-	 * Release our ref to the listener.
-	 * This will cause it to be unattached to the db listener list.
-	 * NOTE: Our thread refs will be released on final callback when we know there will be no more callbacks to it.
-	 */
-	if (li) {
-		ecm_db_listener_deref(li);
-	}
-
-	return count;
-}
-
-/*
  * ecm_classifier_hyfi_rule_get_enabled()
  */
 static ssize_t ecm_classifier_hyfi_rule_get_enabled(struct sys_device *dev,
@@ -821,7 +721,6 @@ static ssize_t ecm_classifier_hyfi_rule_set_enabled(struct sys_device *dev,
 /*
  * SysFS attributes for the user_rule classifier itself.
  */
-static SYSDEV_ATTR(terminate, 0644, ecm_classifier_hyfi_rule_get_terminate, ecm_classifier_hyfi_rule_set_terminate);
 static SYSDEV_ATTR(enabled, 0644, ecm_classifier_hyfi_rule_get_enabled, ecm_classifier_hyfi_rule_set_enabled);
 static SYSDEV_ATTR(cmd, 0200, NULL, ecm_classifier_hyfi_set_command);
 
@@ -834,21 +733,17 @@ static struct sysdev_class ecm_classifier_hyfi_sysclass = {
 };
 
 /*
- * ecm_classifier_hyfi_thread_fn()
- *	A thread to handle tasks that can only be done in thread context.
+ * ecm_classifier_hyfi_rules_init()
  */
-static int ecm_classifier_hyfi_thread_fn(void *arg)
+int ecm_classifier_hyfi_rules_init(void)
 {
 	int result;
-
-	DEBUG_TRACE("HyFi classifier Thread START\n");
+	DEBUG_INFO("HyFi classifier Module init\n");
 
 	/*
-	 * Get reference to this module - release it when thread exits
+	 * Initialise our global lock
 	 */
-	if (!try_module_get(THIS_MODULE)) {
-		return -EINVAL;
-	}
+	spin_lock_init(&ecm_classifier_hyfi_lock);
 
 	/*
 	 * Register the sysfs class
@@ -856,7 +751,7 @@ static int ecm_classifier_hyfi_thread_fn(void *arg)
 	result = sysdev_class_register(&ecm_classifier_hyfi_sysclass);
 	if (result) {
 		DEBUG_WARN("Failed to register SysFS class\n");
-		goto classifier_task_cleanup_1;
+		return result;
 	}
 
 	/*
@@ -868,25 +763,19 @@ static int ecm_classifier_hyfi_thread_fn(void *arg)
 	result = sysdev_register(&ecm_classifier_hyfi_sys_dev);
 	if (result) {
 		DEBUG_WARN("Failed to register SysFS device\n");
-		goto classifier_task_cleanup_2;
-	}
-
-	result = sysdev_create_file(&ecm_classifier_hyfi_sys_dev, &attr_terminate);
-	if (result) {
-		DEBUG_WARN("Failed to register terminate SysFS file\n");
-		goto classifier_task_cleanup_3;
+		goto classifier_task_cleanup_1;
 	}
 
 	result = sysdev_create_file(&ecm_classifier_hyfi_sys_dev, &attr_enabled);
 	if (result) {
 		DEBUG_TRACE("Failed to register enabled SysFS file\n");
-		goto classifier_task_cleanup_4;
+		goto classifier_task_cleanup_2;
 	}
 
 	result = sysdev_create_file(&ecm_classifier_hyfi_sys_dev, &attr_cmd);
 	if (result) {
 		DEBUG_TRACE("Failed to register cmd SysFS file\n");
-		goto classifier_thread_cleanup_5;
+		goto classifier_task_cleanup_2;
 	}
 
 	/*
@@ -895,13 +784,8 @@ static int ecm_classifier_hyfi_thread_fn(void *arg)
 	ecm_classifier_hyfi_li = ecm_db_listener_alloc();
 	if (!ecm_classifier_hyfi_li) {
 		DEBUG_ERROR("Failed to allocate listener\n");
-		goto classifier_thread_cleanup_6;
+		goto classifier_task_cleanup_2;
 	}
-
-	/*
-	 * Set thread refs to 1 - user must terminate us now properly.
-	 */
-	ecm_classifier_hyfi_thread_refs = 1;
 
 	/*
 	 * Add the listener into the database
@@ -918,100 +802,43 @@ static int ecm_classifier_hyfi_thread_fn(void *arg)
 			NULL /* ecm_classifier_hyfi_mapping_removed */,
 			ecm_classifier_hyfi_connection_added,
 			ecm_classifier_hyfi_connection_removed,
-			ecm_classifier_hyfi_listener_final,
+			NULL /* ecm_classifier_hyfi_listener_final */,
 			ecm_classifier_hyfi_li);
 
-	/*
-	 * Bump ref count for listener benefit (module won't get pulled from under it) - until the listener is destroyed
-	 */
-	ecm_classifier_hyfi_thread_refs++;
+	return 0;
 
-	/*
-	 * Allow wakeup signals
-	 */
-	allow_signal(SIGCONT);
-	set_current_state(TASK_INTERRUPTIBLE);
-
-	spin_lock_bh(&ecm_classifier_hyfi_lock);
-
-	while (ecm_classifier_hyfi_thread_refs) {
-		/*
-		 * Sleep and wait for an instruction
-		 */
-		spin_unlock_bh(&ecm_classifier_hyfi_lock);
-		DEBUG_TRACE("HyFi Classifier SLEEP\n");
-		schedule();
-		set_current_state(TASK_INTERRUPTIBLE);
-		spin_lock_bh(&ecm_classifier_hyfi_lock);
-	}
-	DEBUG_TRACE("HyFi Classifier TERMINATE\n");
-	DEBUG_ASSERT(ecm_classifier_hyfi_terminate_pending, "User has not requested terminate\n");
-
-	/*
-	 * If we are terminating then there should be no state remaining - or our linkage into the database will be messed up.
-	 */
-	DEBUG_ASSERT((ecm_classifier_hyfi_instances == NULL)
-			&& (ecm_classifier_hyfi_count == 0), "state is still active\n");
-
-	spin_unlock_bh(&ecm_classifier_hyfi_lock);
-
-	result = 0;
-
-classifier_thread_cleanup_6:
-	sysdev_remove_file(&ecm_classifier_hyfi_sys_dev, &attr_cmd);
-classifier_thread_cleanup_5:
-	sysdev_remove_file(&ecm_classifier_hyfi_sys_dev, &attr_enabled);
-classifier_task_cleanup_4:
-	sysdev_remove_file(&ecm_classifier_hyfi_sys_dev, &attr_terminate);
-classifier_task_cleanup_3:
-	sysdev_unregister(&ecm_classifier_hyfi_sys_dev);
 classifier_task_cleanup_2:
-	sysdev_class_unregister(&ecm_classifier_hyfi_sysclass);
+	sysdev_unregister(&ecm_classifier_hyfi_sys_dev);
 classifier_task_cleanup_1:
+	sysdev_class_unregister(&ecm_classifier_hyfi_sysclass);
 
-	module_put(THIS_MODULE);
 	return result;
 }
-
-/*
- * ecm_classifier_hyfi_rules_init()
- */
-static int __init ecm_classifier_hyfi_rules_init(void)
-{
-	DEBUG_INFO("HyFi classifier Module init\n");
-
-	/*
-	 * Initialise our global lock
-	 */
-	spin_lock_init(&ecm_classifier_hyfi_lock);
-
-	/*
-	 * Create a thread to handle the start/stop of operation.
-	 * NOTE: We use a thread as some things we need to do cannot be done in this context
-	 */
-	ecm_classifier_hyfi_thread = kthread_create(ecm_classifier_hyfi_thread_fn, NULL, "%s", "ecm_classifier_hyfi");
-	if (!ecm_classifier_hyfi_thread) {
-		return -EINVAL;
-	}
-	wake_up_process(ecm_classifier_hyfi_thread);
-	return 0;
-}
+EXPORT_SYMBOL(ecm_classifier_hyfi_rules_init);
 
 /*
  * ecm_classifier_hyfi_rules_exit()
  */
-static void __exit ecm_classifier_hyfi_rules_exit(void)
+void ecm_classifier_hyfi_rules_exit(void)
 {
 	DEBUG_INFO("HyFi classifier Module exit\n");
-	DEBUG_ASSERT(!ecm_classifier_hyfi_thread_refs, "Thread has refs %d\n", ecm_classifier_hyfi_thread_refs);
+
+	spin_lock_bh(&ecm_classifier_hyfi_lock);
+	ecm_classifier_hyfi_terminate_pending = true;
+	spin_unlock_bh(&ecm_classifier_hyfi_lock);
+
+	/*
+	 * Release our ref to the listener.
+	 * This will cause it to be unattached to the db listener list.
+	 * NOTE: Our thread refs will be released on final callback when
+	 * we know there will be no more callbacks to it.
+	 */
+	if (ecm_classifier_hyfi_li) {
+		ecm_db_listener_deref(ecm_classifier_hyfi_li);
+		ecm_classifier_hyfi_li = NULL;
+	}
+
+	sysdev_unregister(&ecm_classifier_hyfi_sys_dev);
+	sysdev_class_unregister(&ecm_classifier_hyfi_sysclass);
 }
-
-module_init(ecm_classifier_hyfi_rules_init)
-module_exit(ecm_classifier_hyfi_rules_exit)
-
-MODULE_AUTHOR("Qualcomm Atheros, Inc.");
-MODULE_DESCRIPTION("ECM HyFi classifier");
-#ifdef MODULE_LICENSE
-MODULE_LICENSE("Dual BSD/GPL");
-#endif
-
+EXPORT_SYMBOL(ecm_classifier_hyfi_rules_exit);

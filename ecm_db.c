@@ -615,8 +615,6 @@ static struct sys_device ecm_db_sys_dev;				/* SysFS linkage */
  * Management thread control
  */
 static bool ecm_db_terminate_pending = false;			/* When true the user has requested termination */
-static int ecm_db_thread_refs = 0;				/* Counts the number of entities that rely on the thread staying functional. When 0 the thread may terminate */
-static struct task_struct *ecm_db_thread = NULL;			/* Control thread */
 
 /*
  * Character device stuff - used to communicate status back to user space
@@ -2445,18 +2443,7 @@ int ecm_db_connection_deref(struct ecm_db_connection_instance *ci)
 	spin_lock_bh(&ecm_db_lock);
 	ecm_db_connection_count--;
 	DEBUG_ASSERT(ecm_db_connection_count >= 0, "%p: connection count wrap\n", ci);
-
-	/*
-	 * No longer need ref to thread for this object
-	 */
-	ecm_db_thread_refs--;
-	DEBUG_ASSERT(ecm_db_thread_refs >= 0, "thread ref wrap: %d\n", ecm_db_thread_refs);
 	spin_unlock_bh(&ecm_db_lock);
-
-	/*
-	 * Thread may be able to exit on object destruction
-	 */
-	wake_up_process(ecm_db_thread);
 
 	return 0;
 }
@@ -2592,18 +2579,7 @@ int ecm_db_mapping_deref(struct ecm_db_mapping_instance *mi)
 	spin_lock_bh(&ecm_db_lock);
 	ecm_db_mapping_count--;
 	DEBUG_ASSERT(ecm_db_mapping_count >= 0, "%p: mapping count wrap\n", mi);
-
-	/*
-	 * No longer need ref to thread for this object
-	 */
-	ecm_db_thread_refs--;
-	DEBUG_ASSERT(ecm_db_thread_refs >= 0, "thread ref wrap: %d\n", ecm_db_thread_refs);
 	spin_unlock_bh(&ecm_db_lock);
-
-	/*
-	 * Thread may be able to exit on object destruction
-	 */
-	wake_up_process(ecm_db_thread);
 
 	return 0;
 }
@@ -2732,18 +2708,8 @@ int ecm_db_host_deref(struct ecm_db_host_instance *hi)
 	spin_lock_bh(&ecm_db_lock);
 	ecm_db_host_count--;
 	DEBUG_ASSERT(ecm_db_host_count >= 0, "%p: host count wrap\n", hi);
-
-	/*
-	 * No longer need ref to thread for this object
-	 */
-	ecm_db_thread_refs--;
-	DEBUG_ASSERT(ecm_db_thread_refs >= 0, "thread ref wrap: %d\n", ecm_db_thread_refs);
 	spin_unlock_bh(&ecm_db_lock);
 
-	/*
-	 * Thread may be able to exit on object destruction
-	 */
-	wake_up_process(ecm_db_thread);
 	return 0;
 }
 EXPORT_SYMBOL(ecm_db_host_deref);
@@ -2870,18 +2836,7 @@ int ecm_db_node_deref(struct ecm_db_node_instance *ni)
 	spin_lock_bh(&ecm_db_lock);
 	ecm_db_node_count--;
 	DEBUG_ASSERT(ecm_db_node_count >= 0, "%p: node count wrap\n", ni);
-
-	/*
-	 * No longer need ref to thread for this object
-	 */
-	ecm_db_thread_refs--;
-	DEBUG_ASSERT(ecm_db_thread_refs >= 0, "thread ref wrap: %d\n", ecm_db_thread_refs);
 	spin_unlock_bh(&ecm_db_lock);
-
-	/*
-	 * Thread may be able to exit on object destruction
-	 */
-	wake_up_process(ecm_db_thread);
 
 	return 0;
 }
@@ -2989,18 +2944,7 @@ int ecm_db_iface_deref(struct ecm_db_iface_instance *ii)
 	spin_lock_bh(&ecm_db_lock);
 	ecm_db_iface_count--;
 	DEBUG_ASSERT(ecm_db_iface_count >= 0, "%p: iface count wrap\n", ii);
-
-	/*
-	 * No longer need ref to thread for this object
-	 */
-	ecm_db_thread_refs--;
-	DEBUG_ASSERT(ecm_db_thread_refs >= 0, "thread ref wrap: %d\n", ecm_db_thread_refs);
 	spin_unlock_bh(&ecm_db_lock);
-
-	/*
-	 * Thread may be able to exit on object destruction
-	 */
-	wake_up_process(ecm_db_thread);
 
 	return 0;
 }
@@ -3061,18 +3005,8 @@ int ecm_db_listener_deref(struct ecm_db_listener_instance *li)
 	spin_lock_bh(&ecm_db_lock);
 	ecm_db_listeners_count--;
 	DEBUG_ASSERT(ecm_db_listeners_count >= 0, "%p: listener count wrap\n", li);
-
-	/*
-	 * No longer need ref to thread for this object
-	 */
-	ecm_db_thread_refs--;
-	DEBUG_ASSERT(ecm_db_thread_refs >= 0, "thread ref wrap: %d\n", ecm_db_thread_refs);
 	spin_unlock_bh(&ecm_db_lock);
 
-	/*
-	 * Thread may be able to exit on object destruction
-	 */
-	wake_up_process(ecm_db_thread);
 	return 0;
 }
 EXPORT_SYMBOL(ecm_db_listener_deref);
@@ -7581,6 +7515,15 @@ struct ecm_db_connection_instance *ecm_db_connection_alloc(void)
 	DEBUG_SET_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC);
 
 	/*
+	 * Initialise the interfaces from/to lists.
+	 * Interfaces are added from end of array.
+	 */
+	ci->from_interface_first = ECM_DB_IFACE_HEIRARCHY_MAX;
+	ci->to_interface_first = ECM_DB_IFACE_HEIRARCHY_MAX;
+	ci->from_nat_interface_first = ECM_DB_IFACE_HEIRARCHY_MAX;
+	ci->to_nat_interface_first = ECM_DB_IFACE_HEIRARCHY_MAX;
+
+	/*
 	 * If the master thread is terminating then we cannot create new instances
 	 */
 	spin_lock_bh(&ecm_db_lock);
@@ -7595,21 +7538,6 @@ struct ecm_db_connection_instance *ecm_db_connection_alloc(void)
 	 * Assign runtime unique serial
 	 */
 	ci->serial = ecm_db_connection_serial++;
-
-	/*
-	 * Initialise the interfaces from/to lists.
-	 * Interfaces are added from end of array.
-	 */
-	ci->from_interface_first = ECM_DB_IFACE_HEIRARCHY_MAX;
-	ci->to_interface_first = ECM_DB_IFACE_HEIRARCHY_MAX;
-	ci->from_nat_interface_first = ECM_DB_IFACE_HEIRARCHY_MAX;
-	ci->to_nat_interface_first = ECM_DB_IFACE_HEIRARCHY_MAX;
-
-	/*
-	 * Thread must remain active for this object
-	 */
-	ecm_db_thread_refs++;
-	DEBUG_ASSERT(ecm_db_thread_refs > 0, "Thread ref count wrap %d\n", ecm_db_thread_refs);
 
 	ecm_db_connection_count++;
 	DEBUG_ASSERT(ecm_db_connection_count > 0, "%p: connection count wrap\n", ci);
@@ -7652,12 +7580,6 @@ struct ecm_db_mapping_instance *ecm_db_mapping_alloc(void)
 		return NULL;
 	}
 
-	/*
-	 * Thread must remain active for this object
-	 */
-	ecm_db_thread_refs++;
-	DEBUG_ASSERT(ecm_db_thread_refs > 0, "Thread ref count wrap %d\n", ecm_db_thread_refs);
-
 	ecm_db_mapping_count++;
 	spin_unlock_bh(&ecm_db_lock);
 
@@ -7697,12 +7619,6 @@ struct ecm_db_host_instance *ecm_db_host_alloc(void)
 		kfree(hi);
 		return NULL;
 	}
-
-	/*
-	 * Thread must remain active for this object
-	 */
-	ecm_db_thread_refs++;
-	DEBUG_ASSERT(ecm_db_thread_refs > 0, "Thread ref count wrap %d\n", ecm_db_thread_refs);
 
 	ecm_db_host_count++;
 	spin_unlock_bh(&ecm_db_lock);
@@ -7744,12 +7660,6 @@ struct ecm_db_node_instance *ecm_db_node_alloc(void)
 		return NULL;
 	}
 
-	/*
-	 * Thread must remain active for this object
-	 */
-	ecm_db_thread_refs++;
-	DEBUG_ASSERT(ecm_db_thread_refs > 0, "Thread ref count wrap %d\n", ecm_db_thread_refs);
-
 	ecm_db_node_count++;
 	spin_unlock_bh(&ecm_db_lock);
 
@@ -7789,12 +7699,6 @@ struct ecm_db_iface_instance *ecm_db_iface_alloc(void)
 		kfree(ii);
 		return NULL;
 	}
-
-	/*
-	 * Thread must remain active for this object
-	 */
-	ecm_db_thread_refs++;
-	DEBUG_ASSERT(ecm_db_thread_refs > 0, "Thread ref count wrap %d\n", ecm_db_thread_refs);
 
 	ecm_db_iface_count++;
 	spin_unlock_bh(&ecm_db_lock);
@@ -7836,17 +7740,11 @@ struct ecm_db_listener_instance *ecm_db_listener_alloc(void)
 		return NULL;
 	}
 
-	/*
-	 * Thread must remain active for this object
-	 */
-	ecm_db_thread_refs++;
-	DEBUG_ASSERT(ecm_db_thread_refs > 0, "Thread ref count wrap %d\n", ecm_db_thread_refs);
-
 	ecm_db_listeners_count++;
 	DEBUG_ASSERT(ecm_db_listeners_count > 0, "%p: listener count wrap\n", li);
+	spin_unlock_bh(&ecm_db_lock);
 
 	DEBUG_TRACE("Listener created %p\n", li);
-	spin_unlock_bh(&ecm_db_lock);
 	return li;
 }
 EXPORT_SYMBOL(ecm_db_listener_alloc);
@@ -7864,51 +7762,6 @@ uint32_t ecm_db_time_get(void)
 	return time_now;
 }
 EXPORT_SYMBOL(ecm_db_time_get);
-
-/*
- * ecm_db_get_terminate()
- */
-static ssize_t ecm_db_get_terminate(struct sys_device *dev,
-				  struct sysdev_attribute *attr,
-				  char *buf)
-{
-	unsigned int n;
-	ssize_t count;
-
-	spin_lock_bh(&ecm_db_lock);
-	n = ecm_db_terminate_pending;
-	spin_unlock_bh(&ecm_db_lock);
-	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%u\n", n);
-	return count;
-}
-
-/*
- * ecm_db_set_terminate()
- *	Writing anything to this 'file' will cause the default classifier to terminate
- */
-static ssize_t ecm_db_set_terminate(struct sys_device *dev,
-				  struct sysdev_attribute *attr,
-				  const char *buf, size_t count)
-{
-	DEBUG_INFO("Terminate\n");
-	spin_lock_bh(&ecm_db_lock);
-
-	/*
-	 * If user has already requested termination then we don't do it again
-	 */
-	if (ecm_db_terminate_pending) {
-		spin_unlock_bh(&ecm_db_lock);
-		return 0;
-	}
-
-	ecm_db_terminate_pending = true;
-	ecm_db_thread_refs--;
-	DEBUG_ASSERT(ecm_db_thread_refs >= 0, "Terminate wrap: %d\n", ecm_db_thread_refs);
-	wake_up_process(ecm_db_thread);
-	spin_unlock_bh(&ecm_db_lock);
-
-	return count;
-}
 
 /*
  * ecm_db_get_state_dev_major()
@@ -8149,7 +8002,6 @@ static ssize_t ecm_db_set_state_file_output_mask(struct sys_device *dev,
 /*
  * SysFS attributes for the default classifier itself.
  */
-static SYSDEV_ATTR(terminate, 0644, ecm_db_get_terminate, ecm_db_set_terminate);
 static SYSDEV_ATTR(state_dev_major, 0444, ecm_db_get_state_dev_major, NULL);
 static SYSDEV_ATTR(connection_count, 0444, ecm_db_get_connection_count, NULL);
 static SYSDEV_ATTR(host_count, 0444, ecm_db_get_host_count, NULL);
@@ -9305,21 +9157,17 @@ static void ecm_db_timer_callback(unsigned long data)
 }
 
 /*
- * ecm_db_thread_fn()
- *	A thread to handle tasks that can only be done in thread context.
+ * ecm_db_init()
  */
-static int ecm_db_thread_fn(void *arg)
+int ecm_db_init(void)
 {
 	int result;
-
-	DEBUG_INFO("DB Thread start\n");
+	DEBUG_INFO("ECM Module init\n");
 
 	/*
-	 * Get reference to this module - release it when thread exits
+	 * Initialise our global database lock
 	 */
-	if (!try_module_get(THIS_MODULE)) {
-		return -EINVAL;
-	}
+	spin_lock_init(&ecm_db_lock);
 
 	/*
 	 * Register the sysfs class
@@ -9327,7 +9175,7 @@ static int ecm_db_thread_fn(void *arg)
 	result = sysdev_class_register(&ecm_db_sysclass);
 	if (result) {
 		DEBUG_ERROR("Failed to register SysFS class %d\n", result);
-		goto task_cleanup_1;
+		return result;
 	}
 
 	/*
@@ -9339,7 +9187,7 @@ static int ecm_db_thread_fn(void *arg)
 	result = sysdev_register(&ecm_db_sys_dev);
 	if (result) {
 		DEBUG_ERROR("Failed to register SysFS device %d\n", result);
-		goto task_cleanup_2;
+		goto task_cleanup_1;
 	}
 
 	/*
@@ -9348,13 +9196,55 @@ static int ecm_db_thread_fn(void *arg)
 	result = sysdev_create_file(&ecm_db_sys_dev, &attr_state_dev_major);
 	if (result) {
 		DEBUG_ERROR("Failed to register dev major file %d\n", result);
-		goto task_cleanup_3;
+		goto task_cleanup_2;
 	}
 
-	result = sysdev_create_file(&ecm_db_sys_dev, &attr_terminate);
+	result = sysdev_create_file(&ecm_db_sys_dev, &attr_connection_count);
 	if (result) {
-		DEBUG_ERROR("Failed to register terminate file %d\n", result);
-		goto task_cleanup_4;
+		DEBUG_ERROR("Failed to register conn count SysFS file\n");
+		goto task_cleanup_2;
+	}
+
+	result = sysdev_create_file(&ecm_db_sys_dev, &attr_host_count);
+	if (result) {
+		DEBUG_ERROR("Failed to register host count SysFS file\n");
+		goto task_cleanup_2;
+	}
+
+	result = sysdev_create_file(&ecm_db_sys_dev, &attr_mapping_count);
+	if (result) {
+		DEBUG_ERROR("Failed to register mapping count SysFS file\n");
+		goto task_cleanup_2;
+	}
+
+	result = sysdev_create_file(&ecm_db_sys_dev, &attr_defunct_all);
+	if (result) {
+		DEBUG_ERROR("Failed to register expire all SysFS file\n");
+		goto task_cleanup_2;
+	}
+
+	result = sysdev_create_file(&ecm_db_sys_dev, &attr_node_count);
+	if (result) {
+		DEBUG_ERROR("Failed to register node count SysFS file\n");
+		goto task_cleanup_2;
+	}
+
+	result = sysdev_create_file(&ecm_db_sys_dev, &attr_iface_count);
+	if (result) {
+		DEBUG_ERROR("Failed to register iface count SysFS file\n");
+		goto task_cleanup_2;
+	}
+
+	result = sysdev_create_file(&ecm_db_sys_dev, &attr_connection_counts_simple);
+	if (result) {
+		DEBUG_ERROR("Failed to register connection counts simple SysFS file\n");
+		goto task_cleanup_2;
+	}
+
+	result = sysdev_create_file(&ecm_db_sys_dev, &attr_state_file_output_mask);
+	if (result) {
+		DEBUG_ERROR("Failed to register state_file_output_mask SysFS file\n");
+		goto task_cleanup_2;
 	}
 
 	/*
@@ -9363,58 +9253,10 @@ static int ecm_db_thread_fn(void *arg)
 	result = register_chrdev(0, ecm_db_sysclass.name, &ecm_db_fops);
 	if (result < 0) {
                 DEBUG_ERROR("Failed to register chrdev %d\n", result);
-		goto task_cleanup_5;
+		goto task_cleanup_2;
 	}
 	ecm_db_dev_major_id = result;
 	DEBUG_TRACE("registered chr dev major id assigned %d\n", ecm_db_dev_major_id);
-
-	result = sysdev_create_file(&ecm_db_sys_dev, &attr_connection_count);
-	if (result) {
-		DEBUG_ERROR("Failed to register conn count SysFS file\n");
-		goto task_cleanup_6;
-	}
-
-	result = sysdev_create_file(&ecm_db_sys_dev, &attr_host_count);
-	if (result) {
-		DEBUG_ERROR("Failed to register host count SysFS file\n");
-		goto task_cleanup_7;
-	}
-
-	result = sysdev_create_file(&ecm_db_sys_dev, &attr_mapping_count);
-	if (result) {
-		DEBUG_ERROR("Failed to register mapping count SysFS file\n");
-		goto task_cleanup_8;
-	}
-
-	result = sysdev_create_file(&ecm_db_sys_dev, &attr_defunct_all);
-	if (result) {
-		DEBUG_ERROR("Failed to register expire all SysFS file\n");
-		goto task_cleanup_9;
-	}
-
-	result = sysdev_create_file(&ecm_db_sys_dev, &attr_node_count);
-	if (result) {
-		DEBUG_ERROR("Failed to register node count SysFS file\n");
-		goto task_cleanup_10;
-	}
-
-	result = sysdev_create_file(&ecm_db_sys_dev, &attr_iface_count);
-	if (result) {
-		DEBUG_ERROR("Failed to register iface count SysFS file\n");
-		goto task_cleanup_11;
-	}
-
-	result = sysdev_create_file(&ecm_db_sys_dev, &attr_connection_counts_simple);
-	if (result) {
-		DEBUG_ERROR("Failed to register connection counts simple SysFS file\n");
-		goto task_cleanup_12;
-	}
-
-	result = sysdev_create_file(&ecm_db_sys_dev, &attr_state_file_output_mask);
-	if (result) {
-		DEBUG_ERROR("Failed to register state_file_output_mask SysFS file\n");
-		goto task_cleanup_13;
-	}
 
 	/*
 	 * Set a timer to manage cleanup of expired connections
@@ -9490,120 +9332,40 @@ static int ecm_db_thread_fn(void *arg)
 	 */
 	memset(ecm_db_connection_count_by_protocol, 0, sizeof(ecm_db_connection_count_by_protocol));
 
-	/*
-	 * Allow wakeup signals
-	 */
-	allow_signal(SIGCONT);
+	return 0;
 
-	/*
-	 * Set state to interruptible so that we don't miss any wake up calls
-	 * during processing of events
-	 * NOTE: Any wakeups while we are processing will set the state to TASK_RUNNING and we simply wont sleep on schedule()
-	 */
-	__set_current_state(TASK_INTERRUPTIBLE);
-
-	spin_lock_bh(&ecm_db_lock);
-
-	/*
-	 * Give the thread one refs - this requires the user to terminate the thread
-	 */
-	ecm_db_thread_refs = 1;
-
-	while (ecm_db_thread_refs) {
-		spin_unlock_bh(&ecm_db_lock);
-
-		/*
-		 * Sleep and wait for a wakeup.
-		 */
-		DEBUG_TRACE("ecm_db sleep\n");
-		schedule();
-		__set_current_state(TASK_INTERRUPTIBLE);
-
-		spin_lock_bh(&ecm_db_lock);
-	}
-	DEBUG_INFO("ecm_db terminate\n");
-	DEBUG_ASSERT(ecm_db_terminate_pending, "User has not requested terminate\n");
-	spin_unlock_bh(&ecm_db_lock);
-
-	/*
-	 * Destroy garbage timer
-	 * Timer must be cancelled outside of holding db lock - if the timer callback runs on another CPU we would deadlock
-	 * as we would wait for the callback to finish and it would wait indefinately for the lock to be released!
-	 */
-	del_timer(&ecm_db_timer);
-
-	result = 0;
-
-	sysdev_remove_file(&ecm_db_sys_dev, &attr_state_file_output_mask);
-task_cleanup_13:
-	sysdev_remove_file(&ecm_db_sys_dev, &attr_connection_counts_simple);
-task_cleanup_12:
-	sysdev_remove_file(&ecm_db_sys_dev, &attr_iface_count);
-task_cleanup_11:
-	sysdev_remove_file(&ecm_db_sys_dev, &attr_node_count);
-task_cleanup_10:
-	sysdev_remove_file(&ecm_db_sys_dev, &attr_defunct_all);
-task_cleanup_9:
-	sysdev_remove_file(&ecm_db_sys_dev, &attr_mapping_count);
-task_cleanup_8:
-	sysdev_remove_file(&ecm_db_sys_dev, &attr_host_count);
-task_cleanup_7:
-	sysdev_remove_file(&ecm_db_sys_dev, &attr_connection_count);
-task_cleanup_6:
-	unregister_chrdev(ecm_db_dev_major_id, ecm_db_sysclass.name);
-task_cleanup_5:
-	sysdev_remove_file(&ecm_db_sys_dev, &attr_terminate);
-task_cleanup_4:
-	sysdev_remove_file(&ecm_db_sys_dev, &attr_state_dev_major);
-task_cleanup_3:
-	sysdev_unregister(&ecm_db_sys_dev);
 task_cleanup_2:
-	sysdev_class_unregister(&ecm_db_sysclass);
+	sysdev_unregister(&ecm_db_sys_dev);
 task_cleanup_1:
+	sysdev_class_unregister(&ecm_db_sysclass);
 
-	module_put(THIS_MODULE);
 	return result;
 }
-
-/*
- * ecm_db_init()
- */
-static int __init ecm_db_init(void)
-{
-	DEBUG_INFO("ECM Module init\n");
-
-	/*
-	 * Initialise our global database lock
-	 */
-	spin_lock_init(&ecm_db_lock);
-
-	/*
-	 * Create a thread to handle the start/stop of the database.
-	 * NOTE: We use a thread as some things we need to do cannot be done in this context
-	 */
-	ecm_db_thread = kthread_create(ecm_db_thread_fn, NULL, "%s", "ecm_db");
-	if (!ecm_db_thread) {
-		return -EINVAL;
-	}
-	wake_up_process(ecm_db_thread);
-	return 0;
-}
+EXPORT_SYMBOL(ecm_db_init);
 
 /*
  * ecm_db_exit()
  */
-static void __exit ecm_db_exit(void)
+void ecm_db_exit(void)
 {
 	DEBUG_INFO("ECM DB Module exit\n");
-	DEBUG_ASSERT(!ecm_db_thread_refs, "Thread has refs %d\n", ecm_db_thread_refs);
+
+	spin_lock_bh(&ecm_db_lock);
+	ecm_db_terminate_pending = true;
+	spin_unlock_bh(&ecm_db_lock);
+
+	ecm_db_connection_defunct_all();
+
+	/*
+	 * Destroy garbage timer
+	 * Timer must be cancelled outside of holding db lock - if the
+	 * timer callback runs on another CPU we would deadlock
+	 * as we would wait for the callback to finish and it would wait
+	 * indefinately for the lock to be released!
+	 */
+	del_timer_sync(&ecm_db_timer);
+	unregister_chrdev(ecm_db_dev_major_id, ecm_db_sysclass.name);
+	sysdev_unregister(&ecm_db_sys_dev);
+	sysdev_class_unregister(&ecm_db_sysclass);
 }
-
-module_init(ecm_db_init)
-module_exit(ecm_db_exit)
-
-MODULE_AUTHOR("Qualcomm Atheros, Inc.");
-MODULE_DESCRIPTION("ECM Database");
-#ifdef MODULE_LICENSE
-MODULE_LICENSE("Dual BSD/GPL");
-#endif
-
+EXPORT_SYMBOL(ecm_db_exit);

@@ -182,8 +182,6 @@ static int ecm_front_end_ipv6_stopped = 0;			/* When non-zero further traffic wi
  * Management thread control
  */
 static bool ecm_front_end_ipv6_terminate_pending = false;		/* True when the user has signalled we should quit */
-static int ecm_front_end_ipv6_thread_refs = 0;			/* >0 when the thread must stay active */
-static struct task_struct *ecm_front_end_ipv6_thread = NULL;		/* Control thread */
 
 static void *ecm_front_end_ipv6_nss_ipv6_context = NULL;		/* Registration for IPv6 rules */
 
@@ -620,102 +618,6 @@ int32_t ecm_front_end_ipv6_interface_heirarchy_construct(struct ecm_db_iface_ins
 }
 
 /*
- * ecm_front_end_ipv6_connection_final_tcp()
- *	Invoked when the connection becomes finalised
- */
-static void ecm_front_end_ipv6_connection_final_tcp(void *arg)
-{
-	/*
-	 * No longer need the ref to the thread
-	 */
-	spin_lock_bh(&ecm_front_end_ipv6_lock);
-	ecm_front_end_ipv6_thread_refs--;
-	DEBUG_ASSERT(ecm_front_end_ipv6_thread_refs >= 0, "Thread refs wrap %d\n", ecm_front_end_ipv6_thread_refs);
-	spin_unlock_bh(&ecm_front_end_ipv6_lock);
-	wake_up_process(ecm_front_end_ipv6_thread);
-}
-
-/*
- * ecm_front_end_ipv6_connection_final_udp()
- *	Invoked when the connection becomes finalised
- */
-static void ecm_front_end_ipv6_connection_final_udp(void *arg)
-{
-	/*
-	 * No longer need the ref to the thread
-	 */
-	spin_lock_bh(&ecm_front_end_ipv6_lock);
-	ecm_front_end_ipv6_thread_refs--;
-	DEBUG_ASSERT(ecm_front_end_ipv6_thread_refs >= 0, "Thread refs wrap %d\n", ecm_front_end_ipv6_thread_refs);
-	spin_unlock_bh(&ecm_front_end_ipv6_lock);
-	wake_up_process(ecm_front_end_ipv6_thread);
-}
-
-/*
- * ecm_front_end_ipv6_connection_final_non_ported()
- *	Invoked when the connection becomes finalised
- */
-static void ecm_front_end_ipv6_connection_final_non_ported(void *arg)
-{
-	/*
-	 * No longer need the ref to the thread
-	 */
-	spin_lock_bh(&ecm_front_end_ipv6_lock);
-	ecm_front_end_ipv6_thread_refs--;
-	DEBUG_ASSERT(ecm_front_end_ipv6_thread_refs >= 0, "Thread refs wrap %d\n", ecm_front_end_ipv6_thread_refs);
-	spin_unlock_bh(&ecm_front_end_ipv6_lock);
-	wake_up_process(ecm_front_end_ipv6_thread);
-}
-
-/*
- * ecm_front_end_ipv6_node_final()
- *	A node object we created has been destroyed
- */
-static void ecm_front_end_ipv6_node_final(void *arg)
-{
-	/*
-	 * No longer need the ref to the thread
-	 */
-	spin_lock_bh(&ecm_front_end_ipv6_lock);
-	ecm_front_end_ipv6_thread_refs--;
-	DEBUG_ASSERT(ecm_front_end_ipv6_thread_refs >= 0, "Thread refs wrap %d\n", ecm_front_end_ipv6_thread_refs);
-	spin_unlock_bh(&ecm_front_end_ipv6_lock);
-	wake_up_process(ecm_front_end_ipv6_thread);
-}
-
-/*
- * ecm_front_end_ipv6_host_final()
- *	A host object we created has been destroyed
- */
-static void ecm_front_end_ipv6_host_final(void *arg)
-{
-	/*
-	 * No longer need the ref to the thread
-	 */
-	spin_lock_bh(&ecm_front_end_ipv6_lock);
-	ecm_front_end_ipv6_thread_refs--;
-	DEBUG_ASSERT(ecm_front_end_ipv6_thread_refs >= 0, "Thread refs wrap %d\n", ecm_front_end_ipv6_thread_refs);
-	spin_unlock_bh(&ecm_front_end_ipv6_lock);
-	wake_up_process(ecm_front_end_ipv6_thread);
-}
-
-/*
- * ecm_front_end_ipv6_mapping_final()
- *	A mapping object we created has been destroyed
- */
-static void ecm_front_end_ipv6_mapping_final(void *arg)
-{
-	/*
-	 * No longer need the ref to the thread
-	 */
-	spin_lock_bh(&ecm_front_end_ipv6_lock);
-	ecm_front_end_ipv6_thread_refs--;
-	DEBUG_ASSERT(ecm_front_end_ipv6_thread_refs >= 0, "Thread refs wrap %d\n", ecm_front_end_ipv6_thread_refs);
-	spin_unlock_bh(&ecm_front_end_ipv6_lock);
-	wake_up_process(ecm_front_end_ipv6_thread);
-}
-
-/*
  * ecm_front_end_ipv6_node_establish_and_ref()
  *	Returns a reference to a node, possibly creating one if necessary.
  *
@@ -769,19 +671,13 @@ static struct ecm_db_node_instance *ecm_front_end_ipv6_node_establish_and_ref(st
 		return ni;
 	}
 
-	ecm_db_node_add(nni, ii, node_mac_addr, ecm_front_end_ipv6_node_final, nni);
+	ecm_db_node_add(nni, ii, node_mac_addr, NULL, nni);
 
 	/*
 	 * Don't need iface instance now
 	 */
 	ecm_db_iface_deref(ii);
 
-	/*
-	 * Ensure our thread persists (and hence this module) for as long as the connection and its supporting framework is alive
-	 * as we could get callbacks from the database
-	 */
-	ecm_front_end_ipv6_thread_refs++;
-	DEBUG_ASSERT(ecm_front_end_ipv6_thread_refs > 0, "Thread refs wrap %d\n", ecm_front_end_ipv6_thread_refs);
 	spin_unlock_bh(&ecm_front_end_ipv6_lock);
 
 	DEBUG_TRACE("%p: node established\n", nni);
@@ -880,14 +776,8 @@ static struct ecm_db_host_instance *ecm_front_end_ipv6_host_establish_and_ref(st
 		return hi;
 	}
 
-	ecm_db_host_add(nhi, ni, addr, on_link, ecm_front_end_ipv6_host_final, nhi);
+	ecm_db_host_add(nhi, ni, addr, on_link, NULL, nhi);
 
-	/*
-	 * Ensure our thread persists (and hence this module) for as long as the connection and its supporting framework is alive
-	 * as we could get callbacks from the database
-	 */
-	ecm_front_end_ipv6_thread_refs++;
-	DEBUG_ASSERT(ecm_front_end_ipv6_thread_refs > 0, "Thread refs wrap %d\n", ecm_front_end_ipv6_thread_refs);
 	spin_unlock_bh(&ecm_front_end_ipv6_lock);
 
 	/*
@@ -953,14 +843,8 @@ static struct ecm_db_mapping_instance *ecm_front_end_ipv6_mapping_establish_and_
 		return mi;
 	}
 
-	ecm_db_mapping_add(nmi, hi, port, ecm_front_end_ipv6_mapping_final, nmi);
+	ecm_db_mapping_add(nmi, hi, port, NULL, nmi);
 
-	/*
-	 * Ensure our thread persists (and hence this module) for as long as the connection and its supporting framework is alive
-	 * as we could get callbacks from the database
-	 */
-	ecm_front_end_ipv6_thread_refs++;
-	DEBUG_ASSERT(ecm_front_end_ipv6_thread_refs > 0, "Thread refs wrap %d\n", ecm_front_end_ipv6_thread_refs);
 	spin_unlock_bh(&ecm_front_end_ipv6_lock);
 
 	/*
@@ -1745,18 +1629,6 @@ static int ecm_front_end_ipv6_connection_tcp_front_end_deref(struct ecm_front_en
 	kfree(fecti);
 	DEBUG_CLEAR_MAGIC(fecti);
 
-	/*
-	 * No longer need ref to thread for this object
-	 */
-	spin_lock_bh(&ecm_front_end_ipv6_lock);
-	ecm_front_end_ipv6_thread_refs--;
-	DEBUG_ASSERT(ecm_front_end_ipv6_thread_refs >= 0, "Thread refs wrap %d\n", ecm_front_end_ipv6_thread_refs);
-	spin_unlock_bh(&ecm_front_end_ipv6_lock);
-
-	/*
-	 * Thread may be able to exit on object destruction
-	 */
-	wake_up_process(ecm_front_end_ipv6_thread);
 	return 0;
 }
 
@@ -1837,14 +1709,6 @@ static struct ecm_front_end_ipv6_connection_tcp_instance *ecm_front_end_ipv6_con
 	fecti->base.accel_ceased = ecm_front_end_ipv6_connection_tcp_front_end_accel_ceased;
 	fecti->base.xml_state_get = ecm_front_end_ipv6_connection_tcp_front_end_xml_state_get;
 
-	/*
-	 * Ensure our thread persists (and hence this module) for as long as the connection and its supporting framework is alive
-	 * as we could get callbacks from the database
-	 */
-	spin_lock_bh(&ecm_front_end_ipv6_lock);
-	ecm_front_end_ipv6_thread_refs++;
-	DEBUG_ASSERT(ecm_front_end_ipv6_thread_refs > 0, "Thread refs wrap %d\n", ecm_front_end_ipv6_thread_refs);
-	spin_unlock_bh(&ecm_front_end_ipv6_lock);
 	return fecti;
 }
 
@@ -2569,18 +2433,6 @@ static int ecm_front_end_ipv6_connection_udp_front_end_deref(struct ecm_front_en
 	kfree(fecui);
 	DEBUG_CLEAR_MAGIC(fecui);
 
-	/*
-	 * No longer need ref to thread for this object
-	 */
-	spin_lock_bh(&ecm_front_end_ipv6_lock);
-	ecm_front_end_ipv6_thread_refs--;
-	DEBUG_ASSERT(ecm_front_end_ipv6_thread_refs >= 0, "Thread refs wrap %d\n", ecm_front_end_ipv6_thread_refs);
-	spin_unlock_bh(&ecm_front_end_ipv6_lock);
-
-	/*
-	 * Thread may be able to exit on object destruction
-	 */
-	wake_up_process(ecm_front_end_ipv6_thread);
 	return 0;
 }
 
@@ -2661,14 +2513,6 @@ static struct ecm_front_end_ipv6_connection_udp_instance *ecm_front_end_ipv6_con
 	fecui->base.accel_ceased = ecm_front_end_ipv6_connection_udp_front_end_accel_ceased;
 	fecui->base.xml_state_get = ecm_front_end_ipv6_connection_udp_front_end_xml_state_get;
 
-	/*
-	 * Ensure our thread persists (and hence this module) for as long as the connection and its supporting framework is alive
-	 * as we could get callbacks from the database
-	 */
-	spin_lock_bh(&ecm_front_end_ipv6_lock);
-	ecm_front_end_ipv6_thread_refs++;
-	DEBUG_ASSERT(ecm_front_end_ipv6_thread_refs > 0, "Thread refs wrap %d\n", ecm_front_end_ipv6_thread_refs);
-	spin_unlock_bh(&ecm_front_end_ipv6_lock);
 	return fecui;
 }
 
@@ -3421,18 +3265,6 @@ static int ecm_front_end_ipv6_connection_non_ported_front_end_deref(struct ecm_f
 	kfree(fecnpi);
 	DEBUG_CLEAR_MAGIC(fecnpi);
 
-	/*
-	 * No longer need ref to thread for this object
-	 */
-	spin_lock_bh(&ecm_front_end_ipv6_lock);
-	ecm_front_end_ipv6_thread_refs--;
-	DEBUG_ASSERT(ecm_front_end_ipv6_thread_refs >= 0, "Thread refs wrap %d\n", ecm_front_end_ipv6_thread_refs);
-	spin_unlock_bh(&ecm_front_end_ipv6_lock);
-
-	/*
-	 * Thread may be able to exit on object destruction
-	 */
-	wake_up_process(ecm_front_end_ipv6_thread);
 	return 0;
 }
 
@@ -3506,14 +3338,6 @@ static struct ecm_front_end_ipv6_connection_non_ported_instance *ecm_front_end_i
 	fecnpi->base.accel_ceased = ecm_front_end_ipv6_connection_non_ported_front_end_accel_ceased;
 	fecnpi->base.xml_state_get = ecm_front_end_ipv6_connection_non_ported_front_end_xml_state_get;
 
-	/*
-	 * Ensure our thread persists (and hence this module) for as long as the connection and its supporting framework is alive
-	 * as we could get callbacks from the database
-	 */
-	spin_lock_bh(&ecm_front_end_ipv6_lock);
-	ecm_front_end_ipv6_thread_refs++;
-	DEBUG_ASSERT(ecm_front_end_ipv6_thread_refs > 0, "Thread refs wrap %d\n", ecm_front_end_ipv6_thread_refs);
-	spin_unlock_bh(&ecm_front_end_ipv6_lock);
 	return fecnpi;
 }
 
@@ -3844,15 +3668,8 @@ static unsigned int ecm_front_end_ipv6_tcp_process(struct net_device *out_dev, s
 			ecm_db_connection_add(nci, feci, dci,
 					src_mi, dest_mi, src_mi, dest_mi,
 					IPPROTO_TCP, ecm_dir,
-					ecm_front_end_ipv6_connection_final_tcp,
+					NULL /* final callback */,
 					tg, is_routed, nci);
-
-			/*
-			 * Ensure our thread persists (and hence this module) for as long as the connection and its supporting framework is alive
-			 * as we could get callbacks or methods invoked
-			 */
-			ecm_front_end_ipv6_thread_refs++;
-			DEBUG_ASSERT(ecm_front_end_ipv6_thread_refs > 0, "Thread refs wrap %d\n", ecm_front_end_ipv6_thread_refs);
 
 			spin_unlock_bh(&ecm_front_end_ipv6_lock);
 
@@ -4328,15 +4145,8 @@ static unsigned int ecm_front_end_ipv6_udp_process(struct net_device *out_dev, s
 			ecm_db_connection_add(nci, feci, dci,
 					src_mi, dest_mi, src_mi, dest_mi,
 					IPPROTO_UDP, ecm_dir,
-					ecm_front_end_ipv6_connection_final_udp,
+					NULL /* final callback */,
 					tg, is_routed, nci);
-
-			/*
-			 * Ensure our thread persists (and hence this module) for as long as the connection and its supporting framework is alive
-			 * as we could get callbacks or methods invoked
-			 */
-			ecm_front_end_ipv6_thread_refs++;
-			DEBUG_ASSERT(ecm_front_end_ipv6_thread_refs > 0, "Thread refs wrap %d\n", ecm_front_end_ipv6_thread_refs);
 
 			spin_unlock_bh(&ecm_front_end_ipv6_lock);
 
@@ -4773,15 +4583,8 @@ static unsigned int ecm_front_end_ipv6_non_ported_process(struct net_device *out
 			ecm_db_connection_add(nci, feci, dci,
 					src_mi, dest_mi, src_mi, dest_mi,
 					protocol, ecm_dir,
-					ecm_front_end_ipv6_connection_final_non_ported,
+					NULL /* final callback */,
 					tg, is_routed, nci);
-
-			/*
-			 * Ensure our thread persists (and hence this module) for as long as the connection and its supporting framework is alive
-			 * as we could get callbacks or methods invoked
-			 */
-			ecm_front_end_ipv6_thread_refs++;
-			DEBUG_ASSERT(ecm_front_end_ipv6_thread_refs > 0, "Thread refs wrap %d\n", ecm_front_end_ipv6_thread_refs);
 
 			spin_unlock_bh(&ecm_front_end_ipv6_lock);
 
@@ -5773,50 +5576,6 @@ int ecm_front_end_ipv6_conntrack_event(unsigned long events, struct nf_conn *ct)
 EXPORT_SYMBOL(ecm_front_end_ipv6_conntrack_event);
 
 /*
- * ecm_front_end_ipv6_get_terminate()
- */
-static ssize_t ecm_front_end_ipv6_get_terminate(struct sys_device *dev,
-				  struct sysdev_attribute *attr,
-				  char *buf)
-{
-	ssize_t count;
-	unsigned int n;
-
-	spin_lock_bh(&ecm_front_end_ipv6_lock);
-	n = ecm_front_end_ipv6_terminate_pending;
-	spin_unlock_bh(&ecm_front_end_ipv6_lock);
-	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%u\n", n);
-	return count;
-}
-
-/*
- * ecm_front_end_ipv6_set_terminate()
- *	Writing anything to this 'file' will cause the default classifier to terminate
- */
-static ssize_t ecm_front_end_ipv6_set_terminate(struct sys_device *dev,
-				  struct sysdev_attribute *attr,
-				  const char *buf, size_t count)
-{
-	DEBUG_INFO("Terminate\n");
-
-	/*
-	 * Are we already signalled to terminate?
-	 */
-	spin_lock_bh(&ecm_front_end_ipv6_lock);
-	if (ecm_front_end_ipv6_terminate_pending) {
-		spin_unlock_bh(&ecm_front_end_ipv6_lock);
-		return 0;
-	}
-
-	ecm_front_end_ipv6_terminate_pending = true;
-	ecm_front_end_ipv6_thread_refs--;
-	DEBUG_ASSERT(ecm_front_end_ipv6_thread_refs >= 0, "Thread ref wrap %d\n", ecm_front_end_ipv6_thread_refs);
-	wake_up_process(ecm_front_end_ipv6_thread);
-	spin_unlock_bh(&ecm_front_end_ipv6_lock);
-	return count;
-}
-
-/*
  * ecm_front_end_ipv6_get_stop()
  */
 static ssize_t ecm_front_end_ipv6_get_stop(struct sys_device *dev,
@@ -5836,6 +5595,17 @@ static ssize_t ecm_front_end_ipv6_get_stop(struct sys_device *dev,
 	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", num);
 	return count;
 }
+
+void ecm_front_end_ipv6_stop(int num)
+{
+	/*
+	 * Operate under our locks and stop further processing of packets
+	 */
+	spin_lock_bh(&ecm_front_end_ipv6_lock);
+	ecm_front_end_ipv6_stopped = num;
+	spin_unlock_bh(&ecm_front_end_ipv6_lock);
+}
+EXPORT_SYMBOL(ecm_front_end_ipv6_stop);
 
 /*
  * ecm_front_end_ipv6_set_stop()
@@ -5858,12 +5628,7 @@ static ssize_t ecm_front_end_ipv6_set_stop(struct sys_device *dev,
 	sscanf(num_buf, "%d", &num);
 	DEBUG_TRACE("ecm_front_end_ipv6_stop = %d\n", num);
 
-	/*
-	 * Operate under our locks and stop further processing of packets
-	 */
-	spin_lock_bh(&ecm_front_end_ipv6_lock);
-	ecm_front_end_ipv6_stopped = num;
-	spin_unlock_bh(&ecm_front_end_ipv6_lock);
+	ecm_front_end_ipv6_stop(num);
 
 	return count;
 }
@@ -5871,7 +5636,6 @@ static ssize_t ecm_front_end_ipv6_set_stop(struct sys_device *dev,
 /*
  * SysFS attributes for the default classifier itself.
  */
-static SYSDEV_ATTR(terminate, 0644, ecm_front_end_ipv6_get_terminate, ecm_front_end_ipv6_set_terminate);
 static SYSDEV_ATTR(stop, 0644, ecm_front_end_ipv6_get_stop, ecm_front_end_ipv6_set_stop);
 
 /*
@@ -5883,21 +5647,17 @@ static struct sysdev_class ecm_front_end_ipv6_sysclass = {
 };
 
 /*
- * ecm_front_end_ipv6_thread_fn()
- *	A thread to handle tasks that can only be done in thread context.
+ * ecm_front_end_ipv6_init()
  */
-static int ecm_front_end_ipv6_thread_fn(void *arg)
+int ecm_front_end_ipv6_init(void)
 {
 	int result;
-
-	DEBUG_INFO("Thread start\n");
+	DEBUG_INFO("ECM Front end IPv6 init\n");
 
 	/*
-	 * Get reference to this module - we release it when the thread exits
+	 * Initialise our global lock
 	 */
-	if (!try_module_get(THIS_MODULE)) {
-		return -EINVAL;
-	}
+	spin_lock_init(&ecm_front_end_ipv6_lock);
 
 	/*
 	 * Register the sysfs class
@@ -5905,7 +5665,7 @@ static int ecm_front_end_ipv6_thread_fn(void *arg)
 	result = sysdev_class_register(&ecm_front_end_ipv6_sysclass);
 	if (result) {
 		DEBUG_ERROR("Failed to register SysFS class %d\n", result);
-		goto task_cleanup_1;
+		return result;
 	}
 
 	/*
@@ -5917,16 +5677,16 @@ static int ecm_front_end_ipv6_thread_fn(void *arg)
 	result = sysdev_register(&ecm_front_end_ipv6_sys_dev);
 	if (result) {
 		DEBUG_ERROR("Failed to register SysFS device %d\n", result);
-		goto task_cleanup_2;
+		goto task_cleanup_1;
 	}
 
 	/*
 	 * Create files, one for each parameter supported by this module
 	 */
-	result = sysdev_create_file(&ecm_front_end_ipv6_sys_dev, &attr_terminate);
+	result = sysdev_create_file(&ecm_front_end_ipv6_sys_dev, &attr_stop);
 	if (result) {
-		DEBUG_ERROR("Failed to register terminate file %d\n", result);
-		goto task_cleanup_3;
+		DEBUG_ERROR("Failed to register stop file %d\n", result);
+		goto task_cleanup_2;
 	}
 
 	/*
@@ -5935,113 +5695,39 @@ static int ecm_front_end_ipv6_thread_fn(void *arg)
         result = nf_register_hooks(ecm_front_end_ipv6_netfilter_hooks, ARRAY_SIZE(ecm_front_end_ipv6_netfilter_hooks));
         if (result < 0) {
 		DEBUG_ERROR("Can't register netfilter hooks.\n");
-		goto task_cleanup_4;
+		goto task_cleanup_2;
         }
-
-	result = sysdev_create_file(&ecm_front_end_ipv6_sys_dev, &attr_stop);
-	if (result) {
-		DEBUG_ERROR("Failed to register stop file %d\n", result);
-		goto task_cleanup_5;
-	}
 
 	/*
 	 * Register this module with the Linux NSS Network driver
 	 */
 	ecm_front_end_ipv6_nss_ipv6_context = nss_register_ipv6_mgr(ecm_front_end_ipv6_ipv6_net_dev_callback);
 
-	/*
-	 * Allow wakeup signals
-	 */
-	allow_signal(SIGCONT);
-	set_current_state(TASK_INTERRUPTIBLE);
+	return 0;
 
-	spin_lock_bh(&ecm_front_end_ipv6_lock);
-
-	/*
-	 * Set thread refs to 1 - user must terminate us now.
-	 */
-	ecm_front_end_ipv6_thread_refs = 1;
-
-	while (ecm_front_end_ipv6_thread_refs) {
-		/*
-		 * Sleep and wait for an instruction
-		 */
-		spin_unlock_bh(&ecm_front_end_ipv6_lock);
-		DEBUG_TRACE("ecm_front_end sleep\n");
-		schedule();
-		set_current_state(TASK_INTERRUPTIBLE);
-		spin_lock_bh(&ecm_front_end_ipv6_lock);
-	}
-	DEBUG_INFO("ecm_front_end terminate\n");
-	DEBUG_ASSERT(ecm_front_end_ipv6_terminate_pending, "User has not requested terminate\n");
-	spin_unlock_bh(&ecm_front_end_ipv6_lock);
-
-	result = 0;
-
-	/*
-	 * Unregister from the na
-	 */
-	nss_unregister_ipv6_mgr();
-
-
-
-	/*
-	 * Unregister stop file and other stuff
-	 */
-	sysdev_remove_file(&ecm_front_end_ipv6_sys_dev, &attr_stop);
-task_cleanup_5:
-	nf_unregister_hooks(ecm_front_end_ipv6_netfilter_hooks, ARRAY_SIZE(ecm_front_end_ipv6_netfilter_hooks));
-task_cleanup_4:
-	sysdev_remove_file(&ecm_front_end_ipv6_sys_dev, &attr_terminate);
-task_cleanup_3:
-	sysdev_unregister(&ecm_front_end_ipv6_sys_dev);
 task_cleanup_2:
-	sysdev_class_unregister(&ecm_front_end_ipv6_sysclass);
+	sysdev_unregister(&ecm_front_end_ipv6_sys_dev);
 task_cleanup_1:
+	sysdev_class_unregister(&ecm_front_end_ipv6_sysclass);
 
-	module_put(THIS_MODULE);
 	return result;
 }
-
-/*
- * ecm_front_end_ipv6_init()
- */
-static int __init ecm_front_end_ipv6_init(void)
-{
-	DEBUG_INFO("ECM Front end IPv6 init\n");
-
-	/*
-	 * Initialise our global lock
-	 */
-	spin_lock_init(&ecm_front_end_ipv6_lock);
-
-	/*
-	 * Create a thread to handle the start/stop of the database.
-	 * NOTE: We use a thread as some things we need to do cannot be done in this context
-	 */
-	ecm_front_end_ipv6_thread = kthread_create(ecm_front_end_ipv6_thread_fn, NULL, "%s", "ecm_front_end_ipv6_ipv6");
-	if (!ecm_front_end_ipv6_thread) {
-		return -EINVAL;
-	}
-	wake_up_process(ecm_front_end_ipv6_thread);
-	return 0;
-}
+EXPORT_SYMBOL(ecm_front_end_ipv6_init);
 
 /*
  * ecm_front_end_ipv6_exit()
  */
-static void __exit ecm_front_end_ipv6_exit(void)
+void ecm_front_end_ipv6_exit(void)
 {
 	DEBUG_INFO("ECM Front end IPv6 Module exit\n");
-	DEBUG_ASSERT(!ecm_front_end_ipv6_thread_refs, "Thread has refs %d\n", ecm_front_end_ipv6_thread_refs);
+	spin_lock_bh(&ecm_front_end_ipv6_lock);
+	ecm_front_end_ipv6_terminate_pending = true;
+	spin_unlock_bh(&ecm_front_end_ipv6_lock);
+
+	nf_unregister_hooks(ecm_front_end_ipv6_netfilter_hooks,
+			    ARRAY_SIZE(ecm_front_end_ipv6_netfilter_hooks));
+	nss_unregister_ipv6_mgr();
+	sysdev_unregister(&ecm_front_end_ipv6_sys_dev);
+	sysdev_class_unregister(&ecm_front_end_ipv6_sysclass);
 }
-
-module_init(ecm_front_end_ipv6_init)
-module_exit(ecm_front_end_ipv6_exit)
-
-MODULE_AUTHOR("Qualcomm Atheros, Inc.");
-MODULE_DESCRIPTION("ECM Front end IPv6");
-#ifdef MODULE_LICENSE
-MODULE_LICENSE("Dual BSD/GPL");
-#endif
-
+EXPORT_SYMBOL(ecm_front_end_ipv6_exit);

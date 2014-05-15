@@ -1088,27 +1088,19 @@ EXPORT_SYMBOL(ecm_tracker_connection_state_to_string);
 /*
  * ecm_tracker_init()
  */
-static int __init ecm_tracker_init(void)
+int ecm_tracker_init(void)
 {
 	DEBUG_INFO("Tracker Module init\n");
 	spin_lock_init(&ecm_tracker_lock);
 	return 0;
 }
+EXPORT_SYMBOL(ecm_tracker_init);
 
 /*
  * ecm_tracker_exit()
  */
-static void __exit ecm_tracker_exit(void)
+void ecm_tracker_exit(void)
 {
 	DEBUG_INFO("Tracker Module exit\n");
 }
-
-module_init(ecm_tracker_init)
-module_exit(ecm_tracker_exit)
-
-MODULE_AUTHOR("Qualcomm Atheros, Inc.");
-MODULE_DESCRIPTION("ECM Tracker");
-#ifdef MODULE_LICENSE
-MODULE_LICENSE("Dual BSD/GPL");
-#endif
-
+EXPORT_SYMBOL(ecm_tracker_exit);

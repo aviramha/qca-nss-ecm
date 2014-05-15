@@ -608,10 +608,6 @@ int ecm_tracker_tcp_deref_callback(struct ecm_tracker_instance *ti)
 	DEBUG_CLEAR_MAGIC(ttii);
 	kfree(ttii);
 
-	/*
-	 * No longer need module
-	 */
-	module_put(THIS_MODULE);
 	return 0;
 }
 
@@ -1930,15 +1926,6 @@ struct ecm_tracker_tcp_instance *ecm_tracker_tcp_alloc(void)
 		return NULL;
 	}
 
-	/*
-	 * Ensure this module persists for as long as the object persists as we are subject to methods being called.
-	 */
-	if (!try_module_get(THIS_MODULE)) {
-		DEBUG_WARN("Module terminating\n");
-		kfree(ttii);
-		return NULL;
-	}
-
 	ttii->tcp_base.base.ref = ecm_tracker_tcp_ref_callback;
 	ttii->tcp_base.base.deref = ecm_tracker_tcp_deref_callback;
 	ttii->tcp_base.base.datagram_count_get = ecm_tracker_tcp_datagram_count_get_callback;
@@ -2364,10 +2351,6 @@ int ecm_tracker_tcp_reader_deref(struct ecm_tracker_tcp_reader_instance *tri)
 	DEBUG_CLEAR_MAGIC(tri);
 	kfree(tri);
 
-	/*
-	 * No longer need module
-	 */
-	module_put(THIS_MODULE);
 	return 0;
 }
 EXPORT_SYMBOL(ecm_tracker_tcp_reader_deref);
@@ -2382,15 +2365,6 @@ struct ecm_tracker_tcp_reader_instance *ecm_tracker_tcp_reader_alloc(void)
 	tri = (struct ecm_tracker_tcp_reader_instance *)kzalloc(sizeof(struct ecm_tracker_tcp_reader_instance), GFP_ATOMIC | __GFP_NOWARN);
 	if (!tri) {
 		DEBUG_WARN("Failed to allocate tcp reader instance\n");
-		return NULL;
-	}
-
-	/*
-	 * Ensure this module persists for as long as the object persists as we are subject to methods being called.
-	 */
-	if (!try_module_get(THIS_MODULE)) {
-		DEBUG_WARN("Module terminating\n");
-		kfree(tri);
 		return NULL;
 	}
 
@@ -2411,27 +2385,19 @@ EXPORT_SYMBOL(ecm_tracker_tcp_reader_alloc);
 /*
  * ecm_tracker_tcp_module_init()
  */
-static int __init ecm_tracker_tcp_module_init(void)
+int ecm_tracker_tcp_module_init(void)
 {
 	DEBUG_INFO("TCP Tracker Module init\n");
 	spin_lock_init(&ecm_tracker_tcp_lock);
 	return 0;
 }
+EXPORT_SYMBOL(ecm_tracker_tcp_module_init);
 
 /*
  * ecm_tracker_tcp_module_exit()
  */
-static void __exit ecm_tracker_tcp_module_exit(void)
+void ecm_tracker_tcp_module_exit(void)
 {
 	DEBUG_INFO("TCP Tracker Module exit\n");
 }
-
-module_init(ecm_tracker_tcp_module_init)
-module_exit(ecm_tracker_tcp_module_exit)
-
-MODULE_AUTHOR("Qualcomm Atheros, Inc.");
-MODULE_DESCRIPTION("ECM Tracker TCP");
-#ifdef MODULE_LICENSE
-MODULE_LICENSE("Dual BSD/GPL");
-#endif
-
+EXPORT_SYMBOL(ecm_tracker_tcp_module_exit);

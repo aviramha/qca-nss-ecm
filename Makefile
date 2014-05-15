@@ -16,19 +16,22 @@
 # Makefile for the QCA NSS ECM
 # ###################################################
 
-obj-m += ecm_classifier_hyfi.o
-obj-m += ecm_classifier_nl.o
-obj-m += ecm_tracker_udp.o
-obj-m += ecm_tracker_tcp.o
-obj-m += ecm_tracker_datagram.o
-obj-m += ecm_tracker.o
-obj-m += ecm_front_end_ipv4.o
-obj-m += ecm_front_end_ipv6.o
-obj-m += ecm_db.o
-obj-m += ecm_classifier_default.o
-obj-m += ecm_conntrack_notifier.o
-obj-m += ecm_interface.o
-obj-m += ecm_bond_notifier.o
+obj-m += ecm.o
+
+ecm-y := ecm_classifier_hyfi.o \
+	 ecm_classifier_nl.o \
+	 ecm_tracker_udp.o \
+	 ecm_tracker_tcp.o \
+	 ecm_tracker_datagram.o \
+	 ecm_tracker.o \
+	 ecm_front_end_ipv4.o \
+	 ecm_front_end_ipv6.o \
+	 ecm_db.o \
+	 ecm_classifier_default.o \
+	 ecm_conntrack_notifier.o \
+	 ecm_interface.o \
+	 ecm_bond_notifier.o \
+	 ecm_init.o
 
 ccflags-y += -DECM_CLASSIFIER_HYFI_DEBUG_LEVEL=1
 ccflags-y += -DECM_CLASSIFIER_NL_DEBUG_LEVEL=1

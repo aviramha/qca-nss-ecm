@@ -22,5 +22,3 @@ struct ecm_tracker_datagram_instance {
 
 void ecm_tracker_datagram_init(struct ecm_tracker_datagram_instance *dti, int32_t data_limit);
 struct ecm_tracker_datagram_instance *ecm_tracker_datagram_alloc(void);
-void ecm_tracker_datagram_module_get(void);
-void ecm_tracker_datagram_module_put(void);

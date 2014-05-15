@@ -323,10 +323,6 @@ static int ecm_tracker_udp_deref(struct ecm_tracker_udp_internal_instance *utii)
 	DEBUG_CLEAR_MAGIC(utii);
 	kfree(utii);
 
-	/*
-	 * No longer need module
-	 */
-	module_put(THIS_MODULE);
 	return 0;
 }
 
@@ -901,15 +897,6 @@ struct ecm_tracker_udp_instance *ecm_tracker_udp_alloc(void)
 		return NULL;
 	}
 
-	/*
-	 * Ensure this module persists for as long as the object persists as we are subject to methods being called.
-	 */
-	if (!try_module_get(THIS_MODULE)) {
-		DEBUG_WARN("Module terminating\n");
-		kfree(utii);
-		return NULL;
-	}
-
 	utii->udp_base.base.ref = ecm_tracker_udp_ref_callback;
 	utii->udp_base.base.deref = ecm_tracker_udp_deref_callback;
 	utii->udp_base.base.datagram_count_get = ecm_tracker_udp_datagram_count_get_callback;
@@ -947,27 +934,19 @@ EXPORT_SYMBOL(ecm_tracker_udp_alloc);
 /*
  * ecm_tracker_udp_module_init()
  */
-static int __init ecm_tracker_udp_module_init(void)
+int ecm_tracker_udp_module_init(void)
 {
 	DEBUG_INFO("UDP Tracker Module init\n");
 	spin_lock_init(&ecm_tracker_udp_lock);
 	return 0;
 }
+EXPORT_SYMBOL(ecm_tracker_udp_module_init);
 
 /*
  * ecm_tracker_udp_module_exit()
  */
-static void __exit ecm_tracker_udp_module_exit(void)
+void ecm_tracker_udp_module_exit(void)
 {
 	DEBUG_INFO("UDP Tracker Module exit\n");
 }
-
-module_init(ecm_tracker_udp_module_init)
-module_exit(ecm_tracker_udp_module_exit)
-
-MODULE_AUTHOR("Qualcomm Atheros, Inc.");
-MODULE_DESCRIPTION("ECM Tracker UDP");
-#ifdef MODULE_LICENSE
-MODULE_LICENSE("Dual BSD/GPL");
-#endif
-
+EXPORT_SYMBOL(ecm_tracker_udp_module_exit);

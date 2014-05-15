@@ -108,8 +108,6 @@ static bool ecm_classifier_nl_enabled = true;		/* Operational behaviour */
  * Management thread control
  */
 static bool ecm_classifier_nl_terminate_pending = false;		/* True when the user wants us to terminate */
-static int ecm_classifier_nl_thread_refs = 0;			/* Signal to tell the control thread to terminate */
-static struct task_struct *ecm_classifier_nl_thread = NULL;	/* Control thread */
 
 /*
  * Sys dev linkage
@@ -505,11 +503,6 @@ static int ecm_classifier_nl_deref(struct ecm_classifier_instance *ci)
 	cnli->next = NULL;
 	cnli->prev = NULL;
 
-	/*
-	 * Release ref to thread
-	 */
-	ecm_classifier_nl_thread_refs--;
-	DEBUG_ASSERT(ecm_classifier_nl_thread_refs >= 0, "Thread refs wrap %d\n", ecm_classifier_nl_thread_refs);
 	spin_unlock_bh(&ecm_classifier_nl_lock);
 
 	/*
@@ -517,7 +510,6 @@ static int ecm_classifier_nl_deref(struct ecm_classifier_instance *ci)
 	 */
 	DEBUG_INFO("%p: Final Netlink classifier instance\n", cnli);
 	kfree(cnli);
-	wake_up_process(ecm_classifier_nl_thread);
 
 	return 0;
 }
@@ -806,12 +798,6 @@ struct ecm_classifier_nl_instance *ecm_classifier_nl_instance_alloc(struct ecm_d
 	}
 
 	/*
-	 * Ensure our thread persists now
-	 */
-	ecm_classifier_nl_thread_refs++;
-	DEBUG_ASSERT(ecm_classifier_nl_thread_refs > 0, "Thread refs wrap %d\n", ecm_classifier_nl_thread_refs);
-
-	/*
 	 * Link the new instance into our list at the head
 	 */
 	cnli->next = ecm_classifier_nl_instances;
@@ -982,52 +968,6 @@ static ssize_t ecm_classifier_nl_set_command(struct sys_device *dev,
 }
 
 /*
- * ecm_classifier_nl_rule_get_terminate()
- */
-static ssize_t ecm_classifier_nl_rule_get_terminate(struct sys_device *dev,
-				  struct sysdev_attribute *attr,
-				  char *buf)
-{
-	unsigned int n;
-	ssize_t count;
-
-	DEBUG_INFO("ecm_classifier_nl_rule_get_terminate\n");
-	spin_lock_bh(&ecm_classifier_nl_lock);
-	n = ecm_classifier_nl_terminate_pending;
-	spin_unlock_bh(&ecm_classifier_nl_lock);
-	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%u\n", n);
-	return count;
-}
-
-/*
- * ecm_classifier_nl_rule_set_terminate()
- *	Writing anything to this 'file' will cause the user_rule classifier to terminate
- */
-static ssize_t ecm_classifier_nl_rule_set_terminate(struct sys_device *dev,
-				  struct sysdev_attribute *attr,
-				  const char *buf, size_t count)
-{
-	DEBUG_TRACE("Netlink classifier terminate\n");
-	spin_lock_bh(&ecm_classifier_nl_lock);
-
-	/*
-	 * Are we already signalled to terminate?
-	 */
-	if (ecm_classifier_nl_terminate_pending) {
-		spin_unlock_bh(&ecm_classifier_nl_lock);
-		return 0;
-	}
-
-	ecm_classifier_nl_terminate_pending = true;
-	ecm_classifier_nl_thread_refs--;
-	DEBUG_ASSERT(ecm_classifier_nl_thread_refs >= 0, "Thread ref wrap %d\n", ecm_classifier_nl_thread_refs);
-	wake_up_process(ecm_classifier_nl_thread);
-	spin_unlock_bh(&ecm_classifier_nl_lock);
-
-	return count;
-}
-
-/*
  * ecm_classifier_nl_rule_get_enabled()
  */
 static ssize_t ecm_classifier_nl_rule_get_enabled(struct sys_device *dev,
@@ -1081,7 +1021,6 @@ static ssize_t ecm_classifier_nl_rule_set_enabled(struct sys_device *dev,
 /*
  * SysFS attributes for the user_rule classifier itself.
  */
-static SYSDEV_ATTR(terminate, 0644, ecm_classifier_nl_rule_get_terminate, ecm_classifier_nl_rule_set_terminate);
 static SYSDEV_ATTR(enabled, 0644, ecm_classifier_nl_rule_get_enabled, ecm_classifier_nl_rule_set_enabled);
 static SYSDEV_ATTR(cmd, 0200, NULL, ecm_classifier_nl_set_command);
 
@@ -1172,21 +1111,17 @@ static void ecm_classifier_nl_unregister_genl(void)
 }
 
 /*
- * ecm_classifier_nl_thread_fn()
- *	A thread to handle tasks that can only be done in thread context.
+ * ecm_classifier_nl_rules_init()
  */
-static int ecm_classifier_nl_thread_fn(void *arg)
+int ecm_classifier_nl_rules_init(void)
 {
 	int result;
-
-	DEBUG_TRACE("Netlink classifier Thread START\n");
+	DEBUG_INFO("Netlink classifier Module init\n");
 
 	/*
-	 * Get reference to this module - release it when thread exits
+	 * Initialise our global lock
 	 */
-	if (!try_module_get(THIS_MODULE)) {
-		return -EINVAL;
-	}
+	spin_lock_init(&ecm_classifier_nl_lock);
 
 	/*
 	 * Register the sysfs class
@@ -1194,7 +1129,7 @@ static int ecm_classifier_nl_thread_fn(void *arg)
 	result = sysdev_class_register(&ecm_classifier_nl_sysclass);
 	if (result) {
 		DEBUG_WARN("Failed to register SysFS class\n");
-		goto classifier_task_cleanup_1;
+		return result;
 	}
 
 	/*
@@ -1206,125 +1141,52 @@ static int ecm_classifier_nl_thread_fn(void *arg)
 	result = sysdev_register(&ecm_classifier_nl_sys_dev);
 	if (result) {
 		DEBUG_WARN("Failed to register SysFS device\n");
-		goto classifier_task_cleanup_2;
-	}
-
-	result = sysdev_create_file(&ecm_classifier_nl_sys_dev, &attr_terminate);
-	if (result) {
-		DEBUG_WARN("Failed to register terminate SysFS file\n");
-		goto classifier_task_cleanup_3;
+		goto classifier_task_cleanup_1;
 	}
 
 	result = sysdev_create_file(&ecm_classifier_nl_sys_dev, &attr_enabled);
 	if (result) {
 		DEBUG_TRACE("Failed to register enabled SysFS file\n");
-		goto classifier_task_cleanup_4;
+		goto classifier_task_cleanup_2;
 	}
 
 	result = sysdev_create_file(&ecm_classifier_nl_sys_dev, &attr_cmd);
 	if (result) {
 		DEBUG_TRACE("Failed to register cmd SysFS file\n");
-		goto classifier_thread_cleanup_5;
+		goto classifier_task_cleanup_2;
 	}
 
 	result = ecm_classifier_nl_register_genl();
 	if (result) {
 		DEBUG_TRACE("Failed to register genl sockets\n");
-		goto classifier_thread_cleanup_6;
+		goto classifier_task_cleanup_2;
 	}
 
-	/*
-	 * Allow wakeup signals
-	 */
-	allow_signal(SIGCONT);
-	set_current_state(TASK_INTERRUPTIBLE);
-
-	spin_lock_bh(&ecm_classifier_nl_lock);
-
-	/*
-	 * Set thread refs to 1 - user must terminate us now.
-	 */
-	ecm_classifier_nl_thread_refs = 1;
-
-	while (ecm_classifier_nl_thread_refs) {
-		/*
-		 * Sleep and wait for an instruction
-		 */
-		spin_unlock_bh(&ecm_classifier_nl_lock);
-		DEBUG_TRACE("Netlink Classifier SLEEP\n");
-		schedule();
-		set_current_state(TASK_INTERRUPTIBLE);
-		spin_lock_bh(&ecm_classifier_nl_lock);
-	}
-	DEBUG_TRACE("Netlink Classifier TERMINATE\n");
-	DEBUG_ASSERT(ecm_classifier_nl_terminate_pending, "User has not requested terminate\n");
-
-	/*
-	 * If we are terminating then there should be no state remaining - or our linkage into the database will be messed up.
-	 */
-	DEBUG_ASSERT((ecm_classifier_nl_instances == NULL)
-			&& (ecm_classifier_nl_count == 0), "state is still active\n");
-
-	spin_unlock_bh(&ecm_classifier_nl_lock);
-
-	result = 0;
-
-	ecm_classifier_nl_unregister_genl();
-classifier_thread_cleanup_6:
-	sysdev_remove_file(&ecm_classifier_nl_sys_dev, &attr_cmd);
-classifier_thread_cleanup_5:
-	sysdev_remove_file(&ecm_classifier_nl_sys_dev, &attr_enabled);
-classifier_task_cleanup_4:
-	sysdev_remove_file(&ecm_classifier_nl_sys_dev, &attr_terminate);
-classifier_task_cleanup_3:
-	sysdev_unregister(&ecm_classifier_nl_sys_dev);
-classifier_task_cleanup_2:
-	sysdev_class_unregister(&ecm_classifier_nl_sysclass);
-classifier_task_cleanup_1:
-
-	module_put(THIS_MODULE);
-	return result;
-}
-
-/*
- * ecm_classifier_nl_rules_init()
- */
-static int __init ecm_classifier_nl_rules_init(void)
-{
-	DEBUG_INFO("Netlink classifier Module init\n");
-
-	/*
-	 * Initialise our global lock
-	 */
-	spin_lock_init(&ecm_classifier_nl_lock);
-
-	/*
-	 * Create a thread to handle the start/stop of operation.
-	 * NOTE: We use a thread as some things we need to do cannot be done in this context
-	 */
-	ecm_classifier_nl_thread = kthread_create(ecm_classifier_nl_thread_fn, NULL, "%s", "ecm_classifier_nl");
-	if (!ecm_classifier_nl_thread) {
-		return -EINVAL;
-	}
-	wake_up_process(ecm_classifier_nl_thread);
 	return 0;
+
+classifier_task_cleanup_2:
+	sysdev_unregister(&ecm_classifier_nl_sys_dev);
+classifier_task_cleanup_1:
+	sysdev_class_unregister(&ecm_classifier_nl_sysclass);
+
+	return result;
+
 }
+EXPORT_SYMBOL(ecm_classifier_nl_rules_init);
 
 /*
  * ecm_classifier_nl_rules_exit()
  */
-static void __exit ecm_classifier_nl_rules_exit(void)
+void ecm_classifier_nl_rules_exit(void)
 {
 	DEBUG_INFO("Netlink classifier Module exit\n");
-	DEBUG_ASSERT(!ecm_classifier_nl_thread_refs, "Thread has refs %d\n", ecm_classifier_nl_thread_refs);
+
+	spin_lock_bh(&ecm_classifier_nl_lock);
+	ecm_classifier_nl_terminate_pending = true;
+	spin_unlock_bh(&ecm_classifier_nl_lock);
+
+	ecm_classifier_nl_unregister_genl();
+	sysdev_unregister(&ecm_classifier_nl_sys_dev);
+	sysdev_class_unregister(&ecm_classifier_nl_sysclass);
 }
-
-module_init(ecm_classifier_nl_rules_init)
-module_exit(ecm_classifier_nl_rules_exit)
-
-MODULE_AUTHOR("Qualcomm Atheros, Inc.");
-MODULE_DESCRIPTION("ECM Netlink classifier");
-#ifdef MODULE_LICENSE
-MODULE_LICENSE("Dual BSD/GPL");
-#endif
-
+EXPORT_SYMBOL(ecm_classifier_nl_rules_exit);
