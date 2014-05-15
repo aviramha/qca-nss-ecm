@@ -56,6 +56,8 @@
 #include <linux/../../net/8021q/vlan.h>
 #include <linux/if_vlan.h>
 #include <linux/../../net/offload/offload.h>
+#include <linux/netfilter/xt_dscp.h>
+#include <net/netfilter/nf_conntrack_dscpremark_ext.h>
 
 /*
  * Debug output levels
@@ -1422,10 +1424,21 @@ static void ecm_front_end_ipv6_connection_tcp_front_end_accelerate(struct ecm_fr
 		create.flags |= NSS_IPV6_CREATE_FLAG_NO_SEQ_CHECK;
 	} else {
 		struct nf_conn *ct;
+		struct nf_ct_dscpremark_ext *dscpcte;
+
 		ct = nf_ct_tuplehash_to_ctrack(h);
+		spin_lock_bh(&ct->lock);
+		dscpcte = nf_ct_dscpremark_ext_find(ct);
+
+		/*
+		 * Update DSCP & QOS information
+		 */
+		create.flow_qos_tag = dscpcte->flow_priority;
+		create.flow_dscp = dscpcte->flow_dscp;
+		create.return_qos_tag = dscpcte->reply_priority;
+		create.return_dscp = dscpcte->reply_dscp;
 
 		DEBUG_TRACE("%p: TCP Accel Get window data from ct %p for conn %p\n", fecti, ct, fecti->ci);
-		spin_lock_bh(&ct->lock);
 		create.flow_window_scale = ct->proto.tcp.seen[0].td_scale;
 		create.flow_max_window = ct->proto.tcp.seen[0].td_maxwin;
 		create.flow_end = ct->proto.tcp.seen[0].td_end;
@@ -2278,6 +2291,7 @@ static void ecm_front_end_ipv6_connection_udp_front_end_accelerate(struct ecm_fr
 	h = nf_conntrack_find_get(&init_net, NF_CT_DEFAULT_ZONE, &tuple);
 	if (h) {
 		struct nf_conn *ct;
+
 		ct = nf_ct_tuplehash_to_ctrack(h);
 
 		/*
@@ -3619,7 +3633,7 @@ static bool ecm_front_end_ipv6_reclassify(struct ecm_db_connection_instance *ci,
  *	Process a TCP packet
  */
 static unsigned int ecm_front_end_ipv6_tcp_process(struct net_device *out_dev, struct net_device *in_dev, bool can_accel,  bool is_routed, struct sk_buff *skb,
-							struct ecm_tracker_ip_header *ip_hdr,
+							struct ecm_tracker_ip_header *iph,
 							struct nf_conn *ct, enum ip_conntrack_dir ct_dir, ecm_db_direction_t ecm_dir,
 							struct nf_conntrack_tuple *orig_tuple, struct nf_conntrack_tuple *reply_tuple,
 							ip_addr_t ip_src_addr, ip_addr_t ip_dest_addr)
@@ -3636,11 +3650,12 @@ static unsigned int ecm_front_end_ipv6_tcp_process(struct net_device *out_dev, s
 	int assignment_count;
 	ecm_db_timer_group_t ci_orig_timer_group;
 	struct ecm_classifier_process_response prevalent_pr;
+	struct nf_ct_dscpremark_ext *dscpcte;
 
 	/*
 	 * Extract TCP header to obtain port information
 	 */
-	tcp_hdr = ecm_tracker_tcp_check_header_and_read(skb, ip_hdr, &tcp_hdr_buff);
+	tcp_hdr = ecm_tracker_tcp_check_header_and_read(skb, iph, &tcp_hdr_buff);
 	if (unlikely(!tcp_hdr)) {
 		DEBUG_WARN("TCP packet header %p\n", skb);
 		return NF_DROP;
@@ -3972,7 +3987,7 @@ static unsigned int ecm_front_end_ipv6_tcp_process(struct net_device *out_dev, s
 
 		aci = assignments[aci_index];
 		DEBUG_TRACE("%p: process: %p, type: %d\n", ci, aci, aci->type_get(aci));
-		aci->process(aci, sender, ip_hdr, skb, &aci_pr);
+		aci->process(aci, sender, iph, skb, &aci_pr);
 		DEBUG_TRACE("%p: aci_pr: process actions: %x, became relevant: %u, relevance: %d, drop: %d, qos_tag: %u, accel_mode: %x, timer_group: %d\n",
 				ci, aci_pr.process_actions, aci_pr.became_relevant, aci_pr.relevance, aci_pr.drop, aci_pr.qos_tag, aci_pr.accel_mode, aci_pr.timer_group);
 
@@ -4065,6 +4080,25 @@ static unsigned int ecm_front_end_ipv6_tcp_process(struct net_device *out_dev, s
 	skb->priority = prevalent_pr.qos_tag;
 	DEBUG_TRACE("%p: skb priority: %u\n", ci, skb->priority);
 
+	dscpcte = nf_ct_dscpremark_ext_find(ct);
+	if (!dscpcte) {
+		DEBUG_TRACE("ct %p does not have any conntrack extention !!!!!!!!!!!!!!!!\n");
+		return NF_ACCEPT;
+	}
+
+	/*
+	 * Extract the priority and DSCP information from skb and store into ct extention
+	 */
+	if (ct_dir == IP_CT_DIR_ORIGINAL) {
+		dscpcte->flow_priority = skb->priority;
+		dscpcte->flow_dscp = ipv4_get_dsfield(ip_hdr(skb)) >> XT_DSCP_SHIFT;
+		DEBUG_TRACE("Flow DSCP: %x Flow priority: %d\n", dscpcte->flow_dscp, dscpcte->flow_priority);
+	} else {
+		dscpcte->reply_priority = skb->priority;
+		dscpcte->reply_dscp = ipv4_get_dsfield(ip_hdr(skb)) >> XT_DSCP_SHIFT;
+		DEBUG_TRACE("Return DSCP: %x Return priority: %d\n", dscpcte->reply_dscp, dscpcte->reply_priority);
+	}
+
 	/*
 	 * Accelerate?
 	 */
@@ -4085,7 +4119,7 @@ static unsigned int ecm_front_end_ipv6_tcp_process(struct net_device *out_dev, s
  *	Process a UDP packet
  */
 static unsigned int ecm_front_end_ipv6_udp_process(struct net_device *out_dev, struct net_device *in_dev, bool can_accel, bool is_routed, struct sk_buff *skb,
-							struct ecm_tracker_ip_header *ip_hdr,
+							struct ecm_tracker_ip_header *iph,
 							struct nf_conn *ct, enum ip_conntrack_dir ct_dir, ecm_db_direction_t ecm_dir,
 							struct nf_conntrack_tuple *orig_tuple, struct nf_conntrack_tuple *reply_tuple,
 							ip_addr_t ip_src_addr, ip_addr_t ip_dest_addr)
@@ -4106,7 +4140,7 @@ static unsigned int ecm_front_end_ipv6_udp_process(struct net_device *out_dev, s
 	/*
 	 * Extract UDP header to obtain port information
 	 */
-	udp_hdr = ecm_tracker_udp_check_header_and_read(skb, ip_hdr, &udp_hdr_buff);
+	udp_hdr = ecm_tracker_udp_check_header_and_read(skb, iph, &udp_hdr_buff);
 	if (unlikely(!udp_hdr)) {
 		DEBUG_WARN("Invalid UDP header in skb %p\n", skb);
 		return NF_DROP;
@@ -4437,7 +4471,7 @@ static unsigned int ecm_front_end_ipv6_udp_process(struct net_device *out_dev, s
 
 		aci = assignments[aci_index];
 		DEBUG_TRACE("%p: process: %p, type: %d\n", ci, aci, aci->type_get(aci));
-		aci->process(aci, sender, ip_hdr, skb, &aci_pr);
+		aci->process(aci, sender, iph, skb, &aci_pr);
 		DEBUG_TRACE("%p: aci_pr: process actions: %x, became relevant: %u, relevance: %d, drop: %d, qos_tag: %u, accel_mode: %x, timer_group: %d\n",
 				ci, aci_pr.process_actions, aci_pr.became_relevant, aci_pr.relevance, aci_pr.drop, aci_pr.qos_tag, aci_pr.accel_mode, aci_pr.timer_group);
 
