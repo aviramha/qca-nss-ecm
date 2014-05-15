@@ -1825,7 +1825,7 @@ static int ecm_tracker_tcp_sender_xml_state_get(char *buf, int buf_sz, ecm_track
 			(data->seq_no_valid)? "yes" : "no",
 			data->recvd_bytes_total,
 			data->recvd_count,
-			ecm_tracker_sender_state_to_string[state->state],
+			ecm_tracker_sender_state_to_string(state->state),
 			state->syn_seq,
 			state->fin_seq);
 }
@@ -1861,7 +1861,7 @@ static int ecm_tracker_tcp_xml_state_get_callback(struct ecm_tracker_instance *t
 	 * Output our opening element
 	 */
 	count = snprintf(buf, buf_sz, "<tcp_tracker connection_state=\"%s\" data_limit=\"%d\">",
-			ecm_tracker_connection_state_to_string[connection_state],
+			ecm_tracker_connection_state_to_string(connection_state),
 			data_limit);
 	if ((count <= 0) || (count >= buf_sz)) {
 		return -1;

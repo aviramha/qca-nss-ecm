@@ -673,9 +673,9 @@ static int ecm_tracker_datagram_xml_state_get_callback(struct ecm_tracker_instan
 			dest_bytes_total,
 			data_limit,
 			ECM_DB_TIMER_GROUPS_CONNECTION_GENERIC_TIMEOUT,
-			ecm_tracker_sender_state_to_string[sender_state[ECM_TRACKER_SENDER_TYPE_SRC]],
-			ecm_tracker_sender_state_to_string[sender_state[ECM_TRACKER_SENDER_TYPE_DEST]],
-			ecm_tracker_connection_state_to_string[connection_state]);
+			ecm_tracker_sender_state_to_string(sender_state[ECM_TRACKER_SENDER_TYPE_SRC]),
+			ecm_tracker_sender_state_to_string(sender_state[ECM_TRACKER_SENDER_TYPE_DEST]),
+			ecm_tracker_connection_state_to_string(connection_state));
 }
 
 /*

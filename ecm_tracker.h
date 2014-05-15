@@ -52,15 +52,8 @@ typedef enum ecm_tracker_sender_states ecm_tracker_sender_state_t;
  * ecm_tracker_sender_state_to_string[]
  *	Convert a sender state to a string
  */
-char *ecm_tracker_sender_state_to_string[] =
-{
-	"Unknown",
-	"Establishing",
-	"Established",
-	"Closing",
-	"Closed",
-	"Fault"
-};
+const char *
+ecm_tracker_sender_state_to_string(enum ecm_tracker_sender_states);
 
 /*
  * enum ecm_tracker_connection_states
@@ -79,17 +72,11 @@ enum ecm_tracker_connection_states {
 typedef enum ecm_tracker_connection_states ecm_tracker_connection_state_t;
 
 /*
- * ecm_tracker_connection_state_to_string[]
+ * ecm_tracker_connection_state_to_string
  *	Convert a connection state to a string
  */
-char *ecm_tracker_connection_state_to_string[] =
-{
-	"Establishing",
-	"Established",
-	"Closing",
-	"Closed",
-	"Fault"
-};
+const char *
+ecm_tracker_connection_state_to_string(enum ecm_tracker_connection_states);
 
 /*
  * enum ecm_tracker_ip_protocol_types

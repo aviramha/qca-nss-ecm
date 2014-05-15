@@ -357,6 +357,23 @@ static struct ecm_tracker_ip_protocols {
 	{255, ECM_TRACKER_IP_PROTOCOL_TYPE_UNKNOWN, "255", ecm_tracker_ip_header_helper_unknown}
 };
 
+static char *ecm_tracker_sender_state_strings[] = {
+	"Unknown",
+	"Establishing",
+	"Established",
+	"Closing",
+	"Closed",
+	"Fault"
+};
+
+static char *ecm_tracker_connection_state_strings[] = {
+	"Establishing",
+	"Established",
+	"Closing",
+	"Closed",
+	"Fault"
+};
+
 /*
  * ecm_tracker_ip_check_header_and_read()
  *	Check that we have a complete network-level IPv4 or V6 header, check it and return true if so.
@@ -1053,6 +1070,20 @@ void ecm_tracker_module_put(void)
 	module_put(THIS_MODULE);
 }
 EXPORT_SYMBOL(ecm_tracker_module_put);
+
+const char *
+ecm_tracker_sender_state_to_string(enum ecm_tracker_sender_states s)
+{
+	return ecm_tracker_sender_state_strings[s];
+}
+EXPORT_SYMBOL(ecm_tracker_sender_state_to_string);
+
+const char *
+ecm_tracker_connection_state_to_string(enum ecm_tracker_connection_states s)
+{
+	return ecm_tracker_connection_state_strings[s];
+}
+EXPORT_SYMBOL(ecm_tracker_connection_state_to_string);
 
 /*
  * ecm_tracker_init()
