@@ -39,7 +39,6 @@ int ecm_db_connection_from_port_get(struct ecm_db_connection_instance *ci);
 int ecm_db_connection_from_port_nat_get(struct ecm_db_connection_instance *ci);
 
 void ecm_db_node_adress_get(struct ecm_db_node_instance *ni, uint8_t *address_buffer);
-void ecm_db_iface_adress_get(struct ecm_db_iface_instance *ii, uint8_t *address_buffer);
 
 void ecm_db_connection_from_node_address_get(struct ecm_db_connection_instance *ci, uint8_t *address_buffer);
 void ecm_db_connection_to_node_address_get(struct ecm_db_connection_instance *ci, uint8_t *address_buffer);
