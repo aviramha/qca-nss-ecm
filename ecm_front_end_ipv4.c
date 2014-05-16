@@ -1329,7 +1329,8 @@ static struct ecm_front_end_ipv4_connection_tcp_instance *ecm_front_end_ipv4_con
  *	Accelerate a connection
  */
 static void ecm_front_end_ipv4_connection_udp_front_end_accelerate(struct ecm_front_end_connection_instance *feci,
-									struct ecm_classifier_process_response *pr)
+									struct ecm_classifier_process_response *pr,
+									struct nf_conn *ct)
 {
 	struct ecm_front_end_ipv4_connection_udp_instance *fecui = (struct ecm_front_end_ipv4_connection_udp_instance *)feci;
 	int32_t from_ifaces_first;
@@ -1342,8 +1343,7 @@ static void ecm_front_end_ipv4_connection_udp_front_end_accelerate(struct ecm_fr
 	int32_t to_nss_iface_id;
 	uint8_t from_nss_iface_address[ETH_ALEN];
 	uint8_t to_nss_iface_address[ETH_ALEN];
-	struct nf_conntrack_tuple_hash *h;
-	struct nf_conntrack_tuple tuple;
+	struct nf_ct_dscpremark_ext *dscpcte;
 	ip_addr_t addr;
 	struct nss_ipv4_create create;
 	struct ecm_classifier_instance *assignments[ECM_CLASSIFIER_TYPES];
@@ -1782,56 +1782,45 @@ static void ecm_front_end_ipv4_connection_udp_front_end_accelerate(struct ecm_fr
 	ecm_db_connection_to_node_address_get(fecui->ci, create.dest_mac_xlate);
 
 	/*
-	 * Need window scaling and remarking information if available
-	 * Start by looking up the conntrack connection
+	 * Update DSCP & QOS information
 	 */
-	memset(&tuple, 0, sizeof(tuple));
-	tuple.src.u3.ip = htonl(create.src_ip);
-	tuple.src.u.all = (__be16)htons(create.src_port);
-	tuple.src.l3num = AF_INET;
+	spin_lock_bh(&ct->lock);
+	dscpcte = nf_ct_dscpremark_ext_find(ct);
 
-	tuple.dst.u3.ip = htonl(create.dest_ip);
-	tuple.dst.dir = IP_CT_DIR_ORIGINAL;
-	tuple.dst.protonum = (uint8_t)IPPROTO_UDP;
-	tuple.dst.u.all = (__be16)htons(create.dest_port);
+	create.flow_qos_tag = dscpcte->flow_priority;
+	create.flow_dscp = dscpcte->flow_dscp;
+	create.return_qos_tag = dscpcte->reply_priority;
+	create.return_dscp = dscpcte->reply_dscp;
+	spin_unlock_bh(&ct->lock);
 
-	h = nf_conntrack_find_get(&init_net, NF_CT_DEFAULT_ZONE, &tuple);
-	if (h) {
-		struct nf_conn *ct;
+	/*
+	 * Initialize DSCP MARKING information
+	 */
+	if (offload_dscpremark_get_target_info(ct, &create.dscp_imask, &create.dscp_itag, &create.dscp_omask, &create.dscp_oval)) {
+		DEBUG_TRACE("%p: DSCP remark information present on: %p\n\timask: %x, itag: %x, omask: %x, oval: %x\n",
+			fecui->ci, ct, create.dscp_imask, create.dscp_itag, create.dscp_omask, create.dscp_oval);
+		create.flags |= NSS_IPV4_CREATE_FLAG_DSCP_MARKING;
+	} else {
+		DEBUG_TRACE("%p: DSCP remark information is not present on: %p\n", fecui->ci, ct);
+		create.dscp_itag = ECM_NSS_CONNMGR_DSCP_MARKING_NOT_CONFIGURED;
+		create.dscp_imask = ECM_NSS_CONNMGR_DSCP_MARKING_NOT_CONFIGURED;
+		create.dscp_omask = ECM_NSS_CONNMGR_DSCP_MARKING_NOT_CONFIGURED;
+		create.dscp_oval = ECM_NSS_CONNMGR_DSCP_MARKING_NOT_CONFIGURED;
+	}
 
-		ct = nf_ct_tuplehash_to_ctrack(h);
-
-		/*
-		 * Initialize DSCP MARKING information
-		 */
-		if (offload_dscpremark_get_target_info(ct, &create.dscp_imask, &create.dscp_itag, &create.dscp_omask, &create.dscp_oval)) {
-			DEBUG_TRACE("%p: DSCP remark information present on: %p\n\timask: %x, itag: %x, omask: %x, oval: %x\n",
-				fecui->ci, ct, create.dscp_imask, create.dscp_itag, create.dscp_omask, create.dscp_oval);
-			create.flags |= NSS_IPV4_CREATE_FLAG_DSCP_MARKING;
-		} else {
-			DEBUG_TRACE("%p: DSCP remark information is not present on: %p\n", fecui->ci, ct);
-			create.dscp_itag = ECM_NSS_CONNMGR_DSCP_MARKING_NOT_CONFIGURED;
-			create.dscp_imask = ECM_NSS_CONNMGR_DSCP_MARKING_NOT_CONFIGURED;
-			create.dscp_omask = ECM_NSS_CONNMGR_DSCP_MARKING_NOT_CONFIGURED;
-			create.dscp_oval = ECM_NSS_CONNMGR_DSCP_MARKING_NOT_CONFIGURED;
-		}
-
-		/*
-		 * Initialize VLAN MARKING information
-		 */
-		if (offload_vlantag_get_target_info(ct, &create.vlan_imask, &create.vlan_itag, &create.vlan_omask, &create.vlan_oval)) {
-			DEBUG_TRACE("%p: VLAN marking information present on: %p\n\timask: %x, itag: %x, omask: %x, oval: %x\n",
-				fecui->ci, ct, create.vlan_imask, create.vlan_itag, create.vlan_omask, create.vlan_oval);
-			create.flags |= NSS_IPV4_CREATE_FLAG_VLAN_MARKING;
-		} else {
-			DEBUG_TRACE("%p: VLAN marking information is not present on: %p\n", fecui->ci, ct);
-			create.vlan_itag = ECM_NSS_CONNMGR_VLAN_MARKING_NOT_CONFIGURED;
-			create.vlan_imask= ECM_NSS_CONNMGR_VLAN_MARKING_NOT_CONFIGURED;
-			create.vlan_omask = ECM_NSS_CONNMGR_VLAN_MARKING_NOT_CONFIGURED;
-			create.vlan_oval = ECM_NSS_CONNMGR_VLAN_MARKING_NOT_CONFIGURED;
-		}
-
-		nf_ct_put(ct);
+	/*
+	 * Initialize VLAN MARKING information
+	 */
+	if (offload_vlantag_get_target_info(ct, &create.vlan_imask, &create.vlan_itag, &create.vlan_omask, &create.vlan_oval)) {
+		DEBUG_TRACE("%p: VLAN marking information present on: %p\n\timask: %x, itag: %x, omask: %x, oval: %x\n",
+			fecui->ci, ct, create.vlan_imask, create.vlan_itag, create.vlan_omask, create.vlan_oval);
+		create.flags |= NSS_IPV4_CREATE_FLAG_VLAN_MARKING;
+	} else {
+		DEBUG_TRACE("%p: VLAN marking information is not present on: %p\n", fecui->ci, ct);
+		create.vlan_itag = ECM_NSS_CONNMGR_VLAN_MARKING_NOT_CONFIGURED;
+		create.vlan_imask= ECM_NSS_CONNMGR_VLAN_MARKING_NOT_CONFIGURED;
+		create.vlan_omask = ECM_NSS_CONNMGR_VLAN_MARKING_NOT_CONFIGURED;
+		create.vlan_oval = ECM_NSS_CONNMGR_VLAN_MARKING_NOT_CONFIGURED;
 	}
 
 	/*
@@ -3721,6 +3710,7 @@ static unsigned int ecm_front_end_ipv4_udp_process(struct net_device *out_dev, s
 	ecm_tracker_sender_type_t sender;
 	ip_addr_t match_addr;
 	struct ecm_classifier_instance *assignments[ECM_CLASSIFIER_TYPES];
+	struct nf_ct_dscpremark_ext *dscpcte;
 	int aci_index;
 	int assignment_count;
 	ecm_db_timer_group_t ci_orig_timer_group;
@@ -4225,6 +4215,25 @@ static unsigned int ecm_front_end_ipv4_udp_process(struct net_device *out_dev, s
 	skb->priority = prevalent_pr.qos_tag;
 	DEBUG_TRACE("%p: skb priority: %u\n", ci, skb->priority);
 
+	dscpcte = nf_ct_dscpremark_ext_find(ct);
+	if (!dscpcte) {
+		DEBUG_TRACE("ct %p does not have any conntrack extention !!!!!!!!!!!!!!!!\n");
+		return NF_ACCEPT;
+	}
+
+	/*
+	 * Extract the priority and DSCP from skb and store into ct extention
+	 */
+	if (ct_dir == IP_CT_DIR_ORIGINAL) {
+		dscpcte->flow_priority = skb->priority;
+		dscpcte->flow_dscp = ipv4_get_dsfield(ip_hdr(skb)) >> XT_DSCP_SHIFT;
+		DEBUG_TRACE("Flow DSCP: %x Flow priority: %d\n", dscpcte->flow_dscp, dscpcte->flow_priority);
+	} else {
+		dscpcte->reply_priority = skb->priority;
+		dscpcte->reply_dscp = ipv4_get_dsfield(ip_hdr(skb)) >> XT_DSCP_SHIFT;
+		DEBUG_TRACE("Return DSCP: %x Return priority: %d\n", dscpcte->reply_dscp, dscpcte->reply_priority);
+	}
+
 	/*
 	 * Accelerate?
 	 */
@@ -4232,7 +4241,7 @@ static unsigned int ecm_front_end_ipv4_udp_process(struct net_device *out_dev, s
 		struct ecm_front_end_connection_instance *feci;
 		DEBUG_TRACE("%p: accel\n", ci);
 		feci = ecm_db_connection_front_end_get_and_ref(ci);
-		ecm_front_end_ipv4_connection_udp_front_end_accelerate(feci, &prevalent_pr);
+		ecm_front_end_ipv4_connection_udp_front_end_accelerate(feci, &prevalent_pr, ct);
 		feci->deref(feci);
 	}
 	ecm_db_connection_deref(ci);
