@@ -102,7 +102,7 @@ struct ecm_classifier_nl_instance {
 /*
  * Operational control
  */
-static bool ecm_classifier_nl_enabled = true;		/* Operational behaviour */
+static bool ecm_classifier_nl_enabled = false;		/* Operational behaviour */
 
 /*
  * Management thread control
