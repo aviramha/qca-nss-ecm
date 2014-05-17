@@ -152,8 +152,8 @@ static int ecm_conntrack_event(unsigned int events, struct nf_ct_event *item)
 		return ecm_front_end_ipv4_conntrack_event(events, ct);
 	} else if (nf_ct_l3num(ct) == AF_INET6) {
 //GGG TODO		return ecm_ipv6_front_end_conntrack_event(events, ct);
-	} 
-	
+	}
+
 	return NOTIFY_DONE;
 }
 
@@ -367,7 +367,7 @@ static int ecm_conntrack_notifier_thread_fn(void *arg)
 
 	while (ecm_conntrack_notifier_thread_refs) {
 		/*
-		 * Sleep and wait for an instruction 
+		 * Sleep and wait for an instruction
 		 */
 		spin_unlock_bh(&ecm_conntrack_notifier_lock);
 		DEBUG_TRACE("ecm_conntrack_notifier sleep\n");

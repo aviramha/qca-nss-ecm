@@ -158,7 +158,7 @@ struct ecm_tracker_tcp_host_data {
 	struct sk_buff *future;				/* A list of skb's that are in the "future" (sequence space wise) and need more sequence space
 							 * received to join the 'gap' allowing their use.
 							 */
-	
+
 };
 
 /*
@@ -312,7 +312,7 @@ struct tcphdr *ecm_tracker_tcp_check_header_and_read(struct sk_buff *skb, struct
 }
 EXPORT_SYMBOL(ecm_tracker_tcp_check_header_and_read);
 
-/* 
+/*
  * ecm_tracker_tcp_bytes_discard()
  *	Discard n bytes from the available in_order bytes
  */
@@ -412,7 +412,7 @@ static void ecm_tracker_tcp_bytes_discard(struct ecm_tracker_tcp_internal_instan
 	}
 }
 
-/* 
+/*
  * ecm_tracker_tcp_bytes_discard_callback()
  *	Discard n bytes from the available stream bytes
  */
@@ -442,7 +442,7 @@ static void ecm_tracker_tcp_datagram_discard_callback(struct ecm_tracker_instanc
 	struct ecm_tracker_tcp_internal_instance *ttii = (struct ecm_tracker_tcp_internal_instance *)ti;
 	struct ecm_tracker_tcp_host_data *data;
 	struct sk_buff *skb;
-	uint32_t seqs_discard;	
+	uint32_t seqs_discard;
 
 	DEBUG_CHECK_MAGIC(ttii, ECM_TRACKER_TCP_INSTANCE_MAGIC, "%p: magic failed", ttii);
 	DEBUG_ASSERT((sender >= 0) && (sender <= 1), "%p: invalid sender %d\n", ttii, sender);
@@ -517,7 +517,7 @@ static void _ecm_tracker_tcp_discard_all(struct ecm_tracker_tcp_internal_instanc
 			 */
 			data->recvd_order = skb_cb->next;
 			data->recvd_count--;
-			
+
 			/*
 			 * Destroy
 			 */
@@ -604,7 +604,7 @@ int ecm_tracker_tcp_deref_callback(struct ecm_tracker_instance *ti)
 	DEBUG_ASSERT(ecm_tracker_tcp_count >= 0, "%p: tracker count wrap", ttii);
 	spin_unlock_bh(&ecm_tracker_tcp_lock);
 
-	DEBUG_INFO("%p: TCP tracker final\n", ttii);	
+	DEBUG_INFO("%p: TCP tracker final\n", ttii);
 	DEBUG_CLEAR_MAGIC(ttii);
 	kfree(ttii);
 
@@ -726,7 +726,7 @@ static int ecm_tracker_tcp_datagram_read_callback(struct ecm_tracker_instance *t
  * SPACE:    --------------CCCCCCCC-------
  * FUTURE:   ------------------------FFF--
  * NEW:      ----------------------NNNNNN
- * As you can see the future data is now rendered old by the arrival of sequences 
+ * As you can see the future data is now rendered old by the arrival of sequences
  *
  * NOTE: The future data list may also contain duplicate future data - we weren't that fussy when we inserted the segment into the future list.
  */
@@ -754,7 +754,7 @@ static void _ecm_tracker_tcp_data_future_replay(struct ecm_tracker_tcp_internal_
 		new_seqs = (int32_t)(skb_cb->num_seqs + in_sequence);
 		offset = -in_sequence;
 		DEBUG_TRACE("%p: FUTURE REPLAY %p: in_sequence: %d, new_seqs: %d, offset: %d\n", ttii, skb, in_sequence, new_seqs, offset);
-		
+
 		/*
 		 * Is the segment still in the future?
 		 */
@@ -817,7 +817,7 @@ static void _ecm_tracker_tcp_data_future_replay(struct ecm_tracker_tcp_internal_
 
 			/*
 			 * Release skb containing obsoleted data
-			 */			
+			 */
 			dev_kfree_skb_any(skb);
 			continue;
 		}
@@ -1053,7 +1053,7 @@ static bool _ecm_tracker_tcp_stream_segment_add(struct ecm_tracker_tcp_internal_
 			DEBUG_ASSERT(data->future == nskb, "%p: invalid future list %p != %p\n", ttii, data->future, nskb);
 			data->future = skb;
 		}
-		
+
 		DEBUG_TRACE("%p: FUTURE SEQ:%u LEN:%u.  Inserted after %p and before %p\n", ttii, seq, num_seqs, pskb, nskb);
 		return true;
 	}
@@ -1141,7 +1141,7 @@ static bool ecm_tracker_tcp_extract_mss(struct sk_buff *skb, uint16_t *mss, stru
 
 	DEBUG_INFO("MSS clamp seen in %p as %u\n", skb, opt_rx.mss_clamp);
 	*mss = opt_rx.mss_clamp;
-	
+
 	return true;
 }
 
@@ -1480,7 +1480,7 @@ static int ecm_tracker_tcp_bytes_read_callback(struct ecm_tracker_tcp_instance *
 	skb = data->in_order;
 	while (skb) {
 		uint32_t next_seg_seq;
-	
+
 		skb_cb = (struct ecm_tracker_tcp_skb_cb_format *)skb->cb;
 		DEBUG_CHECK_MAGIC(skb_cb, ECM_TRACKER_TCP_SKB_CB_MAGIC, "%p: invalid cb magic %p\n", ttii, skb_cb);
 
@@ -2057,7 +2057,7 @@ static void _ecm_tracker_tcp_reader_retreat(struct ecm_tracker_tcp_reader_instan
 		}
 
 		retreatment -= seg_prior_data;
-		
+
 		/*
 		 * Move onto previous actual segment
 		 */
@@ -2116,7 +2116,7 @@ static void _ecm_tracker_tcp_reader_advance(struct ecm_tracker_tcp_reader_instan
 		}
 
 		advancement -= tri->segment_remain;
-		
+
 		/*
 		 * Move onto next actual segment
 		 */
@@ -2181,7 +2181,7 @@ uint32_t ecm_tracker_tcp_reader_position_get(struct ecm_tracker_tcp_reader_insta
 
 	spin_lock_bh(&tri->lock);
 	pos = tri->offset;
-	spin_unlock_bh(&tri->lock);	
+	spin_unlock_bh(&tri->lock);
 	return pos;
 }
 EXPORT_SYMBOL(ecm_tracker_tcp_reader_position_get);
@@ -2200,7 +2200,7 @@ uint32_t ecm_tracker_tcp_reader_remain_get(struct ecm_tracker_tcp_reader_instanc
 	spin_lock_bh(&tri->ttii->lock);
 	remain = tri->data->num_seqs - (tri->offset - tri->discarded);
 	spin_unlock_bh(&tri->ttii->lock);
-	spin_unlock_bh(&tri->lock);	
+	spin_unlock_bh(&tri->lock);
 	return remain;
 }
 EXPORT_SYMBOL(ecm_tracker_tcp_reader_remain_get);

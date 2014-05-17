@@ -16,4 +16,3 @@
 
 struct ecm_classifier_hyfi_instance;
 struct ecm_classifier_hyfi_instance *ecm_classifier_hyfi_instance_alloc(struct ecm_db_connection_instance *ci);
-

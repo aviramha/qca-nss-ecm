@@ -466,7 +466,7 @@ bool ecm_tracker_ip_check_header_and_read(struct ecm_tracker_ip_header *ip_hdr, 
 			DEBUG_WARN("%p: v4 header helper failed for: %u\n", skb, protocol);
 			return false;
 		}
-		
+
 		return true;
 	}
 
@@ -579,7 +579,7 @@ static bool ecm_tracker_ip_header_helper_ipv6_generic(struct ecm_tracker_ip_prot
 	etiph->offset = offset;
 
 	*next_hdr = (int16_t)gen_header->next_protocol;
-	return true;	
+	return true;
 }
 
 /*
@@ -622,7 +622,7 @@ static bool ecm_tracker_ip_header_helper_ipv6_fragment(struct ecm_tracker_ip_pro
 	etiph->offset = offset;
 
 	*next_hdr = (int16_t)gen_header->next_protocol;
-	return true;	
+	return true;
 }
 
 /*
@@ -669,7 +669,7 @@ static bool ecm_tracker_ip_header_helper_tcp(struct ecm_tracker_ip_protocols *et
 	 * There is no header following a TCP header
 	 */
 	*next_hdr = -1;
-	return true;	
+	return true;
 }
 
 /*
@@ -732,7 +732,7 @@ static bool ecm_tracker_ip_header_helper_gre(struct ecm_tracker_ip_protocols *et
 	 * There is no header following a GRE header
 	 */
 	*next_hdr = -1;
-	return true;	
+	return true;
 }
 
 /*
@@ -792,7 +792,7 @@ static bool ecm_tracker_ip_header_helper_ah(struct ecm_tracker_ip_protocols *eti
 	etiph->header_size = hdr_size;
 	etiph->size = hdr_size;
 	etiph->offset = offset;
-	return true;	
+	return true;
 }
 
 /*
@@ -819,7 +819,7 @@ static bool ecm_tracker_ip_header_helper_udp(struct ecm_tracker_ip_protocols *et
 	 * There is no header following a UDP header
 	 */
 	*next_hdr = -1;
-	return true;	
+	return true;
 }
 
 /*
@@ -837,7 +837,7 @@ static bool ecm_tracker_ip_header_helper_unknown(struct ecm_tracker_ip_protocols
 	etiph->header_size = remain;
 	etiph->size = remain;
 	etiph->offset = offset;
-	return true;	
+	return true;
 }
 
 /*
@@ -909,7 +909,7 @@ static bool ecm_tracker_ip_header_helper_icmp(struct ecm_tracker_ip_protocols *e
 	 * There is no header following a ICMP header
 	 */
 	*next_hdr = -1;
-	return true;	
+	return true;
 }
 
 /*
@@ -933,7 +933,7 @@ static bool ecm_tracker_ip_header_helper_ipv6_icmp(struct ecm_tracker_ip_protoco
 	 * There is no header following a V6 ICMP header
 	 */
 	*next_hdr = -1;
-	return true;	
+	return true;
 }
 
 /*
