@@ -701,6 +701,17 @@ int32_t ecm_db_iface_nss_interface_identifier_get(struct ecm_db_iface_instance *
 EXPORT_SYMBOL(ecm_db_iface_nss_interface_identifier_get);
 
 /*
+ * ecm_db_iface_interface_identifier_get()
+ *	Return the interface number of this ecm interface
+ */
+int32_t ecm_db_iface_interface_identifier_get(struct ecm_db_iface_instance *ii)
+{
+	DEBUG_CHECK_MAGIC(ii, ECM_DB_IFACE_INSTANCE_MAGIC, "%p: magic failed", ii);
+	return ii->interface_identifier;
+}
+EXPORT_SYMBOL(ecm_db_iface_interface_identifier_get);
+
+/*
  * ecm_db_iface_mtu_reset()
  *	Reset the mtu
  */

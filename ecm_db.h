@@ -54,6 +54,7 @@ ecm_db_iface_type_t ecm_db_connection_to_iface_type_get(struct ecm_db_connection
 ecm_db_iface_type_t ecm_db_connection_iface_type_get(struct ecm_db_iface_instance *ii);
 int32_t ecm_db_iface_mtu_reset(struct ecm_db_iface_instance *ii, int32_t mtu);
 int32_t ecm_db_iface_nss_interface_identifier_get(struct ecm_db_iface_instance *ii);
+int32_t ecm_db_iface_interface_identifier_get(struct ecm_db_iface_instance *ii);
 
 struct ecm_front_end_connection_instance *ecm_db_connection_front_end_get_and_ref(struct ecm_db_connection_instance *ci);
 
