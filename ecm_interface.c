@@ -927,7 +927,9 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct net_device 
 #ifdef ECM_INTERFACE_PPP_SUPPORT
 	int channel_count;
 	struct ppp_channel *ppp_chan[1];
+	const struct ppp_channel_ops *ppp_chan_ops;
 	int channel_protocol;
+	struct pppoe_channel_ops *pppoe_chan_ops;
 	struct pppoe_opt addressing;
 #endif
 
@@ -1162,8 +1164,7 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct net_device 
 	 */
 	channel_count = ppp_hold_channels(dev, ppp_chan, 1);
 	if (channel_count != 1) {
-		DEBUG_TRACE("Net device: %p PPP has %d channels - ECM cannot handle this (interface becomes Unknown type)\n",
-				dev, channel_count);
+		DEBUG_TRACE("Net device: %p PPP has %d channels - Unknown to the ECM\n", dev, channel_count);
 		type_info.unknown.os_specific_ident = dev_interface_num;
 
 		/*
@@ -1175,9 +1176,9 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct net_device 
 
 	/*
 	 * Get channel protocol type
-	 * NOTE: Not all PPP channels support channel specific methods.
 	 */
-	channel_protocol = ppp_channel_get_protocol(ppp_chan[0]);
+	ppp_chan_ops = ppp_chan[0]->ops;
+	channel_protocol = ppp_chan_ops->get_channel_protocol(ppp_chan[0]);
 	if (channel_protocol != PX_PROTO_OE) {
 		DEBUG_TRACE("Net device: %p PPP channel protocol: %d - Unknown to the ECM\n", dev, channel_protocol);
 		type_info.unknown.os_specific_ident = dev_interface_num;
@@ -1201,11 +1202,14 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct net_device 
 
 	/*
 	 * Get PPPoE session information and the underlying device it is using.
+	 * NOTE: We know this is PPPoE so we can cast the ppp_chan_ops to pppoe_chan_ops and
+	 * use its channel specific methods.
 	 */
-	pppoe_channel_addressing_get(ppp_chan[0], &addressing);
-	type_info.pppoe.pppoe_session_id = (uint16_t)ntohs((uint16_t)addressing.pa.sid);
+	pppoe_chan_ops = (struct pppoe_channel_ops *)ppp_chan_ops;
+	pppoe_chan_ops->get_addressing(ppp_chan[0], &addressing);
+
+	type_info.pppoe.pppoe_session_id = (uint16_t)addressing.pa.sid;
 	memcpy(type_info.pppoe.remote_mac, addressing.pa.remote, ETH_ALEN);
-	dev_put(addressing.dev);
 
 	/*
 	 * Release the channel.  Note that next_dev is still (correctly) held.
@@ -1358,7 +1362,9 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfac
 #ifdef ECM_INTERFACE_PPP_SUPPORT
 			int channel_count;
 			struct ppp_channel *ppp_chan[1];
+			const struct ppp_channel_ops *ppp_chan_ops;
 			int channel_protocol;
+			struct pppoe_channel_ops *pppoe_chan_ops;
 			struct pppoe_opt addressing;
 #endif
 
@@ -1571,9 +1577,9 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfac
 
 			/*
 			 * Get channel protocol type
-			 * NOTE: Not all PPP channels support channel specific methods.
 			 */
-			channel_protocol = ppp_channel_get_protocol(ppp_chan[0]);
+			ppp_chan_ops = ppp_chan[0]->ops;
+			channel_protocol = ppp_chan_ops->get_channel_protocol(ppp_chan[0]);
 			if (channel_protocol != PX_PROTO_OE) {
 				DEBUG_TRACE("Net device: %p PPP channel protocol: %d - Unknown to the ECM\n",
 						dest_dev, channel_protocol);
@@ -1593,8 +1599,11 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfac
 
 			/*
 			 * Get PPPoE session information and the underlying device it is using.
+			 * NOTE: We know this is PPPoE so we can cast the ppp_chan_ops to pppoe_chan_ops and
+			 * use its channel specific methods.
 			 */
-			pppoe_channel_addressing_get(ppp_chan[0], &addressing);
+			pppoe_chan_ops = (struct pppoe_channel_ops *)ppp_chan_ops;
+			pppoe_chan_ops->get_addressing(ppp_chan[0], &addressing);
 
 			/*
 			 * Copy the dev hold into this, we will release the hold later

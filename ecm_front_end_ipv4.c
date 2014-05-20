@@ -196,101 +196,18 @@ extern int nf_ct_tcp_be_liberal;
  *
  * Returns NULL on failure.
  */
-static struct ecm_db_node_instance *ecm_front_end_ipv4_node_establish_and_ref(struct net_device *dev, ip_addr_t addr,
-							struct ecm_db_iface_instance *interface_list[], int32_t interface_list_first)
+static struct ecm_db_node_instance *ecm_front_end_ipv4_node_establish_and_ref(struct net_device *dev, uint8_t *node_mac_addr)
 {
 	struct ecm_db_node_instance *ni;
 	struct ecm_db_node_instance *nni;
 	struct ecm_db_iface_instance *ii;
-	int i;
-	bool done;
-	uint8_t node_addr[ETH_ALEN];
 
-	DEBUG_INFO("Establish node for " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(addr));
-
-	/*
-	 * The node is the datalink address, typically a MAC address.
-	 * However the node address to use is not always obvious and depends on the interfaces involved.
-	 * For example if the interface is PPPoE then we use the MAC of the PPPoE server as we cannot use normal ARP resolution.
-	 * Not all hosts have a node address, where there is none, a suitable alternative should be located and is typically based on 'addr'
-	 * or some other datalink session information.
-	 * It should be, at a minimum, something that ties the host with the interface.
-	 *
-	 * Iterate from 'inner' to 'outer' interfaces - discover what the node is.
-	 */
-	memset(node_addr, 0, ETH_ALEN);
-	done = false;
-	for (i = ECM_DB_IFACE_HEIRARCHY_MAX - 1; (!done) && (i >= interface_list_first); i--) {
-		ecm_db_iface_type_t type;
-
-		type = ecm_db_connection_iface_type_get(interface_list[i]);
-		DEBUG_INFO("Lookup node address, interface @ %d is type: %d\n", i, type);
-
-		switch (type) {
-			ip_addr_t gw_addr = ECM_IP_ADDR_NULL;
-			bool on_link;
-			struct ecm_db_interface_info_pppoe pppoe_info;
-
-		case ECM_DB_IFACE_TYPE_PPPOE:
-			/*
-			 * Node address is the address of the remote PPPoE server
-			 */
-			ecm_db_iface_pppoe_session_info_get(interface_list[i], &pppoe_info);
-			memcpy(node_addr, pppoe_info.remote_mac, ETH_ALEN);
-			done = true;
-			break;
-		case ECM_DB_IFACE_TYPE_ETHERNET:
-		case ECM_DB_IFACE_TYPE_LAG:
-		case ECM_DB_IFACE_TYPE_VLAN:
-		case ECM_DB_IFACE_TYPE_BRIDGE:
-			if (!ecm_interface_mac_addr_get(addr, node_addr, &on_link, gw_addr)) {
-				__be32 ipv4_addr;
-				__be32 src_ip;
-				DEBUG_TRACE("failed to obtain mac for host " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(addr));
-
-				/*
-				 * Issue an ARP request for it, select the src_ip from which to issue the request.
-				 */
-				ECM_IP_ADDR_TO_NIN4_ADDR(ipv4_addr, addr);
-				src_ip = inet_select_addr(dev, ipv4_addr, RT_SCOPE_LINK);
-				if (!src_ip) {
-					DEBUG_TRACE("failed to lookup IP for %pI4\n", &ipv4_addr);
-					return NULL;
-				}
-
-				/*
-				 * If we have a GW for this address, then we have to send ARP request to the GW
-				 */
-				if (!ECM_IP_ADDR_IS_NULL(gw_addr)) {
-					ECM_IP_ADDR_COPY(addr, gw_addr);
-				}
-
-				DEBUG_TRACE("Send ARP for %pI4 using src_ip as %pI4\n", &ipv4_addr, &src_ip);
-				arp_send(ARPOP_REQUEST, ETH_P_ARP, ipv4_addr, dev, src_ip, NULL, NULL, NULL);
-
-				/*
-				 * By returning NULL the connection will not be created and the packet dropped.
-				 * However the sending will no doubt re-try the transmission and by that time we shall have the MAC for it.
-				 */
-				return NULL;
-			}
-			done = true;
-			break;
-		default:
-			/*
-			 * Don't know how to handle these.
-			 * Just copy some part of the address for now, but keep iterating the interface list
-			 * in the hope something recognisable will be seen!
-			 * GGG TODO We really need to roll out support for all interface types we can deal with ASAP :-(
-			 */
-			memcpy(node_addr, (uint8_t *)addr, ETH_ALEN);
-		}
-	}
+	DEBUG_INFO("Establish node for %pM\n", node_mac_addr);
 
 	/*
 	 * Locate the node
 	 */
-	ni = ecm_db_node_find_and_ref(node_addr);
+	ni = ecm_db_node_find_and_ref(node_mac_addr);
 	if (ni) {
 		DEBUG_TRACE("%p: node established\n", ni);
 		return ni;
@@ -319,7 +236,7 @@ static struct ecm_db_node_instance *ecm_front_end_ipv4_node_establish_and_ref(st
 	 * Add node into the database, atomically to avoid races creating the same thing
 	 */
 	spin_lock_bh(&ecm_front_end_ipv4_lock);
-	ni = ecm_db_node_find_and_ref(node_addr);
+	ni = ecm_db_node_find_and_ref(node_mac_addr);
 	if (ni) {
 		spin_unlock_bh(&ecm_front_end_ipv4_lock);
 		ecm_db_node_deref(nni);
@@ -327,7 +244,7 @@ static struct ecm_db_node_instance *ecm_front_end_ipv4_node_establish_and_ref(st
 		return ni;
 	}
 
-	ecm_db_node_add(nni, ii, node_addr, NULL, nni);
+	ecm_db_node_add(nni, ii, node_mac_addr, NULL, nni);
 
 	/*
 	 * Don't need iface instance now
@@ -346,12 +263,14 @@ static struct ecm_db_node_instance *ecm_front_end_ipv4_node_establish_and_ref(st
  *
  * Returns NULL on failure.
  */
-static struct ecm_db_host_instance *ecm_front_end_ipv4_host_establish_and_ref(struct net_device *dev, ip_addr_t addr,
-						struct ecm_db_iface_instance *interface_list[], int32_t interface_list_first)
+static struct ecm_db_host_instance *ecm_front_end_ipv4_host_establish_and_ref(struct net_device *dev, ip_addr_t addr)
 {
 	struct ecm_db_host_instance *hi;
 	struct ecm_db_host_instance *nhi;
 	struct ecm_db_node_instance *ni;
+	uint8_t node_mac_addr[6];
+	ip_addr_t gw_addr = ECM_IP_ADDR_NULL;
+	bool on_link;
 
 	DEBUG_INFO("Establish host for " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(addr));
 
@@ -366,8 +285,41 @@ static struct ecm_db_host_instance *ecm_front_end_ipv4_host_establish_and_ref(st
 
 	/*
 	 * No host - establish node
+	 * Get its MAC address (or some kind of equivalent we can use for the node address).
 	 */
-	ni = ecm_front_end_ipv4_node_establish_and_ref(dev, addr, interface_list, interface_list_first);
+	if (!ecm_interface_mac_addr_get(addr, node_mac_addr, &on_link, gw_addr)) {
+		__be32 ipv4_addr;
+		__be32 src_ip;
+		DEBUG_TRACE("failed to obtain mac for host " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(addr));
+
+		/*
+		 * Issue an ARP request for it, select the src_ip from which to issue the request.
+		 */
+		ECM_IP_ADDR_TO_NIN4_ADDR(ipv4_addr, addr);
+		src_ip = inet_select_addr(dev, ipv4_addr, RT_SCOPE_LINK);
+		if (!src_ip) {
+			DEBUG_TRACE("failed to lookup IP for %pI4\n", &ipv4_addr);
+			return NULL;
+		}
+
+		/*
+		 * If we have a GW for this address, then we have to send ARP request to the GW
+		 */
+		if (!ECM_IP_ADDR_IS_NULL(gw_addr)) {
+			ECM_IP_ADDR_COPY(addr, gw_addr);
+		}
+
+		DEBUG_TRACE("Send ARP for %pI4 using src_ip as %pI4\n", &ipv4_addr, &src_ip);
+		arp_send(ARPOP_REQUEST, ETH_P_ARP, ipv4_addr, dev, src_ip, NULL, NULL, NULL);
+
+		/*
+		 * By returning NULL the connection will not be created and the packet dropped.
+		 * However the sending will no doubt re-try the transmission and by that time we shall have the MAC for it.
+		 */
+		return NULL;
+	}
+
+	ni = ecm_front_end_ipv4_node_establish_and_ref(dev, node_mac_addr);
 	if (!ni) {
 		DEBUG_WARN("Failed to establish node\n");
 		return NULL;
@@ -395,7 +347,7 @@ static struct ecm_db_host_instance *ecm_front_end_ipv4_host_establish_and_ref(st
 		return hi;
 	}
 
-	ecm_db_host_add(nhi, ni, addr, true, NULL, nhi);
+	ecm_db_host_add(nhi, ni, addr, on_link, NULL, nhi);
 
 	spin_unlock_bh(&ecm_front_end_ipv4_lock);
 
@@ -409,13 +361,12 @@ static struct ecm_db_host_instance *ecm_front_end_ipv4_host_establish_and_ref(st
 }
 
 /*
- * ecm_front_end_ipv4_mapping_establish_and_ref()
+ * _ecm_front_end_ipv4_mapping_establish_and_ref()
  *	Returns a reference to a mapping, possibly creating one if necessary.
  *
  * Returns NULL on failure.
  */
-static struct ecm_db_mapping_instance *ecm_front_end_ipv4_mapping_establish_and_ref(struct net_device *dev, ip_addr_t addr, int port,
-				struct ecm_db_iface_instance *interface_list[], int32_t interface_list_first)
+static struct ecm_db_mapping_instance *ecm_front_end_ipv4_mapping_establish_and_ref(struct net_device *dev, ip_addr_t addr, int port)
 {
 	struct ecm_db_mapping_instance *mi;
 	struct ecm_db_mapping_instance *nmi;
@@ -435,7 +386,7 @@ static struct ecm_db_mapping_instance *ecm_front_end_ipv4_mapping_establish_and_
 	/*
 	 * No mapping - establish host existence
 	 */
-	hi = ecm_front_end_ipv4_host_establish_and_ref(dev, addr, interface_list, interface_list_first);
+	hi = ecm_front_end_ipv4_host_establish_and_ref(dev, addr);
 	if (!hi) {
 		DEBUG_WARN("Failed to establish host\n");
 		return NULL;
@@ -482,9 +433,6 @@ static struct ecm_db_mapping_instance *ecm_front_end_ipv4_mapping_establish_and_
 /*
  * ecm_front_end_ipv4_connection_tcp_front_end_accelerate()
  *	Accelerate a connection
- *
- * GGG TODO Refactor this function into a single function that np, udp and tcp
- * can all use and reduce the amount of code!
  */
 static void ecm_front_end_ipv4_connection_tcp_front_end_accelerate(struct ecm_front_end_connection_instance *feci,
 									struct ecm_classifier_process_response *pr)
@@ -663,8 +611,11 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_accelerate(struct ecm_fr
 			break;
 		case ECM_DB_IFACE_TYPE_PPPOE:
 			/*
-			 * More than one PPPoE in the list is not valid!
+			 * GGG TODO For now we don't support PPPoE so this is an invalid rule
 			 */
+			DEBUG_TRACE("%p: PPPoE - unsupported right now\n", fecti);
+			rule_invalid = true;
+
 			if (interface_type_counts[ii_type] != 0) {
 				DEBUG_TRACE("%p: PPPoE - additional unsupported\n", fecti);
 				rule_invalid = true;
@@ -778,8 +729,11 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_accelerate(struct ecm_fr
 			break;
 		case ECM_DB_IFACE_TYPE_PPPOE:
 			/*
-			 * More than one PPPoE in the list is not valid!
+			 * GGG TODO For now we don't support PPPoE so this is an invalid rule
 			 */
+			DEBUG_TRACE("%p: PPPoE - unsupported right now\n", fecti);
+			rule_invalid = true;
+
 			if (interface_type_counts[ii_type] != 0) {
 				DEBUG_TRACE("%p: PPPoE - additional unsupported\n", fecti);
 				rule_invalid = true;
@@ -922,14 +876,14 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_accelerate(struct ecm_fr
 	ecm_db_connection_to_nat_node_address_get(fecti->ci, create.dest_mac);
 
 	/*
-	 * The src_mac_xlate is the mac address to replace the pkt.src_mac when a packet is sent from->to
+	 * The src_mac_xlate is the mac address to replace the src_mac when sent onto the next interface
 	 * This is, therefore, the interface mac of the 'to' side of the connection.
 	 */
 	memcpy(create.src_mac_xlate, to_nss_iface_address, ETH_ALEN);
 
 	/*
-	 * The dest_mac_xlate is the mac address to replace the pkt.src_mac when a packet is sent to->from
-	 * This is, therefore, the MAC of the interface of the 'from' side.
+	 * The dest_mac_xlate replaces the destination mac of a packet when sent on the next interface.
+	 * By getting the MAC of node associated with dest_ip_xlate we can satisfy ingress and egress cases.
 	 */
 	ecm_db_connection_to_node_address_get(fecti->ci, create.dest_mac_xlate);
 
@@ -1373,9 +1327,6 @@ static struct ecm_front_end_ipv4_connection_tcp_instance *ecm_front_end_ipv4_con
 /*
  * ecm_front_end_ipv4_connection_udp_front_end_accelerate()
  *	Accelerate a connection
- *
- * GGG TODO Refactor this function into a single function that np, udp and tcp
- * can all use and reduce the amount of code!
  */
 static void ecm_front_end_ipv4_connection_udp_front_end_accelerate(struct ecm_front_end_connection_instance *feci,
 									struct ecm_classifier_process_response *pr,
@@ -1554,8 +1505,11 @@ static void ecm_front_end_ipv4_connection_udp_front_end_accelerate(struct ecm_fr
 			break;
 		case ECM_DB_IFACE_TYPE_PPPOE:
 			/*
-			 * More than one PPPoE in the list is not valid!
+			 * GGG TODO For now we don't support PPPoE so this is an invalid rule
 			 */
+			DEBUG_TRACE("%p: PPPoE - unsupported right now\n", fecui);
+			rule_invalid = true;
+
 			if (interface_type_counts[ii_type] != 0) {
 				DEBUG_TRACE("%p: PPPoE - additional unsupported\n", fecui);
 				rule_invalid = true;
@@ -1669,8 +1623,11 @@ static void ecm_front_end_ipv4_connection_udp_front_end_accelerate(struct ecm_fr
 			break;
 		case ECM_DB_IFACE_TYPE_PPPOE:
 			/*
-			 * More than one PPPoE in the list is not valid!
+			 * GGG TODO For now we don't support PPPoE so this is an invalid rule
 			 */
+			DEBUG_TRACE("%p: PPPoE - unsupported right now\n", fecui);
+			rule_invalid = true;
+
 			if (interface_type_counts[ii_type] != 0) {
 				DEBUG_TRACE("%p: PPPoE - additional unsupported\n", fecui);
 				rule_invalid = true;
@@ -1813,14 +1770,14 @@ static void ecm_front_end_ipv4_connection_udp_front_end_accelerate(struct ecm_fr
 	ecm_db_connection_to_nat_node_address_get(fecui->ci, create.dest_mac);
 
 	/*
-	 * The src_mac_xlate is the mac address to replace the pkt.src_mac when a packet is sent from->to
+	 * The src_mac_xlate is the mac address to replace the src_mac when sent onto the next interface
 	 * This is, therefore, the interface mac of the 'to' side of the connection.
 	 */
 	memcpy(create.src_mac_xlate, to_nss_iface_address, ETH_ALEN);
 
 	/*
-	 * The dest_mac_xlate is the mac address to replace the pkt.src_mac when a packet is sent to->from
-	 * This is, therefore, the MAC of the interface of the 'from' side.
+	 * The dest_mac_xlate replaces the destination mac of a packet when sent on the next interface.
+	 * By getting the MAC of node associated with dest_ip_xlate we can satisfy ingress and egress cases.
 	 */
 	ecm_db_connection_to_node_address_get(fecui->ci, create.dest_mac_xlate);
 
@@ -2204,9 +2161,6 @@ static struct ecm_front_end_ipv4_connection_udp_instance *ecm_front_end_ipv4_con
 /*
  * ecm_front_end_ipv4_connection_non_ported_front_end_accelerate()
  *	Accelerate a connection
- *
- * GGG TODO Refactor this function into a single function that np, udp and tcp
- * can all use and reduce the amount of code!
  */
 static void ecm_front_end_ipv4_connection_non_ported_front_end_accelerate(struct ecm_front_end_connection_instance *feci,
 									struct ecm_classifier_process_response *pr)
@@ -2395,8 +2349,11 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_accelerate(struct
 			break;
 		case ECM_DB_IFACE_TYPE_PPPOE:
 			/*
-			 * More than one PPPoE in the list is not valid!
+			 * GGG TODO For now we don't support PPPoE so this is an invalid rule
 			 */
+			DEBUG_TRACE("%p: PPPoE - unsupported right now\n", fecnpi);
+			rule_invalid = true;
+
 			if (interface_type_counts[ii_type] != 0) {
 				DEBUG_TRACE("%p: PPPoE - additional unsupported\n", fecnpi);
 				rule_invalid = true;
@@ -2510,8 +2467,11 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_accelerate(struct
 			break;
 		case ECM_DB_IFACE_TYPE_PPPOE:
 			/*
-			 * More than one PPPoE in the list is not valid!
+			 * GGG TODO For now we don't support PPPoE so this is an invalid rule
 			 */
+			DEBUG_TRACE("%p: PPPoE - unsupported right now\n", fecnpi);
+			rule_invalid = true;
+
 			if (interface_type_counts[ii_type] != 0) {
 				DEBUG_TRACE("%p: PPPoE - additional unsupported\n", fecnpi);
 				rule_invalid = true;
@@ -2654,14 +2614,14 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_accelerate(struct
 	ecm_db_connection_to_nat_node_address_get(fecnpi->ci, create.dest_mac);
 
 	/*
-	 * The src_mac_xlate is the mac address to replace the pkt.src_mac when a packet is sent from->to
+	 * The src_mac_xlate is the mac address to replace the src_mac when sent onto the next interface
 	 * This is, therefore, the interface mac of the 'to' side of the connection.
 	 */
 	memcpy(create.src_mac_xlate, to_nss_iface_address, ETH_ALEN);
 
 	/*
-	 * The dest_mac_xlate is the mac address to replace the pkt.src_mac when a packet is sent to->from
-	 * This is, therefore, the MAC of the interface of the 'from' side.
+	 * The dest_mac_xlate replaces the destination mac of a packet when sent on the next interface.
+	 * By getting the MAC of node associated with dest_ip_xlate we can satisfy ingress and egress cases.
 	 */
 	ecm_db_connection_to_node_address_get(fecnpi->ci, create.dest_mac_xlate);
 
@@ -3301,28 +3261,16 @@ static unsigned int ecm_front_end_ipv4_tcp_process(struct net_device *out_dev, s
 		}
 
 		/*
-		 * Get the src and destination mappings.
-		 * For this we also need the interface lists which we also set upon the new connection while we are at it.
-		 * GGG TODO rework terms of "src/dest" - these need to be named consistently as from/to as per database terms.
+		 * Get the src and destination mappings
 		 */
-		DEBUG_TRACE("%p: Create the 'from' interface heirarchy list\n", nci);
-		from_list_first = ecm_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, IPPROTO_TCP);
-		ecm_db_connection_from_interfaces_reset(nci, from_list, from_list_first);
-		DEBUG_TRACE("%p: Create source mapping\n", nci);
-		src_mi = ecm_front_end_ipv4_mapping_establish_and_ref(in_dev, ip_src_addr, src_port, from_list, from_list_first);
-		ecm_db_connection_interfaces_deref(from_list, from_list_first);
+		src_mi = ecm_front_end_ipv4_mapping_establish_and_ref(in_dev, ip_src_addr, src_port);
 		if (!src_mi) {
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to establish src mapping\n");
 			return NF_DROP;
 		}
 
-		DEBUG_TRACE("%p: Create the 'to' interface heirarchy list\n", nci);
-		to_list_first = ecm_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, IPPROTO_TCP);
-		ecm_db_connection_to_interfaces_reset(nci, to_list, to_list_first);
-		DEBUG_TRACE("%p: Create dest mapping\n", nci);
-		dest_mi = ecm_front_end_ipv4_mapping_establish_and_ref(out_dev, ip_dest_addr, dest_port, to_list, to_list_first);
-		ecm_db_connection_interfaces_deref(to_list, to_list_first);
+		dest_mi = ecm_front_end_ipv4_mapping_establish_and_ref(out_dev, ip_dest_addr, dest_port);
 		if (!dest_mi) {
 			ecm_db_mapping_deref(src_mi);
 			ecm_db_connection_deref(nci);
@@ -3332,14 +3280,8 @@ static unsigned int ecm_front_end_ipv4_tcp_process(struct net_device *out_dev, s
 
 		/*
 		 * Get the src and destination NAT mappings
-		 * For this we also need the interface lists which we also set upon the new connection while we are at it.
-		 * GGG TODO rework terms of "src/dest" - these need to be named consistently as from/to as per database terms.
 		 */
-		DEBUG_TRACE("%p: Create the 'from NAT' interface heirarchy list\n", nci);
-		from_nat_list_first = ecm_interface_heirarchy_construct(from_nat_list, ip_dest_addr, ip_src_addr_nat, IPPROTO_TCP);
-		ecm_db_connection_from_nat_interfaces_reset(nci, from_nat_list, from_nat_list_first);
-		src_nat_mi = ecm_front_end_ipv4_mapping_establish_and_ref(in_dev, ip_src_addr_nat, src_port_nat, from_nat_list, from_nat_list_first);
-		ecm_db_connection_interfaces_deref(from_nat_list, from_nat_list_first);
+		src_nat_mi = ecm_front_end_ipv4_mapping_establish_and_ref(in_dev, ip_src_addr_nat, src_port_nat);
 		if (!src_nat_mi) {
 			ecm_db_mapping_deref(dest_mi);
 			ecm_db_mapping_deref(src_mi);
@@ -3348,11 +3290,7 @@ static unsigned int ecm_front_end_ipv4_tcp_process(struct net_device *out_dev, s
 			return NF_DROP;
 		}
 
-		DEBUG_TRACE("%p: Create the 'to NAT' interface heirarchy list\n", nci);
-		to_nat_list_first = ecm_interface_heirarchy_construct(to_nat_list, ip_src_addr, ip_dest_addr_nat, IPPROTO_TCP);
-		ecm_db_connection_to_nat_interfaces_reset(nci, to_nat_list, to_nat_list_first);
-		dest_nat_mi = ecm_front_end_ipv4_mapping_establish_and_ref(out_dev, ip_dest_addr_nat, dest_port_nat, to_nat_list, to_nat_list_first);
-		ecm_db_connection_interfaces_deref(to_nat_list, to_nat_list_first);
+		dest_nat_mi = ecm_front_end_ipv4_mapping_establish_and_ref(out_dev, ip_dest_addr_nat, dest_port_nat);
 		if (!dest_nat_mi) {
 			ecm_db_mapping_deref(src_nat_mi);
 			ecm_db_mapping_deref(dest_mi);
@@ -3411,6 +3349,29 @@ static unsigned int ecm_front_end_ipv4_tcp_process(struct net_device *out_dev, s
 				return NF_DROP;
 			}
 		}
+
+		/*
+		 * Get the initial interface lists the connection will be using
+		 */
+		DEBUG_TRACE("%p: Create the 'from' interface heirarchy list\n", nci);
+		from_list_first = ecm_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, IPPROTO_TCP);
+		ecm_db_connection_from_interfaces_reset(nci, from_list, from_list_first);
+		ecm_db_connection_interfaces_deref(from_list, from_list_first);
+
+		DEBUG_TRACE("%p: Create the 'from NAT' interface heirarchy list\n", nci);
+		from_nat_list_first = ecm_interface_heirarchy_construct(from_nat_list, ip_dest_addr, ip_src_addr_nat, IPPROTO_TCP);
+		ecm_db_connection_from_nat_interfaces_reset(nci, from_nat_list, from_nat_list_first);
+		ecm_db_connection_interfaces_deref(from_nat_list, from_nat_list_first);
+
+		DEBUG_TRACE("%p: Create the 'to' interface heirarchy list\n", nci);
+		to_list_first = ecm_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, IPPROTO_TCP);
+		ecm_db_connection_to_interfaces_reset(nci, to_list, to_list_first);
+		ecm_db_connection_interfaces_deref(to_list, to_list_first);
+
+		DEBUG_TRACE("%p: Create the 'to NAT' interface heirarchy list\n", nci);
+		to_nat_list_first = ecm_interface_heirarchy_construct(to_nat_list, ip_src_addr, ip_dest_addr_nat, IPPROTO_TCP);
+		ecm_db_connection_to_nat_interfaces_reset(nci, to_nat_list, to_nat_list_first);
+		ecm_db_connection_interfaces_deref(to_nat_list, to_nat_list_first);
 
 		/*
 		 * Now add the connection into the database.
@@ -3859,28 +3820,16 @@ static unsigned int ecm_front_end_ipv4_udp_process(struct net_device *out_dev, s
 		}
 
 		/*
-		 * Get the src and destination mappings.
-		 * For this we also need the interface lists which we also set upon the new connection while we are at it.
-		 * GGG TODO rework terms of "src/dest" - these need to be named consistently as from/to as per database terms.
+		 * Get the src and destination mappings
 		 */
-		DEBUG_TRACE("%p: Create the 'from' interface heirarchy list\n", nci);
-		from_list_first = ecm_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, IPPROTO_UDP);
-		ecm_db_connection_from_interfaces_reset(nci, from_list, from_list_first);
-		DEBUG_TRACE("%p: Create source mapping\n", nci);
-		src_mi = ecm_front_end_ipv4_mapping_establish_and_ref(in_dev, ip_src_addr, src_port, from_list, from_list_first);
-		ecm_db_connection_interfaces_deref(from_list, from_list_first);
+		src_mi = ecm_front_end_ipv4_mapping_establish_and_ref(in_dev, ip_src_addr, src_port);
 		if (!src_mi) {
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to establish src mapping\n");
 			return NF_DROP;
 		}
 
-		DEBUG_TRACE("%p: Create the 'to' interface heirarchy list\n", nci);
-		to_list_first = ecm_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, IPPROTO_UDP);
-		ecm_db_connection_to_interfaces_reset(nci, to_list, to_list_first);
-		DEBUG_TRACE("%p: Create dest mapping\n", nci);
-		dest_mi = ecm_front_end_ipv4_mapping_establish_and_ref(out_dev, ip_dest_addr, dest_port, to_list, to_list_first);
-		ecm_db_connection_interfaces_deref(to_list, to_list_first);
+		dest_mi = ecm_front_end_ipv4_mapping_establish_and_ref(out_dev, ip_dest_addr, dest_port);
 		if (!dest_mi) {
 			ecm_db_mapping_deref(src_mi);
 			ecm_db_connection_deref(nci);
@@ -3890,14 +3839,8 @@ static unsigned int ecm_front_end_ipv4_udp_process(struct net_device *out_dev, s
 
 		/*
 		 * Get the src and destination NAT mappings
-		 * For this we also need the interface lists which we also set upon the new connection while we are at it.
-		 * GGG TODO rework terms of "src/dest" - these need to be named consistently as from/to as per database terms.
 		 */
-		DEBUG_TRACE("%p: Create the 'from NAT' interface heirarchy list\n", nci);
-		from_nat_list_first = ecm_interface_heirarchy_construct(from_nat_list, ip_dest_addr, ip_src_addr_nat, IPPROTO_UDP);
-		ecm_db_connection_from_nat_interfaces_reset(nci, from_nat_list, from_nat_list_first);
-		src_nat_mi = ecm_front_end_ipv4_mapping_establish_and_ref(in_dev, ip_src_addr_nat, src_port_nat, from_nat_list, from_nat_list_first);
-		ecm_db_connection_interfaces_deref(from_nat_list, from_nat_list_first);
+		src_nat_mi = ecm_front_end_ipv4_mapping_establish_and_ref(in_dev, ip_src_addr_nat, src_port_nat);
 		if (!src_nat_mi) {
 			ecm_db_mapping_deref(dest_mi);
 			ecm_db_mapping_deref(src_mi);
@@ -3906,11 +3849,7 @@ static unsigned int ecm_front_end_ipv4_udp_process(struct net_device *out_dev, s
 			return NF_DROP;
 		}
 
-		DEBUG_TRACE("%p: Create the 'to NAT' interface heirarchy list\n", nci);
-		to_nat_list_first = ecm_interface_heirarchy_construct(to_nat_list, ip_src_addr, ip_dest_addr_nat, IPPROTO_UDP);
-		ecm_db_connection_to_nat_interfaces_reset(nci, to_nat_list, to_nat_list_first);
-		dest_nat_mi = ecm_front_end_ipv4_mapping_establish_and_ref(out_dev, ip_dest_addr_nat, dest_port_nat, to_nat_list, to_nat_list_first);
-		ecm_db_connection_interfaces_deref(to_nat_list, to_nat_list_first);
+		dest_nat_mi = ecm_front_end_ipv4_mapping_establish_and_ref(out_dev, ip_dest_addr_nat, dest_port_nat);
 		if (!dest_nat_mi) {
 			ecm_db_mapping_deref(src_nat_mi);
 			ecm_db_mapping_deref(dest_mi);
@@ -3969,6 +3908,29 @@ static unsigned int ecm_front_end_ipv4_udp_process(struct net_device *out_dev, s
 				return NF_DROP;
 			}
 		}
+
+		/*
+		 * Get the initial interface lists the connection will be using
+		 */
+		DEBUG_TRACE("%p: Create the 'from' interface heirarchy list\n", nci);
+		from_list_first = ecm_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, IPPROTO_UDP);
+		ecm_db_connection_from_interfaces_reset(nci, from_list, from_list_first);
+		ecm_db_connection_interfaces_deref(from_list, from_list_first);
+
+		DEBUG_TRACE("%p: Create the 'from NAT' interface heirarchy list\n", nci);
+		from_nat_list_first = ecm_interface_heirarchy_construct(from_nat_list, ip_dest_addr, ip_src_addr_nat, IPPROTO_UDP);
+		ecm_db_connection_from_nat_interfaces_reset(nci, from_nat_list, from_nat_list_first);
+		ecm_db_connection_interfaces_deref(from_nat_list, from_nat_list_first);
+
+		DEBUG_TRACE("%p: Create the 'to' interface heirarchy list\n", nci);
+		to_list_first = ecm_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, IPPROTO_UDP);
+		ecm_db_connection_to_interfaces_reset(nci, to_list, to_list_first);
+		ecm_db_connection_interfaces_deref(to_list, to_list_first);
+
+		DEBUG_TRACE("%p: Create the 'to NAT' interface heirarchy list\n", nci);
+		to_nat_list_first = ecm_interface_heirarchy_construct(to_nat_list, ip_src_addr, ip_dest_addr_nat, IPPROTO_UDP);
+		ecm_db_connection_to_nat_interfaces_reset(nci, to_nat_list, to_nat_list_first);
+		ecm_db_connection_interfaces_deref(to_nat_list, to_nat_list_first);
 
 		/*
 		 * Now add the connection into the database.
@@ -4381,30 +4343,17 @@ static unsigned int ecm_front_end_ipv4_non_ported_process(struct net_device *out
 			return NF_DROP;
 		}
 
-
 		/*
-		 * Get the src and destination mappings.
-		 * For this we also need the interface lists which we also set upon the new connection while we are at it.
-		 * GGG TODO rework terms of "src/dest" - these need to be named consistently as from/to as per database terms.
+		 * Get the src and destination mappings
 		 */
-		DEBUG_TRACE("%p: Create the 'from' interface heirarchy list\n", nci);
-		from_list_first = ecm_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, protocol);
-		ecm_db_connection_from_interfaces_reset(nci, from_list, from_list_first);
-		DEBUG_TRACE("%p: Create source mapping\n", nci);
-		src_mi = ecm_front_end_ipv4_mapping_establish_and_ref(in_dev, ip_src_addr, src_port, from_list, from_list_first);
-		ecm_db_connection_interfaces_deref(from_list, from_list_first);
+		src_mi = ecm_front_end_ipv4_mapping_establish_and_ref(in_dev, ip_src_addr, src_port);
 		if (!src_mi) {
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to establish src mapping\n");
 			return NF_DROP;
 		}
 
-		DEBUG_TRACE("%p: Create the 'to' interface heirarchy list\n", nci);
-		to_list_first = ecm_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, protocol);
-		ecm_db_connection_to_interfaces_reset(nci, to_list, to_list_first);
-		DEBUG_TRACE("%p: Create dest mapping\n", nci);
-		dest_mi = ecm_front_end_ipv4_mapping_establish_and_ref(out_dev, ip_dest_addr, dest_port, to_list, to_list_first);
-		ecm_db_connection_interfaces_deref(to_list, to_list_first);
+		dest_mi = ecm_front_end_ipv4_mapping_establish_and_ref(out_dev, ip_dest_addr, dest_port);
 		if (!dest_mi) {
 			ecm_db_mapping_deref(src_mi);
 			ecm_db_connection_deref(nci);
@@ -4414,14 +4363,8 @@ static unsigned int ecm_front_end_ipv4_non_ported_process(struct net_device *out
 
 		/*
 		 * Get the src and destination NAT mappings
-		 * For this we also need the interface lists which we also set upon the new connection while we are at it.
-		 * GGG TODO rework terms of "src/dest" - these need to be named consistently as from/to as per database terms.
 		 */
-		DEBUG_TRACE("%p: Create the 'from NAT' interface heirarchy list\n", nci);
-		from_nat_list_first = ecm_interface_heirarchy_construct(from_nat_list, ip_dest_addr, ip_src_addr_nat, protocol);
-		ecm_db_connection_from_nat_interfaces_reset(nci, from_nat_list, from_nat_list_first);
-		src_nat_mi = ecm_front_end_ipv4_mapping_establish_and_ref(in_dev, ip_src_addr_nat, src_port_nat, from_nat_list, from_nat_list_first);
-		ecm_db_connection_interfaces_deref(from_nat_list, from_nat_list_first);
+		src_nat_mi = ecm_front_end_ipv4_mapping_establish_and_ref(in_dev, ip_src_addr_nat, src_port_nat);
 		if (!src_nat_mi) {
 			ecm_db_mapping_deref(dest_mi);
 			ecm_db_mapping_deref(src_mi);
@@ -4430,11 +4373,7 @@ static unsigned int ecm_front_end_ipv4_non_ported_process(struct net_device *out
 			return NF_DROP;
 		}
 
-		DEBUG_TRACE("%p: Create the 'to NAT' interface heirarchy list\n", nci);
-		to_nat_list_first = ecm_interface_heirarchy_construct(to_nat_list, ip_src_addr, ip_dest_addr_nat, protocol);
-		ecm_db_connection_to_nat_interfaces_reset(nci, to_nat_list, to_nat_list_first);
-		dest_nat_mi = ecm_front_end_ipv4_mapping_establish_and_ref(out_dev, ip_dest_addr_nat, dest_port_nat, to_nat_list, to_nat_list_first);
-		ecm_db_connection_interfaces_deref(to_nat_list, to_nat_list_first);
+		dest_nat_mi = ecm_front_end_ipv4_mapping_establish_and_ref(out_dev, ip_dest_addr_nat, dest_port_nat);
 		if (!dest_nat_mi) {
 			ecm_db_mapping_deref(src_nat_mi);
 			ecm_db_mapping_deref(dest_mi);
@@ -4493,6 +4432,29 @@ static unsigned int ecm_front_end_ipv4_non_ported_process(struct net_device *out
 				return NF_DROP;
 			}
 		}
+
+		/*
+		 * Get the initial interface lists the connection will be using
+		 */
+		DEBUG_TRACE("%p: Create the 'from' interface heirarchy list\n", nci);
+		from_list_first = ecm_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, protocol);
+		ecm_db_connection_from_interfaces_reset(nci, from_list, from_list_first);
+		ecm_db_connection_interfaces_deref(from_list, from_list_first);
+
+		DEBUG_TRACE("%p: Create the 'from NAT' interface heirarchy list\n", nci);
+		from_nat_list_first = ecm_interface_heirarchy_construct(from_nat_list, ip_dest_addr, ip_src_addr_nat, protocol);
+		ecm_db_connection_from_nat_interfaces_reset(nci, from_nat_list, from_nat_list_first);
+		ecm_db_connection_interfaces_deref(from_nat_list, from_nat_list_first);
+
+		DEBUG_TRACE("%p: Create the 'to' interface heirarchy list\n", nci);
+		to_list_first = ecm_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, protocol);
+		ecm_db_connection_to_interfaces_reset(nci, to_list, to_list_first);
+		ecm_db_connection_interfaces_deref(to_list, to_list_first);
+
+		DEBUG_TRACE("%p: Create the 'to NAT' interface heirarchy list\n", nci);
+		to_nat_list_first = ecm_interface_heirarchy_construct(to_nat_list, ip_src_addr, ip_dest_addr_nat, protocol);
+		ecm_db_connection_to_nat_interfaces_reset(nci, to_nat_list, to_nat_list_first);
+		ecm_db_connection_interfaces_deref(to_nat_list, to_nat_list_first);
 
 		/*
 		 * Now add the connection into the database.

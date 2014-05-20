@@ -15,16 +15,6 @@
  */
 
 /*
- * ECM_INTERFACE_PPP_SUPPORT
- *	Comment this line out to disable support for working with PPP interfaces
- *
- * The ECM requires specific kernel API changes to work with PPP channels and channel type specific API's
- * If your kernel does not have this support - or - you do not wish to support PPP interface types -
- * comment this line out.
- */
-#define ECM_INTERFACE_PPP_SUPPORT
-
-/*
  * struct ecm_interface_route
  *	An ecm route supports either v4 or v6 routing information
  */
