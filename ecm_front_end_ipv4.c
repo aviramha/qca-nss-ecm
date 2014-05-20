@@ -3100,7 +3100,6 @@ static unsigned int ecm_front_end_ipv4_tcp_process(struct net_device *out_dev, s
 	int assignment_count;
 	ecm_db_timer_group_t ci_orig_timer_group;
 	struct ecm_classifier_process_response prevalent_pr;
-	struct nf_ct_dscpremark_ext *dscpcte;
 
 	/*
 	 * Extract TCP header to obtain port information
@@ -3603,23 +3602,22 @@ static unsigned int ecm_front_end_ipv4_tcp_process(struct net_device *out_dev, s
 	skb->priority = prevalent_pr.qos_tag;
 	DEBUG_TRACE("%p: skb priority: %u\n", ci, skb->priority);
 
-	dscpcte = nf_ct_dscpremark_ext_find(ct);
-	if (!dscpcte) {
-		DEBUG_TRACE("ct %p does not have DSCPREMARK conntrack extention!\n", ct);
-		return NF_ACCEPT;
-	}
-
-	/*
-	 * Extract the priority and DSCP from skb and store into ct extention
-	 */
-	if (ct_dir == IP_CT_DIR_ORIGINAL) {
-		dscpcte->flow_priority = skb->priority;
-		dscpcte->flow_dscp = ipv4_get_dsfield(ip_hdr(skb)) >> XT_DSCP_SHIFT;
-		DEBUG_TRACE("Flow DSCP: %x Flow priority: %d\n", dscpcte->flow_dscp, dscpcte->flow_priority);
-	} else {
-		dscpcte->reply_priority = skb->priority;
-		dscpcte->reply_dscp = ipv4_get_dsfield(ip_hdr(skb)) >> XT_DSCP_SHIFT;
-		DEBUG_TRACE("Return DSCP: %x Return priority: %d\n", dscpcte->reply_dscp, dscpcte->reply_priority);
+	if (ct) {
+		struct nf_ct_dscpremark_ext *dscpcte = nf_ct_dscpremark_ext_find(ct);
+		if (dscpcte) {
+			/*
+			 * Extract the priority and DSCP from skb and store into ct extention
+			 */
+			if (ct_dir == IP_CT_DIR_ORIGINAL) {
+				dscpcte->flow_priority = skb->priority;
+				dscpcte->flow_dscp = ipv4_get_dsfield(ip_hdr(skb)) >> XT_DSCP_SHIFT;
+				DEBUG_TRACE("Flow DSCP: %x Flow priority: %d\n", dscpcte->flow_dscp, dscpcte->flow_priority);
+			} else {
+				dscpcte->reply_priority = skb->priority;
+				dscpcte->reply_dscp = ipv4_get_dsfield(ip_hdr(skb)) >> XT_DSCP_SHIFT;
+				DEBUG_TRACE("Return DSCP: %x Return priority: %d\n", dscpcte->reply_dscp, dscpcte->reply_priority);
+			}
+		}
 	}
 
 	/*
@@ -3657,7 +3655,6 @@ static unsigned int ecm_front_end_ipv4_udp_process(struct net_device *out_dev, s
 	ecm_tracker_sender_type_t sender;
 	ip_addr_t match_addr;
 	struct ecm_classifier_instance *assignments[ECM_CLASSIFIER_TYPES];
-	struct nf_ct_dscpremark_ext *dscpcte;
 	int aci_index;
 	int assignment_count;
 	ecm_db_timer_group_t ci_orig_timer_group;
@@ -4161,23 +4158,22 @@ static unsigned int ecm_front_end_ipv4_udp_process(struct net_device *out_dev, s
 	skb->priority = prevalent_pr.qos_tag;
 	DEBUG_TRACE("%p: skb priority: %u\n", ci, skb->priority);
 
-	dscpcte = nf_ct_dscpremark_ext_find(ct);
-	if (!dscpcte) {
-		DEBUG_TRACE("ct %p does not have DSCPREMARK conntrack extention!\n", ct);
-		return NF_ACCEPT;
-	}
-
-	/*
-	 * Extract the priority and DSCP from skb and store into ct extention
-	 */
-	if (ct_dir == IP_CT_DIR_ORIGINAL) {
-		dscpcte->flow_priority = skb->priority;
-		dscpcte->flow_dscp = ipv4_get_dsfield(ip_hdr(skb)) >> XT_DSCP_SHIFT;
-		DEBUG_TRACE("Flow DSCP: %x Flow priority: %d\n", dscpcte->flow_dscp, dscpcte->flow_priority);
-	} else {
-		dscpcte->reply_priority = skb->priority;
-		dscpcte->reply_dscp = ipv4_get_dsfield(ip_hdr(skb)) >> XT_DSCP_SHIFT;
-		DEBUG_TRACE("Return DSCP: %x Return priority: %d\n", dscpcte->reply_dscp, dscpcte->reply_priority);
+	if (ct) {
+		struct nf_ct_dscpremark_ext *dscpcte = nf_ct_dscpremark_ext_find(ct);
+		if (dscpcte) {
+			/*
+			 * Extract the priority and DSCP from skb and store into ct extention
+			 */
+			if (ct_dir == IP_CT_DIR_ORIGINAL) {
+				dscpcte->flow_priority = skb->priority;
+				dscpcte->flow_dscp = ipv4_get_dsfield(ip_hdr(skb)) >> XT_DSCP_SHIFT;
+				DEBUG_TRACE("Flow DSCP: %x Flow priority: %d\n", dscpcte->flow_dscp, dscpcte->flow_priority);
+			} else {
+				dscpcte->reply_priority = skb->priority;
+				dscpcte->reply_dscp = ipv4_get_dsfield(ip_hdr(skb)) >> XT_DSCP_SHIFT;
+				DEBUG_TRACE("Return DSCP: %x Return priority: %d\n", dscpcte->reply_dscp, dscpcte->reply_priority);
+			}
+		}
 	}
 
 	/*
