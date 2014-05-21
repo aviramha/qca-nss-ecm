@@ -279,6 +279,9 @@ static void ecm_classifier_default_process(struct ecm_classifier_instance *aci, 
 	 * Handle non-TCP case
 	 */
 	if (ecm_db_connection_protocol_get(cdii->ci) != IPPROTO_TCP) {
+		if (unlikely(prevailing_state != ECM_TRACKER_CONNECTION_STATE_ESTABLISHED)) {
+			cdii->process_response.accel_mode = ECM_CLASSIFIER_ACCELERATION_MODE_NO;
+		}
 		goto return_response;
 	}
 
@@ -302,9 +305,10 @@ static void ecm_classifier_default_process(struct ecm_classifier_instance *aci, 
 	}
 
 	/*
-	 * TCP requires special handling due to MSS
+	 * Check the TCP connections state whether it is established or not.
 	 */
 	if (unlikely(prevailing_state != ECM_TRACKER_CONNECTION_STATE_ESTABLISHED)) {
+		cdii->process_response.accel_mode = ECM_CLASSIFIER_ACCELERATION_MODE_NO;
 		goto return_response;
 	}
 
