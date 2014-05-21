@@ -3936,7 +3936,7 @@ static unsigned int ecm_front_end_ipv6_udp_process(struct net_device *out_dev, s
 		if (!src_mi) {
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to establish src mapping\n");
-			return NF_DROP;
+			return NF_ACCEPT;
 		}
 
 		dest_mi = ecm_front_end_ipv6_mapping_establish_and_ref(out_dev, ip_dest_addr, dest_port);
@@ -3944,7 +3944,7 @@ static unsigned int ecm_front_end_ipv6_udp_process(struct net_device *out_dev, s
 			ecm_db_mapping_deref(src_mi);
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to establish dest mapping\n");
-			return NF_DROP;
+			return NF_ACCEPT;
 		}
 
 		/*
@@ -4392,7 +4392,7 @@ static unsigned int ecm_front_end_ipv6_non_ported_process(struct net_device *out
 		if (!src_mi) {
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to establish src mapping\n");
-			return NF_DROP;
+			return NF_ACCEPT;
 		}
 
 		dest_mi = ecm_front_end_ipv6_mapping_establish_and_ref(out_dev, ip_dest_addr, dest_port);
@@ -4400,7 +4400,7 @@ static unsigned int ecm_front_end_ipv6_non_ported_process(struct net_device *out
 			ecm_db_mapping_deref(src_mi);
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to establish dest mapping\n");
-			return NF_DROP;
+			return NF_ACCEPT;
 		}
 
 		/*
