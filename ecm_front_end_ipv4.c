@@ -4708,6 +4708,15 @@ static unsigned int ecm_front_end_ipv4_ip_process(struct net_device *out_dev, st
 		}
 
 		/*
+		 * If the conntrack connection is using a helper (i.e. Application Layer Gateway)
+		 * then acceleration is denied (connection needs assistance from HLOS to function)
+		 */
+		if (nfct_help(ct)) {
+			DEBUG_TRACE("%p: Connection has helper\n", ct);
+			can_accel = false;
+		}
+
+		/*
 		 * Extract conntrack connection information
 		 */
 		DEBUG_TRACE("%p: ct: %p, ctinfo: %x\n", skb, ct, ctinfo);
