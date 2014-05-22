@@ -990,18 +990,18 @@ static void ecm_front_end_ipv6_connection_tcp_front_end_accelerate(struct ecm_fr
 	if (ct) {
 		spin_lock_bh(&ct->lock);
 		dscpcte = nf_ct_dscpremark_ext_find(ct);
-		if (!dscpcte) {
+		if (dscpcte) {
+			/*
+			 * Update QOS and DSCP parameters
+			 */
+			create.flow_qos_tag = dscpcte->flow_priority;
+			create.flow_dscp = dscpcte->flow_dscp;
+			create.return_qos_tag = dscpcte->reply_priority;
+			create.return_dscp = dscpcte->reply_dscp;
+			create.flags = NSS_IPV6_CREATE_FLAG_DSCP_MARKING;
+		} else {
 			DEBUG_TRACE("ct %p does not have DSCPREMARK conntrack extention!\n", ct);
-			spin_unlock_bh(&ct->lock);
-			return;
 		}
-
-		create.flow_qos_tag = dscpcte->flow_priority;
-		create.flow_dscp = dscpcte->flow_dscp;
-		create.return_qos_tag = dscpcte->reply_priority;
-		create.return_dscp = dscpcte->reply_dscp;
-		create.flags = NSS_IPV6_CREATE_FLAG_DSCP_MARKING;
-
 		spin_unlock_bh(&ct->lock);
 	}
 
@@ -1870,18 +1870,18 @@ static void ecm_front_end_ipv6_connection_udp_front_end_accelerate(struct ecm_fr
 	if (ct) {
 		spin_lock_bh(&ct->lock);
 		dscpcte = nf_ct_dscpremark_ext_find(ct);
-		if (!dscpcte) {
+		if (dscpcte) {
+			/*
+			 * Update QOS and DSCP parameters
+			 */
+			create.flow_qos_tag = dscpcte->flow_priority;
+			create.flow_dscp = dscpcte->flow_dscp;
+			create.return_qos_tag = dscpcte->reply_priority;
+			create.return_dscp = dscpcte->reply_dscp;
+			create.flags = NSS_IPV6_CREATE_FLAG_DSCP_MARKING;
+		} else {
 			DEBUG_TRACE("ct %p does not have DSCPREMARK conntrack extention!\n", ct);
-			spin_unlock_bh(&ct->lock);
-			return;
 		}
-
-		create.flow_qos_tag = dscpcte->flow_priority;
-		create.flow_dscp = dscpcte->flow_dscp;
-		create.return_qos_tag = dscpcte->reply_priority;
-		create.return_dscp = dscpcte->reply_dscp;
-		create.flags = NSS_IPV6_CREATE_FLAG_DSCP_MARKING;
-
 		spin_unlock_bh(&ct->lock);
 	}
 
