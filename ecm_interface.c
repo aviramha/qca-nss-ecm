@@ -44,6 +44,7 @@
 #include <linux/inetdevice.h>
 #include <net/ipip.h>
 #include <net/ip6_tunnel.h>
+#include <net/addrconf.h>
 #include <linux/if_arp.h>
 #include <linux/netfilter_ipv4.h>
 #include <linux/netfilter_bridge.h>
@@ -1292,7 +1293,7 @@ EXPORT_SYMBOL(ecm_interface_establish_and_ref);
  *
  * PPPoE--VLAN--BRIDGE--BRIDGE_PORT(LAG_MASTER)--LAG_SLAVE_0--10.22.33.11
  *
- * Given the IP address 10.22.33.11 this will create an interface heirarchy (in interracfes[]) of:
+ * Given the packet_dest_addr IP address 10.22.33.11 this will create an interface heirarchy (in interracfes[]) of:
  * LAG_SLAVE_0 @ [ECM_DB_IFACE_HEIRARCHY_MAX - 5]
  * LAG_MASTER @ [ECM_DB_IFACE_HEIRARCHY_MAX - 4]
  * BRIDGE @ [ECM_DB_IFACE_HEIRARCHY_MAX - 3]
@@ -1312,10 +1313,6 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfac
 	int protocol;
 	ip_addr_t src_addr;
 	ip_addr_t dest_addr;
-	struct ecm_interface_route src_rt;
-	struct ecm_interface_route dest_rt;
-	struct dst_entry *src_dst;
-	struct dst_entry *dest_dst;
 	struct net_device *src_dev;
 	struct net_device *dest_dev;
 	char *src_dev_name;
@@ -1335,42 +1332,56 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfac
 	DEBUG_TRACE("Construct interface heirarchy for from src_addr: %s to dest_addr: %s, protocol: %d\n", src_addr_str, dest_addr_str, protocol);
 
 	/*
-	 * Begin by finding the interface to which we reach the given addresses
+	 * Get device from the given addresses
+	 * Is the address a local IP?
 	 */
-	if (!ecm_interface_find_route_by_addr(src_addr, &src_rt)) {
-		DEBUG_WARN("Construct interface heirarchy failed from src_addr: %s to dest_addr: %s, protocol: %d\n", src_addr_str, dest_addr_str, protocol);
-		return ECM_DB_IFACE_HEIRARCHY_MAX;
-	}
-	if (!ecm_interface_find_route_by_addr(dest_addr, &dest_rt)) {
-		ecm_interface_route_release(&src_rt);
-		DEBUG_WARN("Construct interface heirarchy failed from src_addr: %s to dest_addr: %s, protocol: %d\n", src_addr_str, dest_addr_str, protocol);
-		return ECM_DB_IFACE_HEIRARCHY_MAX;
-	}
+	src_dev = ecm_interface_dev_find_by_addr(src_addr);
+	if (!src_dev) {
+		struct ecm_interface_route ecm_rt;
+		struct dst_entry *dst;
 
-	/*
-	 * Get the dst entries
-	 */
-	src_dst = src_rt.dst;
-	dest_dst = dest_rt.dst;
+		DEBUG_TRACE("src_addr: %s is not local\n", src_addr_str);
 
-	/*
-	 * Get device from the destination entries
-	 */
-	src_dev = src_dst->dev;
-	dev_hold(src_dev);
+		/*
+		 * Not local.
+		 * Try a route to the address
+		 */
+		if (!ecm_interface_find_route_by_addr(src_addr, &ecm_rt)) {
+			DEBUG_WARN("src_addr: %s - no route\n", src_addr_str);
+			return ECM_DB_IFACE_HEIRARCHY_MAX;
+		}
+		dst = ecm_rt.dst;
+		src_dev = dst->dev;
+		dev_hold(src_dev);
+		ecm_interface_route_release(&ecm_rt);
+		DEBUG_TRACE("src_addr: %s uses dev: %p(%s)\n", src_addr_str, src_dev, src_dev->name);
+	}
 	src_dev_name = src_dev->name;
 	src_dev_type = src_dev->type;
 
-	dest_dev = dest_dst->dev;
-	dev_hold(dest_dev);
+	dest_dev = ecm_interface_dev_find_by_addr(dest_addr);
+	if (!dest_dev) {
+		struct ecm_interface_route ecm_rt;
+		struct dst_entry *dst;
+
+		DEBUG_TRACE("dest_addr: %s is not local\n", dest_addr_str);
+
+		/*
+		 * Try a route to the address
+		 */
+		if (!ecm_interface_find_route_by_addr(dest_addr, &ecm_rt)) {
+			DEBUG_WARN("dest_addr: %s - no route\n", dest_addr_str);
+			dev_put(src_dev);
+			return ECM_DB_IFACE_HEIRARCHY_MAX;
+		}
+		dst = ecm_rt.dst;
+		dest_dev = dst->dev;
+		dev_hold(dest_dev);
+		ecm_interface_route_release(&ecm_rt);
+		DEBUG_TRACE("dest_addr: %s uses dev: %p(%s)\n", dest_addr_str, dest_dev, dest_dev->name);
+	}
 	dest_dev_name = dest_dev->name;
 	dest_dev_type = dest_dev->type;
-
-	/*
-	 * Release route (we hold devices for ourselves)
-	 */
-	ecm_interface_route_release(&src_rt);
-	ecm_interface_route_release(&dest_rt);
 
 	/*
 	 * Iterate until we are done or get to the max number of interfaces we can record.
