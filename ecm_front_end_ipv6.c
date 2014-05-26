@@ -909,6 +909,9 @@ static struct ecm_db_mapping_instance *ecm_front_end_ipv6_mapping_establish_and_
 /*
  * ecm_front_end_ipv6_connection_tcp_front_end_accelerate()
  *	Accelerate a connection
+ *
+ * GGG TODO Refactor this function into a single function that np, udp and tcp
+ * can all use and reduce the amount of code!
  */
 static void ecm_front_end_ipv6_connection_tcp_front_end_accelerate(struct ecm_front_end_connection_instance *feci,
 									struct ecm_classifier_process_response *pr,
@@ -990,23 +993,16 @@ static void ecm_front_end_ipv6_connection_tcp_front_end_accelerate(struct ecm_fr
 	/*
 	 * Save the per-direction QoS and DSCP information
 	 */
-	if (ct) {
-		spin_lock_bh(&ct->lock);
-		dscpcte = nf_ct_dscpremark_ext_find(ct);
-		if (dscpcte) {
-			/*
-			 * Update QOS and DSCP parameters
-			 */
-			create.flow_qos_tag = dscpcte->flow_priority;
-			create.flow_dscp = dscpcte->flow_dscp;
-			create.return_qos_tag = dscpcte->reply_priority;
-			create.return_dscp = dscpcte->reply_dscp;
-			create.flags = NSS_IPV6_CREATE_FLAG_DSCP_MARKING;
-		} else {
-			DEBUG_TRACE("ct %p does not have DSCPREMARK conntrack extention!\n", ct);
-		}
-		spin_unlock_bh(&ct->lock);
+	spin_lock_bh(&ct->lock);
+	dscpcte = (ct)? nf_ct_dscpremark_ext_find(ct) : NULL;
+	if (dscpcte) {
+		create.flow_qos_tag = dscpcte->flow_priority;
+		create.flow_dscp = dscpcte->flow_dscp;
+		create.return_qos_tag = dscpcte->reply_priority;
+		create.return_dscp = dscpcte->reply_dscp;
+		create.flags = NSS_IPV6_CREATE_FLAG_DSCP_MARKING;
 	}
+	spin_unlock_bh(&ct->lock);
 
 	/*
 	 * Get the interface lists of the connection, we must have at least one interface in the list to continue
@@ -1758,6 +1754,9 @@ static struct ecm_front_end_ipv6_connection_tcp_instance *ecm_front_end_ipv6_con
 /*
  * ecm_front_end_ipv6_connection_udp_front_end_accelerate()
  *	Accelerate a connection
+ *
+ * GGG TODO Refactor this function into a single function that np, udp and tcp
+ * can all use and reduce the amount of code!
  */
 static void ecm_front_end_ipv6_connection_udp_front_end_accelerate(struct ecm_front_end_connection_instance *feci,
 									struct ecm_classifier_process_response *pr,
@@ -1838,6 +1837,20 @@ static void ecm_front_end_ipv6_connection_udp_front_end_accelerate(struct ecm_fr
 	create.out_vlan_tag[1] = ECM_NSS_CONNMGR_VLAN_ID_NOT_CONFIGURED;
 
 	/*
+	 * Save the per-direction QoS and DSCP information
+	 */
+	spin_lock_bh(&ct->lock);
+	dscpcte = (ct)? nf_ct_dscpremark_ext_find(ct) : NULL;
+	if (dscpcte) {
+		create.flow_qos_tag = dscpcte->flow_priority;
+		create.flow_dscp = dscpcte->flow_dscp;
+		create.return_qos_tag = dscpcte->reply_priority;
+		create.return_dscp = dscpcte->reply_dscp;
+		create.flags = NSS_IPV6_CREATE_FLAG_DSCP_MARKING;
+	}
+	spin_unlock_bh(&ct->lock);
+
+	/*
 	 * Get the interface lists of the connection, we must have at least one interface in the list to continue
 	 */
 	from_ifaces_first = ecm_db_connection_from_interfaces_get_and_ref(fecui->ci, from_ifaces);
@@ -1889,27 +1902,6 @@ static void ecm_front_end_ipv6_connection_udp_front_end_accelerate(struct ecm_fr
 	 */
 	create.src_interface_num = from_nss_iface_id;
 	create.dest_interface_num = to_nss_iface_id;
-
-	/*
-	 * Save the per-direction QoS and DSCP information
-	 */
-	if (ct) {
-		spin_lock_bh(&ct->lock);
-		dscpcte = nf_ct_dscpremark_ext_find(ct);
-		if (dscpcte) {
-			/*
-			 * Update QOS and DSCP parameters
-			 */
-			create.flow_qos_tag = dscpcte->flow_priority;
-			create.flow_dscp = dscpcte->flow_dscp;
-			create.return_qos_tag = dscpcte->reply_priority;
-			create.return_dscp = dscpcte->reply_dscp;
-			create.flags = NSS_IPV6_CREATE_FLAG_DSCP_MARKING;
-		} else {
-			DEBUG_TRACE("ct %p does not have DSCPREMARK conntrack extention!\n", ct);
-		}
-		spin_unlock_bh(&ct->lock);
-	}
 
 	/*
 	 * We know that each outward facing interface is known to the NSS and so this connection could be accelerated.
@@ -2562,6 +2554,9 @@ static struct ecm_front_end_ipv6_connection_udp_instance *ecm_front_end_ipv6_con
 /*
  * ecm_front_end_ipv6_connection_non_ported_front_end_accelerate()
  *	Accelerate a connection
+ *
+ * GGG TODO Refactor this function into a single function that np, udp and tcp
+ * can all use and reduce the amount of code!
  */
 static void ecm_front_end_ipv6_connection_non_ported_front_end_accelerate(struct ecm_front_end_connection_instance *feci,
 									struct ecm_classifier_process_response *pr)
