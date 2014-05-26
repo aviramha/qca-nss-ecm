@@ -5335,13 +5335,27 @@ static void ecm_front_end_ipv6_ipv6_net_dev_callback(struct nss_ipv6_cb_params *
 	if (sync->flow_tx_packet_count || sync->return_tx_packet_count) {
 		DEBUG_TRACE("%p: flow_tx_packet_count: %u, flow_tx_byte_count: %u, return_tx_packet_count: %u, , return_tx_byte_count: %u\n",
 				ci, sync->flow_tx_packet_count, sync->flow_tx_byte_count, sync->return_tx_packet_count, sync->return_tx_byte_count);
-		ecm_db_connection_data_totals_update(ci, true, sync->return_tx_byte_count, sync->return_tx_packet_count);
-		ecm_db_connection_data_totals_update(ci, false, sync->flow_tx_byte_count, sync->flow_tx_packet_count);
+
+		/*
+		 * The amount of data *sent* by the ECM connection 'from' side is the amount the NSS has *received* in the 'flow' direction.
+		 */
+		ecm_db_connection_data_totals_update(ci, true, sync->flow_rx_byte_count, sync->flow_rx_packet_count);
+
+		/*
+		 * The amount of data *sent* by the ECM connection 'to' side is the amount the NSS has *received* in the 'return' direction.
+		 */
+		ecm_db_connection_data_totals_update(ci, false, sync->return_rx_byte_count, sync->return_rx_packet_count);
 
 		/*
 		 * As packets have been accelerated we reset the accel count for the connection
 		 */
 		feci->accel_count_reset(feci);
+
+		/*
+		 * Update interface statistics
+		 */
+		ecm_interface_stats_update(ci, sync->flow_tx_packet_count, sync->flow_tx_byte_count, sync->flow_rx_packet_count, sync->flow_rx_byte_count,
+						sync->return_tx_packet_count, sync->return_tx_byte_count, sync->return_rx_packet_count, sync->return_rx_byte_count);
 	}
 
 	/*

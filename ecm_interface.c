@@ -85,6 +85,11 @@
 #include "ecm_interface.h"
 
 /*
+ * TODO: Remove once the Linux image and headers get propogated.
+ */
+struct net_device *ipv6_dev_find(struct net *net, struct in6_addr *addr, int strict);
+
+/*
  * Locking - concurrency control
  */
 static spinlock_t ecm_interface_lock;			/* Protect against SMP access between netfilter, events and private threaded function. */
@@ -103,6 +108,55 @@ static int ecm_interface_stopped = 0;			/* When non-zero further traffic will no
  * Management thread control
  */
 static bool ecm_interface_terminate_pending = false;		/* True when the user has signalled we should quit */
+
+/*
+ * ecm_interface_dev_find_by_addr_ipv4()
+ *	Return a hold to the device for the given IP address.  Returns NULL on failure.
+ */
+static struct net_device *ecm_interface_dev_find_by_addr_ipv4(ip_addr_t addr)
+{
+	__be32 be_addr;
+	struct net_device *dev;
+
+	ECM_IP_ADDR_TO_NIN4_ADDR(be_addr, addr);
+	dev = ip_dev_find(&init_net, be_addr);
+	return dev;
+}
+
+/*
+ * ecm_interface_dev_find_by_addr_ipv6()
+ *	Return a hold to the device for the given IP address.  Returns NULL on failure.
+ */
+static struct net_device *ecm_interface_dev_find_by_addr_ipv6(ip_addr_t addr)
+{
+	struct in6_addr addr6;
+	struct net_device *dev;
+
+	ECM_IP_ADDR_TO_NIN6_ADDR(addr6, addr);
+	dev = (struct net_device *)ipv6_dev_find(&init_net, &addr6, 1);
+	return dev;
+}
+
+/*
+ * ecm_interface_dev_find_by_addr()
+ *	Return the address locate the device on which it resides.
+ *
+ * Returns a hold to the device or NULL on failure.
+ */
+struct net_device *ecm_interface_dev_find_by_addr(ip_addr_t addr)
+{
+	char __attribute__((unused)) addr_str[40];
+
+	ecm_ip_addr_to_string(addr_str, addr);
+	DEBUG_TRACE("Locate dev for: %s\n", addr_str);
+
+	if (ECM_IP_ADDR_IS_V4(addr)) {
+		return ecm_interface_dev_find_by_addr_ipv4(addr);
+	}
+
+	return ecm_interface_dev_find_by_addr_ipv6(addr);
+}
+EXPORT_SYMBOL(ecm_interface_dev_find_by_addr);
 
 /*
  * ecm_interface_mac_addr_get_ipv6()
@@ -1698,6 +1752,114 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfac
 	return ECM_DB_IFACE_HEIRARCHY_MAX;
 }
 EXPORT_SYMBOL(ecm_interface_heirarchy_construct);
+
+/*
+ * ecm_interface_list_stats_update()
+ *	Given an interface list, walk the interfaces and update the stats for certain types.
+ */
+static void ecm_interface_list_stats_update(int iface_list_first, struct ecm_db_iface_instance *iface_list[], uint8_t *mac_addr,
+						uint32_t tx_packets, uint32_t tx_bytes, uint32_t rx_packets, uint32_t rx_bytes)
+{
+	int list_index;
+
+	for (list_index = iface_list_first; (list_index < ECM_DB_IFACE_HEIRARCHY_MAX); list_index++) {
+		struct ecm_db_iface_instance *ii;
+		ecm_db_iface_type_t ii_type;
+		char *ii_name;
+		struct net_device *dev;
+
+		ii = iface_list[list_index];
+		ii_type = ecm_db_connection_iface_type_get(ii);
+		ii_name = ecm_db_interface_type_to_string(ii_type);
+		DEBUG_TRACE("list_index: %d, ii: %p, type: %d (%s)\n", list_index, ii, ii_type, ii_name);
+
+		/*
+		 * Locate real device in system
+		 */
+		dev = dev_get_by_index(&init_net, ecm_db_iface_interface_identifier_get(ii));
+		if (!dev) {
+			DEBUG_WARN("Could not locate interface\n");
+			continue;
+		}
+		DEBUG_TRACE("found dev: %p (%s)\n", dev, dev->name);
+
+		switch (ii_type) {
+			struct rtnl_link_stats64 stats;
+
+			case ECM_DB_IFACE_TYPE_VLAN:
+				DEBUG_INFO("%VLAN\n");
+				stats.rx_packets = rx_packets;
+				stats.rx_bytes = rx_bytes;
+				stats.tx_packets = tx_packets;
+				stats.tx_bytes = tx_bytes;
+				__vlan_dev_update_accel_stats(dev, &stats);
+				break;
+			case ECM_DB_IFACE_TYPE_BRIDGE:
+				DEBUG_INFO("BRIDGE\n");
+				stats.rx_packets = rx_packets;
+				stats.rx_bytes = rx_bytes;
+				stats.tx_packets = tx_packets;
+				stats.tx_bytes = tx_bytes;
+				br_dev_update_stats(dev, &stats);
+
+				/*
+				 * Refresh the bridge forward table entry
+				 */
+				DEBUG_TRACE("Update bridge fdb entry for mac: %pM\n", mac_addr);
+				br_refresh_fdb_entry(dev, mac_addr);
+				break;
+
+			default:
+				/*
+				 * TODO: Extend it accordingly
+				 */
+				break;
+		}
+
+		dev_put(dev);
+	}
+}
+
+/*
+ * ecm_interface_stats_update()
+ *	Using the interface lists for the given connection, update the interface statistics for each.
+ *
+ * 'from' here is wrt the connection 'from' side.  Likewise with 'to'.
+ * TX is wrt what the interface has transmitted.  RX is what the interface has received.
+ */
+void ecm_interface_stats_update(struct ecm_db_connection_instance *ci,
+						uint32_t from_tx_packets, uint32_t from_tx_bytes, uint32_t from_rx_packets, uint32_t from_rx_bytes,
+						uint32_t to_tx_packets, uint32_t to_tx_bytes, uint32_t to_rx_packets, uint32_t to_rx_bytes)
+{
+	struct ecm_db_iface_instance *from_ifaces[ECM_DB_IFACE_HEIRARCHY_MAX];
+	struct ecm_db_iface_instance *to_ifaces[ECM_DB_IFACE_HEIRARCHY_MAX];
+	int from_ifaces_first;
+	int to_ifaces_first;
+	uint8_t mac_addr[ETH_ALEN];
+
+	/*
+	 * Iterate the 'from' side interfaces and update statistics and state for the real HLOS interfaces
+	 * from_tx_packets / bytes: the amount transmitted by the 'from' interface
+	 * from_rx_packets / bytes: the amount received by the 'from' interface
+	 */
+	DEBUG_INFO("%p: Update from interface stats\n", ci);
+	from_ifaces_first = ecm_db_connection_from_interfaces_get_and_ref(ci, from_ifaces);
+	ecm_db_connection_from_node_address_get(ci, mac_addr);
+	ecm_interface_list_stats_update(from_ifaces_first, from_ifaces, mac_addr, from_tx_packets, from_tx_bytes, from_rx_packets, from_rx_bytes);
+	ecm_db_connection_interfaces_deref(from_ifaces, from_ifaces_first);
+
+	/*
+	 * Iterate the 'to' side interfaces and update statistics and state for the real HLOS interfaces
+	 * to_tx_packets / bytes: the amount transmitted by the 'to' interface
+	 * to_rx_packets / bytes: the amount received by the 'to' interface
+	 */
+	DEBUG_INFO("%p: Update to interface stats\n", ci);
+	to_ifaces_first = ecm_db_connection_to_interfaces_get_and_ref(ci, to_ifaces);
+	ecm_db_connection_to_node_address_get(ci, mac_addr);
+	ecm_interface_list_stats_update(to_ifaces_first, to_ifaces, mac_addr, to_tx_packets, to_tx_bytes, to_rx_packets, to_rx_bytes);
+	ecm_db_connection_interfaces_deref(to_ifaces, to_ifaces_first);
+}
+EXPORT_SYMBOL(ecm_interface_stats_update);
 
 /*
  * ecm_interface_regenerate_connections()

@@ -39,4 +39,5 @@ bool ecm_interface_find_route_by_addr(ip_addr_t addr, struct ecm_interface_route
 void ecm_interface_route_release(struct ecm_interface_route *rt);
 struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct net_device *dev);
 int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfaces[], ip_addr_t packet_src_addr, ip_addr_t packet_dest_addr, int packet_protocol);
-
+void ecm_interface_stats_update(struct ecm_db_connection_instance *ci, uint32_t from_tx_packets, uint32_t from_tx_bytes, uint32_t from_rx_packets, uint32_t from_rx_bytes, uint32_t to_tx_packets, uint32_t to_tx_bytes, uint32_t to_rx_packets, uint32_t to_rx_bytes);
+struct net_device *ecm_interface_dev_find_by_addr(ip_addr_t addr);
