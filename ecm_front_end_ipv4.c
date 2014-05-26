@@ -3067,7 +3067,7 @@ static unsigned int ecm_front_end_ipv4_tcp_process(struct net_device *out_dev, s
 	tcp_hdr = ecm_tracker_tcp_check_header_and_read(skb, iph, &tcp_hdr_buff);
 	if (unlikely(!tcp_hdr)) {
 		DEBUG_WARN("TCP packet header %p\n", skb);
-		return NF_DROP;
+		return NF_ACCEPT;
 	}
 
 	/*
@@ -3164,7 +3164,7 @@ static unsigned int ecm_front_end_ipv4_tcp_process(struct net_device *out_dev, s
 		nci = ecm_db_connection_alloc();
 		if (!nci) {
 			DEBUG_WARN("Failed to allocate connection\n");
-			return NF_DROP;
+			return NF_ACCEPT;
 		}
 
 		/*
@@ -3174,7 +3174,7 @@ static unsigned int ecm_front_end_ipv4_tcp_process(struct net_device *out_dev, s
 		if (!src_mi) {
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to establish src mapping\n");
-			return NF_DROP;
+			return NF_ACCEPT;
 		}
 
 		dest_mi = ecm_front_end_ipv4_mapping_establish_and_ref(out_dev, ip_dest_addr, dest_port);
@@ -3182,7 +3182,7 @@ static unsigned int ecm_front_end_ipv4_tcp_process(struct net_device *out_dev, s
 			ecm_db_mapping_deref(src_mi);
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to establish dest mapping\n");
-			return NF_DROP;
+			return NF_ACCEPT;
 		}
 
 		/*
@@ -3194,7 +3194,7 @@ static unsigned int ecm_front_end_ipv4_tcp_process(struct net_device *out_dev, s
 			ecm_db_mapping_deref(src_mi);
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to establish src nat mapping\n");
-			return NF_DROP;
+			return NF_ACCEPT;
 		}
 
 		dest_nat_mi = ecm_front_end_ipv4_mapping_establish_and_ref(out_dev, ip_dest_addr_nat, dest_port_nat);
@@ -3204,7 +3204,7 @@ static unsigned int ecm_front_end_ipv4_tcp_process(struct net_device *out_dev, s
 			ecm_db_mapping_deref(src_mi);
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to establish dest mapping\n");
-			return NF_DROP;
+			return NF_ACCEPT;
 		}
 
 		/*
@@ -3218,7 +3218,7 @@ static unsigned int ecm_front_end_ipv4_tcp_process(struct net_device *out_dev, s
 			ecm_db_mapping_deref(src_mi);
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to allocate front end\n");
-			return NF_DROP;
+			return NF_ACCEPT;
 		}
 
 		/*
@@ -3233,7 +3233,7 @@ static unsigned int ecm_front_end_ipv4_tcp_process(struct net_device *out_dev, s
 			ecm_db_mapping_deref(src_mi);
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to allocate default classifier\n");
-			return NF_DROP;
+			return NF_ACCEPT;
 		}
 
 		/*
@@ -3253,7 +3253,7 @@ static unsigned int ecm_front_end_ipv4_tcp_process(struct net_device *out_dev, s
 				ecm_db_mapping_deref(src_mi);
 				ecm_db_connection_deref(nci);
 				DEBUG_WARN("Failed to allocate classifiers assignments\n");
-				return NF_DROP;
+				return NF_ACCEPT;
 			}
 		}
 
@@ -3341,7 +3341,7 @@ static unsigned int ecm_front_end_ipv4_tcp_process(struct net_device *out_dev, s
 	 */
 	if (!ecm_db_connection_defunct_timer_touch(ci)) {
 		ecm_db_connection_deref(ci);
-		return NF_DROP;
+		return NF_ACCEPT;
 	}
 
 	/*
@@ -3417,7 +3417,7 @@ static unsigned int ecm_front_end_ipv4_tcp_process(struct net_device *out_dev, s
 				DEBUG_WARN("%p: Regeneration failed, dropping packet\n", ci);
 				ecm_db_connection_assignments_release(assignment_count, assignments);
 				ecm_db_connection_deref(ci);
-				return NF_DROP;
+				return NF_ACCEPT;
 			}
 			DEBUG_TRACE("%p: reclassify success\n", ci);
 		}
@@ -3553,7 +3553,7 @@ static unsigned int ecm_front_end_ipv4_tcp_process(struct net_device *out_dev, s
 		DEBUG_TRACE("%p: drop: %p\n", ci, skb);
 		ecm_db_connection_data_totals_update_dropped(ci, (sender == ECM_TRACKER_SENDER_TYPE_SRC)? true : false, skb->len, 1);
 		ecm_db_connection_deref(ci);
-		return NF_DROP;
+		return NF_ACCEPT;
 	}
 	ecm_db_connection_data_totals_update(ci, (sender == ECM_TRACKER_SENDER_TYPE_SRC)? true : false, skb->len, 1);
 
@@ -3627,7 +3627,7 @@ static unsigned int ecm_front_end_ipv4_udp_process(struct net_device *out_dev, s
 	udp_hdr = ecm_tracker_udp_check_header_and_read(skb, iph, &udp_hdr_buff);
 	if (unlikely(!udp_hdr)) {
 		DEBUG_WARN("Invalid UDP header in skb %p\n", skb);
-		return NF_DROP;
+		return NF_ACCEPT;
 	}
 
 	/*
@@ -3721,7 +3721,7 @@ static unsigned int ecm_front_end_ipv4_udp_process(struct net_device *out_dev, s
 		nci = ecm_db_connection_alloc();
 		if (!nci) {
 			DEBUG_WARN("Failed to allocate connection\n");
-			return NF_DROP;
+			return NF_ACCEPT;
 		}
 
 		/*
@@ -3775,7 +3775,7 @@ static unsigned int ecm_front_end_ipv4_udp_process(struct net_device *out_dev, s
 			ecm_db_mapping_deref(src_mi);
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to allocate front end\n");
-			return NF_DROP;
+			return NF_ACCEPT;
 		}
 
 		/*
@@ -3790,7 +3790,7 @@ static unsigned int ecm_front_end_ipv4_udp_process(struct net_device *out_dev, s
 			ecm_db_mapping_deref(src_mi);
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to allocate default classifier\n");
-			return NF_DROP;
+			return NF_ACCEPT;
 		}
 
 		/*
@@ -3810,7 +3810,7 @@ static unsigned int ecm_front_end_ipv4_udp_process(struct net_device *out_dev, s
 				ecm_db_mapping_deref(src_mi);
 				ecm_db_connection_deref(nci);
 				DEBUG_WARN("Failed to allocate classifiers assignments\n");
-				return NF_DROP;
+				return NF_ACCEPT;
 			}
 		}
 
@@ -3898,7 +3898,7 @@ static unsigned int ecm_front_end_ipv4_udp_process(struct net_device *out_dev, s
 	 */
 	if (!ecm_db_connection_defunct_timer_touch(ci)) {
 		ecm_db_connection_deref(ci);
-		return NF_DROP;
+		return NF_ACCEPT;
 	}
 
 	/*
@@ -3974,7 +3974,7 @@ static unsigned int ecm_front_end_ipv4_udp_process(struct net_device *out_dev, s
 				DEBUG_WARN("%p: Regeneration failed, dropping packet\n", ci);
 				ecm_db_connection_assignments_release(assignment_count, assignments);
 				ecm_db_connection_deref(ci);
-				return NF_DROP;
+				return NF_ACCEPT;
 			}
 			DEBUG_TRACE("%p: reclassify success\n", ci);
 		}
@@ -4110,7 +4110,7 @@ static unsigned int ecm_front_end_ipv4_udp_process(struct net_device *out_dev, s
 		DEBUG_TRACE("%p: drop: %p\n", ci, skb);
 		ecm_db_connection_data_totals_update_dropped(ci, (sender == ECM_TRACKER_SENDER_TYPE_SRC)? true : false, skb->len, 1);
 		ecm_db_connection_deref(ci);
-		return NF_DROP;
+		return NF_ACCEPT;
 	}
 	ecm_db_connection_data_totals_update(ci, (sender == ECM_TRACKER_SENDER_TYPE_SRC)? true : false, skb->len, 1);
 
@@ -4244,7 +4244,7 @@ static unsigned int ecm_front_end_ipv4_non_ported_process(struct net_device *out
 		nci = ecm_db_connection_alloc();
 		if (!nci) {
 			DEBUG_WARN("Failed to allocate connection\n");
-			return NF_DROP;
+			return NF_ACCEPT;
 		}
 
 		/*
@@ -4298,7 +4298,7 @@ static unsigned int ecm_front_end_ipv4_non_ported_process(struct net_device *out
 			ecm_db_mapping_deref(src_mi);
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to allocate front end\n");
-			return NF_DROP;
+			return NF_ACCEPT;
 		}
 
 		/*
@@ -4313,7 +4313,7 @@ static unsigned int ecm_front_end_ipv4_non_ported_process(struct net_device *out
 			ecm_db_mapping_deref(src_mi);
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to allocate default classifier\n");
-			return NF_DROP;
+			return NF_ACCEPT;
 		}
 
 		/*
@@ -4333,7 +4333,7 @@ static unsigned int ecm_front_end_ipv4_non_ported_process(struct net_device *out
 				ecm_db_mapping_deref(src_mi);
 				ecm_db_connection_deref(nci);
 				DEBUG_WARN("Failed to allocate classifiers assignments\n");
-				return NF_DROP;
+				return NF_ACCEPT;
 			}
 		}
 
@@ -4421,7 +4421,7 @@ static unsigned int ecm_front_end_ipv4_non_ported_process(struct net_device *out
 	 */
 	if (!ecm_db_connection_defunct_timer_touch(ci)) {
 		ecm_db_connection_deref(ci);
-		return NF_DROP;
+		return NF_ACCEPT;
 	}
 
 	/*
@@ -4497,7 +4497,7 @@ static unsigned int ecm_front_end_ipv4_non_ported_process(struct net_device *out
 				DEBUG_WARN("%p: Regeneration failed, dropping packet\n", ci);
 				ecm_db_connection_assignments_release(assignment_count, assignments);
 				ecm_db_connection_deref(ci);
-				return NF_DROP;
+				return NF_ACCEPT;
 			}
 			DEBUG_TRACE("%p: reclassify success\n", ci);
 		}
@@ -4633,7 +4633,7 @@ static unsigned int ecm_front_end_ipv4_non_ported_process(struct net_device *out
 		DEBUG_TRACE("%p: drop: %p\n", ci, skb);
 		ecm_db_connection_data_totals_update_dropped(ci, (sender == ECM_TRACKER_SENDER_TYPE_SRC)? true : false, skb->len, 1);
 		ecm_db_connection_deref(ci);
-		return NF_DROP;
+		return NF_ACCEPT;
 	}
 	ecm_db_connection_data_totals_update(ci, (sender == ECM_TRACKER_SENDER_TYPE_SRC)? true : false, skb->len, 1);
 
@@ -4681,7 +4681,7 @@ static unsigned int ecm_front_end_ipv4_ip_process(struct net_device *out_dev, st
 	 */
 	if (!ecm_tracker_ip_check_header_and_read(&ip_hdr, skb)) {
 		DEBUG_WARN("Invalid ip header in skb %p\n", skb);
-		return NF_DROP;
+		return NF_ACCEPT;
 	}
 
 	if (ip_hdr.fragmented) {
