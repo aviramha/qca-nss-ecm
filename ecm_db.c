@@ -8097,9 +8097,11 @@ static bool ecm_db_char_dev_conn_msg_prep(struct ecm_db_state_file_instance *sfi
 	int sport;
 	int sport_nat;
 	char snode_address[25];
+	char snode_address_nat[25];
 	char sip_address[50];
 	char sip_address_nat[50];
 	char dnode_address[25];
+	char dnode_address_nat[25];
 	int dport;
 	int dport_nat;
 	char dip_address[50];
@@ -8161,6 +8163,12 @@ static bool ecm_db_char_dev_conn_msg_prep(struct ecm_db_state_file_instance *sfi
 	hi = sfi->ci->mapping_nat_from->host;
 	ecm_ip_addr_to_string(sip_address_nat, hi->address);
 
+	hi = sfi->ci->mapping_nat_to->host;
+	sprintf(dnode_address_nat, "%pM", hi->node->address);
+
+	hi = sfi->ci->mapping_nat_from->host;
+	sprintf(snode_address_nat, "%pM", hi->node->address);
+
 	direction = sfi->ci->direction;
 	protocol = sfi->ci->protocol;
 	is_routed = sfi->ci->is_routed;
@@ -8180,8 +8188,8 @@ static bool ecm_db_char_dev_conn_msg_prep(struct ecm_db_state_file_instance *sfi
 	 * Prep the message
 	 */
 	msg_len = snprintf(sfi->msgp, ECM_DB_STATE_FILE_BUFFER_SIZE,
-			"<conn serial=\"%u\" sip_address=\"%s\" sip_address_nat=\"%s\" sport=\"%d\" sport_nat=\"%d\" snode_address=\"%s\""
-			" dip_address=\"%s\" dip_address_nat=\"%s\" dport=\"%d\" dport_nat=\"%d\" dnode_address=\"%s\""
+			"<conn serial=\"%u\" sip_address=\"%s\" sip_address_nat=\"%s\" sport=\"%d\" sport_nat=\"%d\" snode_address=\"%s\" snode_address_nat=\"%s\""
+			" dip_address=\"%s\" dip_address_nat=\"%s\" dport=\"%d\" dport_nat=\"%d\" dnode_address=\"%s\" dnode_address_nat=\"%s\""
 			" protocol=\"%d\" is_routed=\"%d\" expires=\"%ld\" direction=\"%d\" time_added=\"%u\""
 			" from_data_total=\"%llu\" to_data_total=\"%llu\" from_packet_total=\"%llu\" to_packet_total=\"%llu\" from_data_total_dropped=\"%llu\" to_data_total_dropped=\"%llu\" from_packet_total_dropped=\"%llu\" to_packet_total_dropped=\"%llu\">\n",
 			serial,
@@ -8190,11 +8198,13 @@ static bool ecm_db_char_dev_conn_msg_prep(struct ecm_db_state_file_instance *sfi
 			sport,
 			sport_nat,
 			snode_address,
+			snode_address_nat,
 			dip_address,
 			dip_address_nat,
 			dport,
 			dport_nat,
 			dnode_address,
+			dnode_address_nat,
 			protocol,
 			is_routed,
 			expires_in,
