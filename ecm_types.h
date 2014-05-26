@@ -294,7 +294,7 @@ static inline bool ecm_string_to_ip_addr(ip_addr_t addr, char *ip_str)
 #define DEBUG_SET_MAGIC(i, m)
 #define DEBUG_CLEAR_MAGIC(i)
 #else
-#define DEBUG_ASSERT(c, s, ...) if (!(c)) { printk("ASSERT: %s:%d:" s, __FILE__, __LINE__, ##__VA_ARGS__); while(1); }
+#define DEBUG_ASSERT(c, s, ...) if (!(c)) { printk("ASSERT: %s:%d:" s, __FILE__, __LINE__, ##__VA_ARGS__); BUG(); }
 #define DEBUG_ERROR(s, ...) printk(KERN_ERR "ERROR: %s:%d:" s, __FILE__, __LINE__, ##__VA_ARGS__)
 #define DEBUG_CHECK_MAGIC(i, m, s, ...) if (i->magic != m) { DEBUG_ASSERT(false, s, ##__VA_ARGS__); }
 #define DEBUG_SET_MAGIC(i, m) i->magic = m
