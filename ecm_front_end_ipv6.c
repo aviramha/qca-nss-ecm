@@ -5397,6 +5397,11 @@ static struct ecm_db_connection_instance *ecm_front_end_ipv6_connection_from_ct_
 static void ecm_front_end_ipv6_conntrack_event_destroy(struct nf_conn *ct)
 {
 	struct ecm_db_connection_instance *ci;
+	struct ecm_front_end_connection_instance *feci;
+	ecm_classifier_acceleration_mode_t accel_mode;
+	int count;
+	int limit;
+	bool can_accel;
 
 	DEBUG_INFO("Destroy event for ct: %p\n", ct);
 
@@ -5406,6 +5411,17 @@ static void ecm_front_end_ipv6_conntrack_event_destroy(struct nf_conn *ct)
 		return;
 	}
 	DEBUG_INFO("%p: Connection defunct %p\n", ct, ci);
+
+	/*
+	 * If this connection is accelerated then we need to issue a destroy command
+	 */
+	feci = ecm_db_connection_front_end_get_and_ref(ci);
+	feci->accel_state_get(feci, &accel_mode, &count, &limit, &can_accel);
+	if (accel_mode == ECM_CLASSIFIER_ACCELERATION_MODE_ACCEL) {
+		DEBUG_TRACE("%p: Connection is accelerated, terminating acceleration", ci);
+		feci->decelerate(feci);
+	}
+	feci->deref(feci);
 
 	/*
 	 * Force destruction of the connection my making it defunct
