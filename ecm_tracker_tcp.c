@@ -1711,7 +1711,7 @@ static void ecm_tracker_tcp_state_update_callback(struct ecm_tracker_instance *t
 		if (unlikely(peer_state_current == ECM_TRACKER_SENDER_STATE_ESTABLISHING)) {
 			int32_t ackd;
 			uint32_t ack_seq = ntohl(tcp_hdr->ack_seq);
-			uint32_t syn_seq = ntohl(peer_state->syn_seq);
+			uint32_t syn_seq = peer_state->syn_seq;
 
 			spin_lock_bh(&ttii->lock);
 			ackd = (int32_t)(ack_seq - syn_seq);
@@ -1727,7 +1727,7 @@ static void ecm_tracker_tcp_state_update_callback(struct ecm_tracker_instance *t
 		} else if (unlikely(peer_state->state == ECM_TRACKER_SENDER_STATE_CLOSING)) {
 			int32_t ackd;
 			uint32_t ack_seq = ntohl(tcp_hdr->ack_seq);
-			uint32_t fin_seq = ntohl(peer_state->fin_seq);
+			uint32_t fin_seq = peer_state->fin_seq;
 
 			spin_lock_bh(&ttii->lock);
 			ackd = (int32_t)(ack_seq - fin_seq);
