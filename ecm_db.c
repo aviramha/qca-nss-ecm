@@ -3293,6 +3293,20 @@ void ecm_db_iface_ethernet_address_get(struct ecm_db_iface_instance *ii, uint8_t
 EXPORT_SYMBOL(ecm_db_iface_ethernet_address_get);
 
 /*
+ * ecm_db_iface_bridge_address_get()
+ *	Obtain the ethernet address for a bridge interface
+ */
+void ecm_db_iface_bridge_address_get(struct ecm_db_iface_instance *ii, uint8_t *address)
+{
+	DEBUG_CHECK_MAGIC(ii, ECM_DB_IFACE_INSTANCE_MAGIC, "%p: magic failed", ii);
+	DEBUG_ASSERT(ii->type == ECM_DB_IFACE_TYPE_BRIDGE, "%p: Bad type, expected bridge, actual: %d\n", ii, ii->type);
+	spin_lock_bh(&ecm_db_lock);
+	memcpy(address, ii->type_info.bridge.address, sizeof(ii->type_info.bridge.address));
+	spin_unlock_bh(&ecm_db_lock);
+}
+EXPORT_SYMBOL(ecm_db_iface_bridge_address_get);
+
+/*
  * ecm_db_iface_find_and_ref_ethernet()
  *	Lookup and return a iface reference if any
  */

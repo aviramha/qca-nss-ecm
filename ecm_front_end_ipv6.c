@@ -1091,6 +1091,19 @@ static void ecm_front_end_ipv6_connection_tcp_front_end_accelerate(struct ecm_fr
 			struct ecm_db_interface_info_pppoe pppoe_info;
 			struct ecm_db_interface_info_vlan vlan_info;
 
+		case ECM_DB_IFACE_TYPE_BRIDGE:
+			DEBUG_TRACE("%p: Bridge\n", fecti);
+			if (interface_type_counts[ii_type] != 0) {
+				/*
+				 * Cannot cascade bridges
+				 */
+				rule_invalid = true;
+				DEBUG_TRACE("%p: Bridge - ignore additional\n", fecti);
+				break;
+			}
+			ecm_db_iface_bridge_address_get(ii, from_nss_iface_address);
+			DEBUG_TRACE("%p: Bridge - mac: %pM\n", fecti, from_nss_iface_address);
+			break;
 		case ECM_DB_IFACE_TYPE_ETHERNET:
 			DEBUG_TRACE("%p: Ethernet\n", fecti);
 			if (interface_type_counts[ii_type] != 0) {
@@ -1216,6 +1229,19 @@ static void ecm_front_end_ipv6_connection_tcp_front_end_accelerate(struct ecm_fr
 			struct ecm_db_interface_info_pppoe pppoe_info;
 			struct ecm_db_interface_info_vlan vlan_info;
 
+		case ECM_DB_IFACE_TYPE_BRIDGE:
+			DEBUG_TRACE("%p: Bridge\n", fecti);
+			if (interface_type_counts[ii_type] != 0) {
+				/*
+				 * Cannot cascade bridges
+				 */
+				rule_invalid = true;
+				DEBUG_TRACE("%p: Bridge - ignore additional\n", fecti);
+				break;
+			}
+			ecm_db_iface_bridge_address_get(ii, to_nss_iface_address);
+			DEBUG_TRACE("%p: Bridge - mac: %pM\n", fecti, to_nss_iface_address);
+			break;
 		case ECM_DB_IFACE_TYPE_ETHERNET:
 			DEBUG_TRACE("%p: Ethernet\n", fecti);
 			if (interface_type_counts[ii_type] != 0) {
@@ -1921,6 +1947,19 @@ static void ecm_front_end_ipv6_connection_udp_front_end_accelerate(struct ecm_fr
 			struct ecm_db_interface_info_pppoe pppoe_info;
 			struct ecm_db_interface_info_vlan vlan_info;
 
+		case ECM_DB_IFACE_TYPE_BRIDGE:
+			DEBUG_TRACE("%p: Bridge\n", fecui);
+			if (interface_type_counts[ii_type] != 0) {
+				/*
+				 * Cannot cascade bridges
+				 */
+				rule_invalid = true;
+				DEBUG_TRACE("%p: Bridge - ignore additional\n", fecui);
+				break;
+			}
+			ecm_db_iface_bridge_address_get(ii, from_nss_iface_address);
+			DEBUG_TRACE("%p: Bridge - mac: %pM\n", fecui, from_nss_iface_address);
+			break;
 		case ECM_DB_IFACE_TYPE_ETHERNET:
 			DEBUG_TRACE("%p: Ethernet\n", fecui);
 			if (interface_type_counts[ii_type] != 0) {
@@ -2046,6 +2085,19 @@ static void ecm_front_end_ipv6_connection_udp_front_end_accelerate(struct ecm_fr
 			struct ecm_db_interface_info_pppoe pppoe_info;
 			struct ecm_db_interface_info_vlan vlan_info;
 
+		case ECM_DB_IFACE_TYPE_BRIDGE:
+			DEBUG_TRACE("%p: Bridge\n", fecui);
+			if (interface_type_counts[ii_type] != 0) {
+				/*
+				 * Cannot cascade bridges
+				 */
+				rule_invalid = true;
+				DEBUG_TRACE("%p: Bridge - ignore additional\n", fecui);
+				break;
+			}
+			ecm_db_iface_bridge_address_get(ii, to_nss_iface_address);
+			DEBUG_TRACE("%p: Bridge - mac: %pM\n", fecui, to_nss_iface_address);
+			break;
 		case ECM_DB_IFACE_TYPE_ETHERNET:
 			DEBUG_TRACE("%p: Ethernet\n", fecui);
 			if (interface_type_counts[ii_type] != 0) {
@@ -2698,6 +2750,19 @@ static void ecm_front_end_ipv6_connection_non_ported_front_end_accelerate(struct
 			struct ecm_db_interface_info_pppoe pppoe_info;
 			struct ecm_db_interface_info_vlan vlan_info;
 
+		case ECM_DB_IFACE_TYPE_BRIDGE:
+			DEBUG_TRACE("%p: Bridge\n", fecnpi);
+			if (interface_type_counts[ii_type] != 0) {
+				/*
+				 * Cannot cascade bridges
+				 */
+				rule_invalid = true;
+				DEBUG_TRACE("%p: Bridge - ignore additional\n", fecnpi);
+				break;
+			}
+			ecm_db_iface_bridge_address_get(ii, from_nss_iface_address);
+			DEBUG_TRACE("%p: Bridge - mac: %pM\n", fecnpi, from_nss_iface_address);
+			break;
 		case ECM_DB_IFACE_TYPE_ETHERNET:
 			DEBUG_TRACE("%p: Ethernet\n", fecnpi);
 			if (interface_type_counts[ii_type] != 0) {
@@ -2816,6 +2881,19 @@ static void ecm_front_end_ipv6_connection_non_ported_front_end_accelerate(struct
 			struct ecm_db_interface_info_pppoe pppoe_info;
 			struct ecm_db_interface_info_vlan vlan_info;
 
+		case ECM_DB_IFACE_TYPE_BRIDGE:
+			DEBUG_TRACE("%p: Bridge\n", fecnpi);
+			if (interface_type_counts[ii_type] != 0) {
+				/*
+				 * Cannot cascade bridges
+				 */
+				rule_invalid = true;
+				DEBUG_TRACE("%p: Bridge - ignore additional\n", fecnpi);
+				break;
+			}
+			ecm_db_iface_bridge_address_get(ii, to_nss_iface_address);
+			DEBUG_TRACE("%p: Bridge - mac: %pM\n", fecnpi, to_nss_iface_address);
+			break;
 		case ECM_DB_IFACE_TYPE_ETHERNET:
 			DEBUG_TRACE("%p: Ethernet\n", fecnpi);
 			if (interface_type_counts[ii_type] != 0) {

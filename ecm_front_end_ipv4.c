@@ -663,6 +663,19 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_accelerate(struct ecm_fr
 			struct ecm_db_interface_info_pppoe pppoe_info;
 			struct ecm_db_interface_info_vlan vlan_info;
 
+		case ECM_DB_IFACE_TYPE_BRIDGE:
+			DEBUG_TRACE("%p: Bridge\n", fecti);
+			if (interface_type_counts[ii_type] != 0) {
+				/*
+				 * Cannot cascade bridges
+				 */
+				rule_invalid = true;
+				DEBUG_TRACE("%p: Bridge - ignore additional\n", fecti);
+				break;
+			}
+			ecm_db_iface_bridge_address_get(ii, from_nss_iface_address);
+			DEBUG_TRACE("%p: Bridge - mac: %pM\n", fecti, from_nss_iface_address);
+			break;
 		case ECM_DB_IFACE_TYPE_ETHERNET:
 			DEBUG_TRACE("%p: Ethernet\n", fecti);
 			if (interface_type_counts[ii_type] != 0) {
@@ -788,6 +801,19 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_accelerate(struct ecm_fr
 			struct ecm_db_interface_info_pppoe pppoe_info;
 			struct ecm_db_interface_info_vlan vlan_info;
 
+		case ECM_DB_IFACE_TYPE_BRIDGE:
+			DEBUG_TRACE("%p: Bridge\n", fecti);
+			if (interface_type_counts[ii_type] != 0) {
+				/*
+				 * Cannot cascade bridges
+				 */
+				rule_invalid = true;
+				DEBUG_TRACE("%p: Bridge - ignore additional\n", fecti);
+				break;
+			}
+			ecm_db_iface_bridge_address_get(ii, to_nss_iface_address);
+			DEBUG_TRACE("%p: Bridge - mac: %pM\n", fecti, to_nss_iface_address);
+			break;
 		case ECM_DB_IFACE_TYPE_ETHERNET:
 			DEBUG_TRACE("%p: Ethernet\n", fecti);
 			if (interface_type_counts[ii_type] != 0) {
@@ -961,21 +987,36 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_accelerate(struct ecm_fr
 	ecm_db_connection_to_nat_node_address_get(fecti->ci, create.dest_mac);
 
 	/*
-	 * The src_mac_xlate is the mac address to replace the src_mac when sent onto the next interface
-	 * This is, therefore, the interface mac of the 'to' side of the connection.
+	 * The src_mac_xlate is the mac address to replace the pkt.src_mac when a packet is sent from->to
+	 * For bridged connections this does not change.
+	 * For routed connections this is the interface mac of the 'to' side of the connection.
 	 */
-	memcpy(create.src_mac_xlate, to_nss_iface_address, ETH_ALEN);
+	if (ecm_db_connection_is_routed_get(fecti->ci)) {
+		memcpy(create.src_mac_xlate, to_nss_iface_address, ETH_ALEN);
+	} else {
+		/*
+		 * Bridge flows preserve the MAC addressing
+		 */
+		memcpy(create.src_mac_xlate, create.src_mac, ETH_ALEN);
+	}
 
 	/*
-	 * The dest_mac_xlate replaces the destination mac of a packet when sent on the next interface.
-	 * By getting the MAC of node associated with dest_ip_xlate we can satisfy ingress and egress cases.
+	 * The dest_mac_xlate is the mac address to replace the pkt.src_mac when a packet is sent to->from
+	 * For bridged connections this does not change.
+	 * For routed connections this is the mac of the 'to' node side of the connection.
 	 */
-	ecm_db_connection_to_node_address_get(fecti->ci, create.dest_mac_xlate);
+	if (ecm_db_connection_is_routed_get(fecti->ci)) {
+		ecm_db_connection_to_node_address_get(fecti->ci, create.dest_mac_xlate);
+	} else {
+		/*
+		 * Bridge flows preserve the MAC addressing
+		 */
+		memcpy(create.dest_mac_xlate, create.dest_mac, ETH_ALEN);
+	}
 
 	/*
 	 * Need window scaling and remarking information if available
 	 * Start by looking up the conntrack connection
-	 *
 	 */
 	if (!ct) {
 		/*
@@ -1351,6 +1392,9 @@ static struct ecm_front_end_ipv4_connection_tcp_instance *ecm_front_end_ipv4_con
 /*
  * ecm_front_end_ipv4_connection_udp_front_end_accelerate()
  *	Accelerate a connection
+ *
+ * GGG TODO Refactor this function into a single function that np, udp and tcp
+ * can all use and reduce the amount of code!
  */
 static void ecm_front_end_ipv4_connection_udp_front_end_accelerate(struct ecm_front_end_connection_instance *feci,
 									struct ecm_classifier_process_response *pr,
@@ -1534,6 +1578,19 @@ static void ecm_front_end_ipv4_connection_udp_front_end_accelerate(struct ecm_fr
 			struct ecm_db_interface_info_pppoe pppoe_info;
 			struct ecm_db_interface_info_vlan vlan_info;
 
+		case ECM_DB_IFACE_TYPE_BRIDGE:
+			DEBUG_TRACE("%p: Bridge\n", fecui);
+			if (interface_type_counts[ii_type] != 0) {
+				/*
+				 * Cannot cascade bridges
+				 */
+				rule_invalid = true;
+				DEBUG_TRACE("%p: Bridge - ignore additional\n", fecui);
+				break;
+			}
+			ecm_db_iface_bridge_address_get(ii, from_nss_iface_address);
+			DEBUG_TRACE("%p: Bridge - mac: %pM\n", fecui, from_nss_iface_address);
+			break;
 		case ECM_DB_IFACE_TYPE_ETHERNET:
 			DEBUG_TRACE("%p: Ethernet\n", fecui);
 			if (interface_type_counts[ii_type] != 0) {
@@ -1659,6 +1716,19 @@ static void ecm_front_end_ipv4_connection_udp_front_end_accelerate(struct ecm_fr
 			struct ecm_db_interface_info_pppoe pppoe_info;
 			struct ecm_db_interface_info_vlan vlan_info;
 
+		case ECM_DB_IFACE_TYPE_BRIDGE:
+			DEBUG_TRACE("%p: Bridge\n", fecui);
+			if (interface_type_counts[ii_type] != 0) {
+				/*
+				 * Cannot cascade bridges
+				 */
+				rule_invalid = true;
+				DEBUG_TRACE("%p: Bridge - ignore additional\n", fecui);
+				break;
+			}
+			ecm_db_iface_bridge_address_get(ii, to_nss_iface_address);
+			DEBUG_TRACE("%p: Bridge - mac: %pM\n", fecui, to_nss_iface_address);
+			break;
 		case ECM_DB_IFACE_TYPE_ETHERNET:
 			DEBUG_TRACE("%p: Ethernet\n", fecui);
 			if (interface_type_counts[ii_type] != 0) {
@@ -1833,16 +1903,32 @@ static void ecm_front_end_ipv4_connection_udp_front_end_accelerate(struct ecm_fr
 	ecm_db_connection_to_nat_node_address_get(fecui->ci, create.dest_mac);
 
 	/*
-	 * The src_mac_xlate is the mac address to replace the src_mac when sent onto the next interface
-	 * This is, therefore, the interface mac of the 'to' side of the connection.
+	 * The src_mac_xlate is the mac address to replace the pkt.src_mac when a packet is sent from->to
+	 * For bridged connections this does not change.
+	 * For routed connections this is the interface mac of the 'to' side of the connection.
 	 */
-	memcpy(create.src_mac_xlate, to_nss_iface_address, ETH_ALEN);
+	if (ecm_db_connection_is_routed_get(fecui->ci)) {
+		memcpy(create.src_mac_xlate, to_nss_iface_address, ETH_ALEN);
+	} else {
+		/*
+		 * Bridge flows preserve the MAC addressing
+		 */
+		memcpy(create.src_mac_xlate, create.src_mac, ETH_ALEN);
+	}
 
 	/*
-	 * The dest_mac_xlate replaces the destination mac of a packet when sent on the next interface.
-	 * By getting the MAC of node associated with dest_ip_xlate we can satisfy ingress and egress cases.
+	 * The dest_mac_xlate is the mac address to replace the pkt.src_mac when a packet is sent to->from
+	 * For bridged connections this does not change.
+	 * For routed connections this is the mac of the 'to' node side of the connection.
 	 */
-	ecm_db_connection_to_node_address_get(fecui->ci, create.dest_mac_xlate);
+	if (ecm_db_connection_is_routed_get(fecui->ci)) {
+		ecm_db_connection_to_node_address_get(fecui->ci, create.dest_mac_xlate);
+	} else {
+		/*
+		 * Bridge flows preserve the MAC addressing
+		 */
+		memcpy(create.dest_mac_xlate, create.dest_mac, ETH_ALEN);
+	}
 
 	/*
 	 * Get MTU information
@@ -2344,6 +2430,19 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_accelerate(struct
 			struct ecm_db_interface_info_pppoe pppoe_info;
 			struct ecm_db_interface_info_vlan vlan_info;
 
+		case ECM_DB_IFACE_TYPE_BRIDGE:
+			DEBUG_TRACE("%p: Bridge\n", fecnpi);
+			if (interface_type_counts[ii_type] != 0) {
+				/*
+				 * Cannot cascade bridges
+				 */
+				rule_invalid = true;
+				DEBUG_TRACE("%p: Bridge - ignore additional\n", fecnpi);
+				break;
+			}
+			ecm_db_iface_bridge_address_get(ii, from_nss_iface_address);
+			DEBUG_TRACE("%p: Bridge - mac: %pM\n", fecnpi, from_nss_iface_address);
+			break;
 		case ECM_DB_IFACE_TYPE_ETHERNET:
 			DEBUG_TRACE("%p: Ethernet\n", fecnpi);
 			if (interface_type_counts[ii_type] != 0) {
@@ -2462,6 +2561,19 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_accelerate(struct
 			struct ecm_db_interface_info_pppoe pppoe_info;
 			struct ecm_db_interface_info_vlan vlan_info;
 
+		case ECM_DB_IFACE_TYPE_BRIDGE:
+			DEBUG_TRACE("%p: Bridge\n", fecnpi);
+			if (interface_type_counts[ii_type] != 0) {
+				/*
+				 * Cannot cascade bridges
+				 */
+				rule_invalid = true;
+				DEBUG_TRACE("%p: Bridge - ignore additional\n", fecnpi);
+				break;
+			}
+			ecm_db_iface_bridge_address_get(ii, to_nss_iface_address);
+			DEBUG_TRACE("%p: Bridge - mac: %pM\n", fecnpi, to_nss_iface_address);
+			break;
 		case ECM_DB_IFACE_TYPE_ETHERNET:
 			DEBUG_TRACE("%p: Ethernet\n", fecnpi);
 			if (interface_type_counts[ii_type] != 0) {
@@ -2628,16 +2740,32 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_accelerate(struct
 	ecm_db_connection_to_nat_node_address_get(fecnpi->ci, create.dest_mac);
 
 	/*
-	 * The src_mac_xlate is the mac address to replace the src_mac when sent onto the next interface
-	 * This is, therefore, the interface mac of the 'to' side of the connection.
+	 * The src_mac_xlate is the mac address to replace the pkt.src_mac when a packet is sent from->to
+	 * For bridged connections this does not change.
+	 * For routed connections this is the interface mac of the 'to' side of the connection.
 	 */
-	memcpy(create.src_mac_xlate, to_nss_iface_address, ETH_ALEN);
+	if (ecm_db_connection_is_routed_get(fecnpi->ci)) {
+		memcpy(create.src_mac_xlate, to_nss_iface_address, ETH_ALEN);
+	} else {
+		/*
+		 * Bridge flows preserve the MAC addressing
+		 */
+		memcpy(create.src_mac_xlate, create.src_mac, ETH_ALEN);
+	}
 
 	/*
-	 * The dest_mac_xlate replaces the destination mac of a packet when sent on the next interface.
-	 * By getting the MAC of node associated with dest_ip_xlate we can satisfy ingress and egress cases.
+	 * The dest_mac_xlate is the mac address to replace the pkt.src_mac when a packet is sent to->from
+	 * For bridged connections this does not change.
+	 * For routed connections this is the mac of the 'to' node side of the connection.
 	 */
-	ecm_db_connection_to_node_address_get(fecnpi->ci, create.dest_mac_xlate);
+	if (ecm_db_connection_is_routed_get(fecnpi->ci)) {
+		ecm_db_connection_to_node_address_get(fecnpi->ci, create.dest_mac_xlate);
+	} else {
+		/*
+		 * Bridge flows preserve the MAC addressing
+		 */
+		memcpy(create.dest_mac_xlate, create.dest_mac, ETH_ALEN);
+	}
 
 	/*
 	 * Get MTU information

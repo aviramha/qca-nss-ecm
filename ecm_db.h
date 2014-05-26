@@ -116,6 +116,7 @@ struct ecm_db_connection_instance *ecm_db_connection_serial_find_and_ref(uint32_
 struct ecm_db_connection_instance *ecm_db_connection_find_and_ref(ip_addr_t host1_addr, ip_addr_t host2_addr, int protocol, int host1_port, int host2_port);
 
 void ecm_db_iface_ethernet_address_get(struct ecm_db_iface_instance *ii, uint8_t *address);
+void ecm_db_iface_bridge_address_get(struct ecm_db_iface_instance *ii, uint8_t *address);
 void ecm_db_iface_pppoe_session_info_get(struct ecm_db_iface_instance *ii, struct ecm_db_interface_info_pppoe *pppoe_info);
 void ecm_db_iface_vlan_info_get(struct ecm_db_iface_instance *ii, struct ecm_db_interface_info_vlan *vlan_info);
 
