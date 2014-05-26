@@ -307,7 +307,9 @@ static void ecm_classifier_default_process(struct ecm_classifier_instance *aci, 
 	}
 
 	/*
-	 * Check the TCP connections state whether it is established or not.
+	 * Check the TCP connection state.
+	 * If we are not established then we deny acceleration but, if tracking,
+	 * continue to track for MSS.
 	 */
 	ct = nf_ct_get(skb, &ctinfo);
 	if (ct == NULL) {
@@ -342,7 +344,8 @@ static void ecm_classifier_default_process(struct ecm_classifier_instance *aci, 
 	}
 
 	/*
-	 * Once established a TCP connection should have seen its MSS, there is no point in tracking further anyway
+	 * The connection is now established.
+	 * There is no longer a need to track for MSS because that is only available at the SYN stages.
 	 */
 	spin_lock_bh(&ecm_classifier_default_lock);
 	cdii->tracking = false;
