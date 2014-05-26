@@ -1406,7 +1406,40 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfac
 						/*
 						 * Possible ARP does not know the address yet
 						 */
-						DEBUG_WARN("Unable to obtain MAC address for " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(dest_addr));
+						DEBUG_INFO("Unable to obtain MAC address for " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(dest_addr));
+						if (ECM_IP_ADDR_IS_V4(dest_addr)) {
+							__be32 ipv4_addr;
+							__be32 src_ip;
+
+							/*
+							 * Issue an ARP request for it, select the src_ip from which to issue the request.
+							 */
+							ECM_IP_ADDR_TO_NIN4_ADDR(ipv4_addr, dest_addr);
+							src_ip = inet_select_addr(dest_dev, ipv4_addr, RT_SCOPE_LINK);
+							if (!src_ip) {
+								DEBUG_TRACE("failed to lookup IP for %pI4\n", &ipv4_addr);
+
+								dev_put(src_dev);
+								dev_put(dest_dev);
+
+								/*
+								* Release the interfaces heirarchy we constructed to this point.
+								*/
+								ecm_db_connection_interfaces_deref(interfaces, current_interface_index);
+								return ECM_DB_IFACE_HEIRARCHY_MAX;
+							}
+
+							/*
+							 * If we have a GW for this address, then we have to send ARP request to the GW
+							 */
+							if (!ECM_IP_ADDR_IS_NULL(gw_addr)) {
+								ECM_IP_ADDR_COPY(dest_addr, gw_addr);
+							}
+
+							DEBUG_TRACE("Send ARP for %pI4 using src_ip as %pI4\n", &ipv4_addr, &src_ip);
+							arp_send(ARPOP_REQUEST, ETH_P_ARP, ipv4_addr, dest_dev, src_ip, NULL, NULL, NULL);
+						}
+
 						dev_put(src_dev);
 						dev_put(dest_dev);
 
