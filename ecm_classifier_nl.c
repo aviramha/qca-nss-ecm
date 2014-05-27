@@ -573,23 +573,55 @@ static void ecm_classifier_nl_process(struct ecm_classifier_instance *aci, ecm_t
 						struct ecm_classifier_process_response *process_response)
 {
 	struct ecm_classifier_nl_instance *cnli;
+	ecm_classifier_relevence_t relevance;
+	bool enabled;
+	struct ecm_front_end_connection_instance *feci;
+	ecm_classifier_acceleration_mode_t accel_mode;
+	int count;
+	int limit;
+	bool can_accel;
+	uint32_t became_relevant = 0;
 
 	cnli = (struct ecm_classifier_nl_instance *)aci;
 	DEBUG_CHECK_MAGIC(cnli, ECM_CLASSIFIER_NL_INSTANCE_MAGIC, "%p: magic failed\n", cnli);
 
-	spin_lock_bh(&ecm_classifier_nl_lock);
-	*process_response = cnli->process_response;
-
 	/*
-	 * Check if we are enabled
+	 * Have we decided our relevance?  If so return our state.
 	 */
-	if (!ecm_classifier_nl_enabled) {
-		/*
-		 * If we are not enabled we have no actions to take, we are still relevant to the connection though!
-		 */
-		process_response->process_actions = 0;
+	spin_lock_bh(&ecm_classifier_nl_lock);
+	relevance = cnli->process_response.relevance;
+	if (relevance != ECM_CLASSIFIER_RELEVANCE_MAYBE) {
+		*process_response = cnli->process_response;
+		spin_unlock_bh(&ecm_classifier_nl_lock);
+		return;
 	}
 
+	/*
+	 * Decide upon relevance
+	 */
+	enabled = ecm_classifier_nl_enabled;
+	spin_unlock_bh(&ecm_classifier_nl_lock);
+
+	/*
+	 * If classifier is enabled, the connection is routed and the front end says it can accel then we are "relevant".
+	 * Any other condition and we are not and will stop analysing this connection.
+	 */
+	relevance = ECM_CLASSIFIER_RELEVANCE_NO;
+	feci = ecm_db_connection_front_end_get_and_ref(cnli->ci);
+	feci->accel_state_get(feci, &accel_mode, &count, &limit, &can_accel);
+	feci->deref(feci);
+	if (enabled && can_accel && ecm_db_connection_is_routed_get(cnli->ci)) {
+		relevance = ECM_CLASSIFIER_RELEVANCE_YES;
+		became_relevant = ecm_db_time_get();
+	}
+
+	/*
+	 * Return process response
+	 */
+	spin_lock_bh(&ecm_classifier_nl_lock);
+	cnli->process_response.relevance = relevance;
+	cnli->process_response.became_relevant = became_relevant;
+	*process_response = cnli->process_response;
 	spin_unlock_bh(&ecm_classifier_nl_lock);
 }
 
@@ -825,10 +857,10 @@ struct ecm_classifier_nl_instance *ecm_classifier_nl_instance_alloc(struct ecm_d
 	cnli->ci = ci;
 
 	/*
-	 * Netlink is always relevant to all connections, only for acceleration decision (NO initially).
+	 * Classifier initially denies acceleration.
 	 */
 	cnli->process_response.qos_tag = 0;
-	cnli->process_response.relevance = ECM_CLASSIFIER_RELEVANCE_YES;
+	cnli->process_response.relevance = ECM_CLASSIFIER_RELEVANCE_MAYBE;
 	cnli->process_response.process_actions =
 		ECM_CLASSIFIER_PROCESS_ACTION_ACCEL_MODE;
 	cnli->process_response.accel_mode = ECM_CLASSIFIER_ACCELERATION_MODE_NO;
