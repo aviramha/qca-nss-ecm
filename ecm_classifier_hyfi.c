@@ -216,30 +216,69 @@ static void ecm_classifier_hyfi_process(struct ecm_classifier_instance *aci, ecm
 						struct ecm_classifier_process_response *process_response)
 {
 	struct ecm_classifier_hyfi_instance *chfi;
+	ecm_classifier_relevence_t relevance;
+	bool enabled;
+	struct ecm_front_end_connection_instance *feci;
+	ecm_classifier_acceleration_mode_t accel_mode;
+	int count;
+	int limit;
+	bool can_accel;
+	uint32_t became_relevant = 0;
 	uint32_t ecm_serial;
 
 	chfi = (struct ecm_classifier_hyfi_instance *)aci;
 	DEBUG_CHECK_MAGIC(chfi, ECM_CLASSIFIER_HYFI_INSTANCE_MAGIC, "%p: magic failed\n", chfi);
 
-
 	/*
-	 * Inspect the skb.
-	 * Alternatively use the ip_hdr to look at the v4 or, if ip_hdr->is_v4 is false, the v6 header contained within.
-	 * The database functions are also available to look at the database information for the connection such as addresses, ports etc.
-	 */
-
-	/*
-	 * Return our process response.
+	 * Are we yet to decide if this instance is relevant to the connection?
 	 */
 	spin_lock_bh(&ecm_classifier_hyfi_lock);
+	relevance = chfi->process_response.relevance;
+	if (relevance != ECM_CLASSIFIER_RELEVANCE_MAYBE) {
+		/*
+		 * We already know
+		 * NOTE: Lock still held
+		 */
+		goto hyfi_classifier_out;
+	}
+
+	enabled = ecm_classifier_hyfi_enabled;
+	spin_unlock_bh(&ecm_classifier_hyfi_lock);
+
+	/*
+	 * Need to decide our relevance to this connection.
+	 * If classifier is enabled and the front end says it can accel then we are "relevant".
+	 * Any other condition and we are not and will stop analysing this connection.
+	 */
+	relevance = ECM_CLASSIFIER_RELEVANCE_NO;
+	feci = ecm_db_connection_front_end_get_and_ref(chfi->ci);
+	feci->accel_state_get(feci, &accel_mode, &count, &limit, &can_accel);
+	feci->deref(feci);
+	if (enabled && can_accel) {
+		relevance = ECM_CLASSIFIER_RELEVANCE_YES;
+		became_relevant = ecm_db_time_get();
+	}
+
+	spin_lock_bh(&ecm_classifier_hyfi_lock);
+	chfi->process_response.relevance = relevance;
+	chfi->process_response.became_relevant = became_relevant;
+
+hyfi_classifier_out:
+	;
+
+	/*
+	 * Return our process response
+	 */
 	*process_response = chfi->process_response;
+	if (relevance == ECM_CLASSIFIER_RELEVANCE_NO) {
+		goto hyfi_classifier_done;
+	}
 
 	/*
 	 * Fast path, already accelerated or ignored
 	 */
-	if (chfi->hyfi_state &
-			(ECM_CLASSIFIER_HYFI_STATE_ACCELERATED | ECM_CLASSIFIER_HYFI_STATE_IGNORE)) {
-		goto hyfi_classifier_out;
+	if (chfi->hyfi_state & (ECM_CLASSIFIER_HYFI_STATE_ACCELERATED | ECM_CLASSIFIER_HYFI_STATE_IGNORE)) {
+		goto hyfi_classifier_done;
 	}
 
 	ecm_serial = ecm_db_connection_serial_get(chfi->ci);
@@ -249,15 +288,19 @@ static void ecm_classifier_hyfi_process(struct ecm_classifier_instance *aci, ecm
 	 */
 	if (hyfi_ecm_new_connection(skb, ecm_serial, &chfi->hyfi_hash) < 0) {
 		chfi->hyfi_state = ECM_CLASSIFIER_HYFI_STATE_IGNORE;
-		goto hyfi_classifier_out;
+		goto hyfi_classifier_done;
 	}
 
 	if (chfi->hyfi_hash != ECM_CLASSIFIER_HYFI_HASH_UNINITIALIZED) {
-		/* Mark as accelerated, hash stored and mapped */
+		/*
+		 * Mark as accelerated, hash stored and mapped
+		 */
 		chfi->hyfi_state = ECM_CLASSIFIER_HYFI_STATE_ACCELERATED;
 	}
 
-	hyfi_classifier_out:
+hyfi_classifier_done:
+	;
+
 	spin_unlock_bh(&ecm_classifier_hyfi_lock);
 }
 
@@ -481,12 +524,8 @@ struct ecm_classifier_hyfi_instance *ecm_classifier_hyfi_instance_alloc(struct e
 	chfi->base.ref = ecm_classifier_hyfi_ref;
 	chfi->base.deref = ecm_classifier_hyfi_deref;
 	chfi->ci = ci;
-
-	/*
-	 * HyFi is always relevant to a connection so that we can monitor packets.
-	 */
 	chfi->process_response.process_actions = 0;
-	chfi->process_response.relevance = ECM_CLASSIFIER_RELEVANCE_YES;
+	chfi->process_response.relevance = ECM_CLASSIFIER_RELEVANCE_MAYBE;
 
 	/*
 	 * Init Hy-Fi state
