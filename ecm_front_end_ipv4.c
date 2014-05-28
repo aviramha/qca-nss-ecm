@@ -274,15 +274,6 @@ static struct ecm_db_host_instance *ecm_front_end_ipv4_host_establish_and_ref(st
 	DEBUG_INFO("Establish host for " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(addr));
 
 	/*
-	 * Locate the host
-	 */
-	hi = ecm_db_host_find_and_ref(addr);
-	if (hi) {
-		DEBUG_TRACE("%p: host established\n", hi);
-		return hi;
-	}
-
-	/*
 	 * No host - establish node
 	 * Get its MAC address (or some kind of equivalent we can use for the node address).
 	 */
@@ -316,6 +307,15 @@ static struct ecm_db_host_instance *ecm_front_end_ipv4_host_establish_and_ref(st
 		 * However the sending will no doubt re-try the transmission and by that time we shall have the MAC for it.
 		 */
 		return NULL;
+	}
+
+	/*
+	 * Locate the host
+	 */
+	hi = ecm_db_host_find_and_ref(addr);
+	if (hi) {
+		DEBUG_TRACE("%p: host established\n", hi);
+		return hi;
 	}
 
 	ni = ecm_front_end_ipv4_node_establish_and_ref(dev, node_mac_addr);
@@ -374,21 +374,21 @@ static struct ecm_db_mapping_instance *ecm_front_end_ipv4_mapping_establish_and_
 	DEBUG_INFO("Establish mapping for " ECM_IP_ADDR_DOT_FMT ":%d\n", ECM_IP_ADDR_TO_DOT(addr), port);
 
 	/*
-	 * Locate the mapping
-	 */
-	mi = ecm_db_mapping_find_and_ref(addr, port);
-	if (mi) {
-		DEBUG_TRACE("%p: mapping established\n", mi);
-		return mi;
-	}
-
-	/*
 	 * No mapping - establish host existence
 	 */
 	hi = ecm_front_end_ipv4_host_establish_and_ref(dev, addr);
 	if (!hi) {
 		DEBUG_WARN("Failed to establish host\n");
 		return NULL;
+	}
+
+	/*
+	 * Locate the mapping
+	 */
+	mi = ecm_db_mapping_find_and_ref(addr, port);
+	if (mi) {
+		DEBUG_TRACE("%p: mapping established\n", mi);
+		return mi;
 	}
 
 	/*
