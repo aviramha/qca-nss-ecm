@@ -518,11 +518,44 @@ void
 ecm_classifier_nl_process_mark(struct ecm_classifier_nl_instance *cnli,
 			       uint32_t mark)
 {
+	int limit;
+	int count;
+	bool updated;
+	bool can_accel;
+	ecm_classifier_acceleration_mode_t accel_mode;
+	struct ecm_front_end_connection_instance *feci;
+
+	updated = false;
+
 	spin_lock_bh(&ecm_classifier_nl_lock);
-	cnli->process_response.qos_tag = mark;
-	cnli->process_response.process_actions |=
-		ECM_CLASSIFIER_PROCESS_ACTION_QOS_TAG;
+	if (mark != cnli->process_response.qos_tag) {
+		cnli->process_response.qos_tag = mark;
+		cnli->process_response.process_actions |=
+			ECM_CLASSIFIER_PROCESS_ACTION_QOS_TAG;
+		updated = true;
+	}
 	spin_unlock_bh(&ecm_classifier_nl_lock);
+
+	if (updated) {
+		/*
+		 * we need to make sure to propagate the new mark to the
+		 * NSS if the connection has been accelerated.  to do that,
+		 * since there's no way to directly update an offload rule,
+		 * we simply decelerate the connection which should result
+		 * in a re-acceleration when the next packet is processed
+		 * by the front end, thereby applying the new mark.
+		 */
+		feci = ecm_db_connection_front_end_get_and_ref(cnli->ci);
+		feci->accel_state_get(feci,
+				      &accel_mode,
+				      &count,
+				      &limit,
+				      &can_accel);
+		if (accel_mode == ECM_CLASSIFIER_ACCELERATION_MODE_ACCEL) {
+			feci->decelerate(feci);
+		}
+		feci->deref(feci);
+	}
 }
 EXPORT_SYMBOL(ecm_classifier_nl_process_mark);
 

@@ -25,6 +25,9 @@ ecm_classifier_nl_instance_alloc(struct ecm_db_connection_instance *ci);
 
 /*
  *  Callback for for conmark updates
+ *
+ *  Saves the new mark to the per-connection context and decelerates
+ *  the connection if offloaded.
  */
 void ecm_classifier_nl_process_mark(struct ecm_classifier_nl_instance *cnli,
 				    uint32_t mark);
