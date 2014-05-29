@@ -278,6 +278,7 @@ static struct ecm_db_host_instance *ecm_front_end_ipv4_host_establish_and_ref(st
 	 * Get its MAC address (or some kind of equivalent we can use for the node address).
 	 */
 	if (!ecm_interface_mac_addr_get(addr, node_mac_addr, &on_link, gw_addr)) {
+#if 0
 		__be32 ipv4_addr;
 		__be32 src_ip;
 		DEBUG_TRACE("failed to obtain mac for host " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(addr));
@@ -306,6 +307,7 @@ static struct ecm_db_host_instance *ecm_front_end_ipv4_host_establish_and_ref(st
 		 * By returning NULL the connection will not be created and the packet dropped.
 		 * However the sending will no doubt re-try the transmission and by that time we shall have the MAC for it.
 		 */
+#endif
 		return NULL;
 	}
 
