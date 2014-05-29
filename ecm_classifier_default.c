@@ -222,6 +222,8 @@ static void ecm_classifier_default_process(struct ecm_classifier_instance *aci, 
 	struct ecm_tracker_tcp_instance *tti;
 	bool tracking;
 	struct ecm_classifier_default_internal_instance *cdii = (struct ecm_classifier_default_internal_instance *)aci;
+	struct nf_conn *ct;
+	enum ip_conntrack_info ctinfo;
 	DEBUG_CHECK_MAGIC(cdii, ECM_CLASSIFIER_DEFAULT_INTERNAL_INSTANCE_MAGIC, "%p: invalid state magic\n", cdii);
 
 	spin_lock_bh(&ecm_classifier_default_lock);
@@ -307,9 +309,36 @@ static void ecm_classifier_default_process(struct ecm_classifier_instance *aci, 
 	/*
 	 * Check the TCP connections state whether it is established or not.
 	 */
-	if (unlikely(prevailing_state != ECM_TRACKER_CONNECTION_STATE_ESTABLISHED)) {
-		//cdii->process_response.accel_mode = ECM_CLASSIFIER_ACCELERATION_MODE_NO;
-		goto return_response;
+	ct = nf_ct_get(skb, &ctinfo);
+	if (ct == NULL) {
+		DEBUG_TRACE("%p: No Conntrack found for packet, using ECM tracker state\n", cdii);
+		if (unlikely(prevailing_state != ECM_TRACKER_CONNECTION_STATE_ESTABLISHED)) {
+			cdii->process_response.accel_mode = ECM_CLASSIFIER_ACCELERATION_MODE_NO;
+			goto return_response;
+		}
+	} else {
+		/*
+		 * Don't try to manage a non-established connection.
+		 */
+		if (!test_bit(IPS_ASSURED_BIT, &ct->status)) {
+			DEBUG_TRACE("%p: Non-established connection\n", ct);
+			cdii->process_response.accel_mode = ECM_CLASSIFIER_ACCELERATION_MODE_NO;
+			goto return_response;
+		}
+
+		/*
+		 * If the connection is shutting down do not manage it.
+		 * state can not be SYN_SENT, SYN_RECV because connection is assured
+		 * Not managed states: FIN_WAIT, CLOSE_WAIT, LAST_ACK, TIME_WAIT, CLOSE.
+		 */
+		spin_lock_bh(&ct->lock);
+		if (ct->proto.tcp.state != TCP_CONNTRACK_ESTABLISHED) {
+			spin_unlock_bh(&ct->lock);
+			DEBUG_TRACE("%p: Connection in termination state %#X\n", ct, ct->proto.tcp.state);
+			cdii->process_response.accel_mode = ECM_CLASSIFIER_ACCELERATION_MODE_NO;
+			goto return_response;
+		}
+		spin_unlock_bh(&ct->lock);
 	}
 
 	/*
