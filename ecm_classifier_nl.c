@@ -552,7 +552,12 @@ ecm_classifier_nl_process_mark(struct ecm_classifier_nl_instance *cnli,
 				      &limit,
 				      &can_accel);
 		if (accel_mode == ECM_CLASSIFIER_ACCELERATION_MODE_ACCEL) {
+			DEBUG_TRACE("%p: mark changed on offloaded connection, decelerate. new mark: 0x%08x\n",
+				    cnli, mark);
 			feci->decelerate(feci);
+		} else {
+			DEBUG_TRACE("%p: mark changed on non-offloaded connection. new mark: 0x%08x\n",
+				    cnli, mark);
 		}
 		feci->deref(feci);
 	}
@@ -617,13 +622,23 @@ ecm_classifier_nl_sync_to_v4(struct ecm_classifier_instance *aci,
 
 	switch(sync->reason) {
 	case NSS_IPV4_SYNC_REASON_FLUSH:
+		/* do nothing */
+		DEBUG_TRACE("%p: nl_sync_to_v4: SYNC_FLUSH\n", cnli);
+		break;
 	case NSS_IPV4_SYNC_REASON_EVICT:
+		/* do nothing */
+		DEBUG_TRACE("%p: nl_sync_to_v4: SYNC_EVICT\n", cnli);
+		break;
 	case NSS_IPV4_SYNC_REASON_DESTROY:
+		DEBUG_TRACE("%p: nl_sync_to_v4: SYNC_DESTROY\n", cnli);
 		close = 1;
 		break;
 	case NSS_IPV4_SYNC_REASON_STATS:
+		DEBUG_TRACE("%p: nl_sync_to_v4: SYNC_STATS\n", cnli);
 		accel_ok = 1;
+		break;
 	default:
+		DEBUG_TRACE("%p: nl_sync_to_v4: unsupported reason\n", cnli);
 		break;
 	}
 
