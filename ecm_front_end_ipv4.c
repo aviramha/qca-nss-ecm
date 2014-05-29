@@ -695,11 +695,8 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_accelerate(struct ecm_fr
 			break;
 		case ECM_DB_IFACE_TYPE_PPPOE:
 			/*
-			 * GGG TODO For now we don't support PPPoE so this is an invalid rule
+			 * More than one PPPoE in the list is not valid!
 			 */
-			DEBUG_TRACE("%p: PPPoE - unsupported right now\n", fecti);
-			rule_invalid = true;
-
 			if (interface_type_counts[ii_type] != 0) {
 				DEBUG_TRACE("%p: PPPoE - additional unsupported\n", fecti);
 				rule_invalid = true;
@@ -833,11 +830,8 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_accelerate(struct ecm_fr
 			break;
 		case ECM_DB_IFACE_TYPE_PPPOE:
 			/*
-			 * GGG TODO For now we don't support PPPoE so this is an invalid rule
+			 * More than one PPPoE in the list is not valid!
 			 */
-			DEBUG_TRACE("%p: PPPoE - unsupported right now\n", fecti);
-			rule_invalid = true;
-
 			if (interface_type_counts[ii_type] != 0) {
 				DEBUG_TRACE("%p: PPPoE - additional unsupported\n", fecti);
 				rule_invalid = true;
@@ -1610,11 +1604,8 @@ static void ecm_front_end_ipv4_connection_udp_front_end_accelerate(struct ecm_fr
 			break;
 		case ECM_DB_IFACE_TYPE_PPPOE:
 			/*
-			 * GGG TODO For now we don't support PPPoE so this is an invalid rule
+			 * More than one PPPoE in the list is not valid!
 			 */
-			DEBUG_TRACE("%p: PPPoE - unsupported right now\n", fecui);
-			rule_invalid = true;
-
 			if (interface_type_counts[ii_type] != 0) {
 				DEBUG_TRACE("%p: PPPoE - additional unsupported\n", fecui);
 				rule_invalid = true;
@@ -1748,11 +1739,8 @@ static void ecm_front_end_ipv4_connection_udp_front_end_accelerate(struct ecm_fr
 			break;
 		case ECM_DB_IFACE_TYPE_PPPOE:
 			/*
-			 * GGG TODO For now we don't support PPPoE so this is an invalid rule
+			 * More than one PPPoE in the list is not valid!
 			 */
-			DEBUG_TRACE("%p: PPPoE - unsupported right now\n", fecui);
-			rule_invalid = true;
-
 			if (interface_type_counts[ii_type] != 0) {
 				DEBUG_TRACE("%p: PPPoE - additional unsupported\n", fecui);
 				rule_invalid = true;
@@ -2462,11 +2450,8 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_accelerate(struct
 			break;
 		case ECM_DB_IFACE_TYPE_PPPOE:
 			/*
-			 * GGG TODO For now we don't support PPPoE so this is an invalid rule
+			 * More than one PPPoE in the list is not valid!
 			 */
-			DEBUG_TRACE("%p: PPPoE - unsupported right now\n", fecnpi);
-			rule_invalid = true;
-
 			if (interface_type_counts[ii_type] != 0) {
 				DEBUG_TRACE("%p: PPPoE - additional unsupported\n", fecnpi);
 				rule_invalid = true;
@@ -2593,11 +2578,8 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_accelerate(struct
 			break;
 		case ECM_DB_IFACE_TYPE_PPPOE:
 			/*
-			 * GGG TODO For now we don't support PPPoE so this is an invalid rule
+			 * More than one PPPoE in the list is not valid!
 			 */
-			DEBUG_TRACE("%p: PPPoE - unsupported right now\n", fecnpi);
-			rule_invalid = true;
-
 			if (interface_type_counts[ii_type] != 0) {
 				DEBUG_TRACE("%p: PPPoE - additional unsupported\n", fecnpi);
 				rule_invalid = true;
@@ -5805,9 +5787,10 @@ static void ecm_front_end_ipv4_conntrack_event_mark(struct nf_conn *ct)
 	 * GGG TODO Add a classifier method to propagate this information to any and all types of classifier.
 	 */
 	cls = ecm_db_connection_assigned_classifier_find_and_ref(ci, ECM_CLASSIFIER_TYPE_NL);
-	DEBUG_ASSERT(cls, "NL classifier should never have unassigned\n");
-	ecm_classifier_nl_process_mark((struct ecm_classifier_nl_instance *)cls, ct->mark);
-	cls->deref(cls);
+	if (cls) {
+		ecm_classifier_nl_process_mark((struct ecm_classifier_nl_instance *)cls, ct->mark);
+		cls->deref(cls);
+	}
 
 	/*
 	 * All done

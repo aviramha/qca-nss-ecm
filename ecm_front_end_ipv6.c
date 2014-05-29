@@ -326,9 +326,7 @@ int32_t ecm_front_end_ipv6_interface_heirarchy_construct(struct ecm_db_iface_ins
 #ifdef ECM_INTERFACE_PPP_SUPPORT
 			int channel_count;
 			struct ppp_channel *ppp_chan[1];
-			const struct ppp_channel_ops *ppp_chan_ops;
 			int channel_protocol;
-			struct pppoe_channel_ops *pppoe_chan_ops;
 			struct pppoe_opt addressing;
 #endif
 
@@ -529,16 +527,16 @@ int32_t ecm_front_end_ipv6_interface_heirarchy_construct(struct ecm_db_iface_ins
 			 */
 			channel_count = ppp_hold_channels(dest_dev, ppp_chan, 1);
 			if (channel_count != 1) {
-				DEBUG_TRACE("Net device: %p PPP has %d channels - Unknown to the ECM\n",
+				DEBUG_TRACE("Net device: %p PPP has %d channels - ECM cannot handle this (interface becomes Unknown type)\n",
 						dest_dev, channel_count);
 				break;
 			}
 
 			/*
 			 * Get channel protocol type
+			 * NOTE: Not all PPP channels support channel specific methods.
 			 */
-			ppp_chan_ops = ppp_chan[0]->ops;
-			channel_protocol = ppp_chan_ops->get_channel_protocol(ppp_chan[0]);
+			channel_protocol = ppp_channel_get_protocol(ppp_chan[0]);
 			if (channel_protocol != PX_PROTO_OE) {
 				DEBUG_TRACE("Net device: %p PPP channel protocol: %d - Unknown to the ECM\n",
 						dest_dev, channel_protocol);
@@ -558,11 +556,8 @@ int32_t ecm_front_end_ipv6_interface_heirarchy_construct(struct ecm_db_iface_ins
 
 			/*
 			 * Get PPPoE session information and the underlying device it is using.
-			 * NOTE: We know this is PPPoE so we can cast the ppp_chan_ops to pppoe_chan_ops and
-			 * use its channel specific methods.
 			 */
-			pppoe_chan_ops = (struct pppoe_channel_ops *)ppp_chan_ops;
-			pppoe_chan_ops->get_addressing(ppp_chan[0], &addressing);
+			pppoe_channel_addressing_get(ppp_chan[0], &addressing);
 
 			/*
 			 * Copy the dev hold into this, we will release the hold later
@@ -1129,11 +1124,8 @@ static void ecm_front_end_ipv6_connection_tcp_front_end_accelerate(struct ecm_fr
 			break;
 		case ECM_DB_IFACE_TYPE_PPPOE:
 			/*
-			 * GGG TODO For now we don't support PPPoE so this is an invalid rule
+			 * More than one PPPoE in the list is not valid!
 			 */
-			DEBUG_TRACE("%p: PPPoE - unsupported right now\n", fecti);
-			rule_invalid = true;
-
 			if (interface_type_counts[ii_type] != 0) {
 				DEBUG_TRACE("%p: PPPoE - additional unsupported\n", fecti);
 				rule_invalid = true;
@@ -1267,11 +1259,8 @@ static void ecm_front_end_ipv6_connection_tcp_front_end_accelerate(struct ecm_fr
 			break;
 		case ECM_DB_IFACE_TYPE_PPPOE:
 			/*
-			 * GGG TODO For now we don't support PPPoE so this is an invalid rule
+			 * More than one PPPoE in the list is not valid!
 			 */
-			DEBUG_TRACE("%p: PPPoE - unsupported right now\n", fecti);
-			rule_invalid = true;
-
 			if (interface_type_counts[ii_type] != 0) {
 				DEBUG_TRACE("%p: PPPoE - additional unsupported\n", fecti);
 				rule_invalid = true;
@@ -1985,11 +1974,8 @@ static void ecm_front_end_ipv6_connection_udp_front_end_accelerate(struct ecm_fr
 			break;
 		case ECM_DB_IFACE_TYPE_PPPOE:
 			/*
-			 * GGG TODO For now we don't support PPPoE so this is an invalid rule
+			 * More than one PPPoE in the list is not valid!
 			 */
-			DEBUG_TRACE("%p: PPPoE - unsupported right now\n", fecui);
-			rule_invalid = true;
-
 			if (interface_type_counts[ii_type] != 0) {
 				DEBUG_TRACE("%p: PPPoE - additional unsupported\n", fecui);
 				rule_invalid = true;
@@ -2123,11 +2109,8 @@ static void ecm_front_end_ipv6_connection_udp_front_end_accelerate(struct ecm_fr
 			break;
 		case ECM_DB_IFACE_TYPE_PPPOE:
 			/*
-			 * GGG TODO For now we don't support PPPoE so this is an invalid rule
+			 * More than one PPPoE in the list is not valid!
 			 */
-			DEBUG_TRACE("%p: PPPoE - unsupported right now\n", fecui);
-			rule_invalid = true;
-
 			if (interface_type_counts[ii_type] != 0) {
 				DEBUG_TRACE("%p: PPPoE - additional unsupported\n", fecui);
 				rule_invalid = true;
@@ -2788,11 +2771,8 @@ static void ecm_front_end_ipv6_connection_non_ported_front_end_accelerate(struct
 			break;
 		case ECM_DB_IFACE_TYPE_PPPOE:
 			/*
-			 * GGG TODO For now we don't support PPPoE so this is an invalid rule
+			 * More than one PPPoE in the list is not valid!
 			 */
-			DEBUG_TRACE("%p: PPPoE - unsupported right now\n", fecnpi);
-			rule_invalid = true;
-
 			if (interface_type_counts[ii_type] != 0) {
 				DEBUG_TRACE("%p: PPPoE - additional unsupported\n", fecnpi);
 				rule_invalid = true;
@@ -2919,11 +2899,8 @@ static void ecm_front_end_ipv6_connection_non_ported_front_end_accelerate(struct
 			break;
 		case ECM_DB_IFACE_TYPE_PPPOE:
 			/*
-			 * GGG TODO For now we don't support PPPoE so this is an invalid rule
+			 * More than one PPPoE in the list is not valid!
 			 */
-			DEBUG_TRACE("%p: PPPoE - unsupported right now\n", fecnpi);
-			rule_invalid = true;
-
 			if (interface_type_counts[ii_type] != 0) {
 				DEBUG_TRACE("%p: PPPoE - additional unsupported\n", fecnpi);
 				rule_invalid = true;
