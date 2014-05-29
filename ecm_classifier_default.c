@@ -308,7 +308,7 @@ static void ecm_classifier_default_process(struct ecm_classifier_instance *aci, 
 	 * Check the TCP connections state whether it is established or not.
 	 */
 	if (unlikely(prevailing_state != ECM_TRACKER_CONNECTION_STATE_ESTABLISHED)) {
-		cdii->process_response.accel_mode = ECM_CLASSIFIER_ACCELERATION_MODE_NO;
+		//cdii->process_response.accel_mode = ECM_CLASSIFIER_ACCELERATION_MODE_NO;
 		goto return_response;
 	}
 
