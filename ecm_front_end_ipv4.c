@@ -242,10 +242,11 @@ static struct ecm_db_node_instance *ecm_front_end_ipv4_node_establish_and_ref(st
 		case ECM_DB_IFACE_TYPE_LAG:
 		case ECM_DB_IFACE_TYPE_VLAN:
 		case ECM_DB_IFACE_TYPE_BRIDGE:
-			if (!ecm_interface_mac_addr_get(addr, node_addr, &on_link, gw_addr)) {
+			if (!ecm_interface_mac_addr_get(addr, node_addr, &on_link, gw_addr) || is_zero_ether_addr(node_addr)) {
 				__be32 ipv4_addr;
 				__be32 src_ip;
-				DEBUG_TRACE("failed to obtain mac for host " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(addr));
+				DEBUG_TRACE("failed to obtain node address for host " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(addr));
+
 
 				/*
 				 * Issue an ARP request for it, select the src_ip from which to issue the request.
@@ -261,7 +262,7 @@ static struct ecm_db_node_instance *ecm_front_end_ipv4_node_establish_and_ref(st
 				 * If we have a GW for this address, then we have to send ARP request to the GW
 				 */
 				if (!ECM_IP_ADDR_IS_NULL(gw_addr)) {
-					ECM_IP_ADDR_COPY(addr, gw_addr);
+					ECM_IP_ADDR_TO_NIN4_ADDR(ipv4_addr, gw_addr);
 				}
 
 				DEBUG_TRACE("Send ARP for %pI4 using src_ip as %pI4\n", &ipv4_addr, &src_ip);
@@ -276,6 +277,10 @@ static struct ecm_db_node_instance *ecm_front_end_ipv4_node_establish_and_ref(st
 				 */
 				return NULL;
 			}
+			if (is_multicast_ether_addr(node_addr)) {
+				DEBUG_TRACE("multicast node address for host " ECM_IP_ADDR_DOT_FMT ", node_addr: %pM\n", ECM_IP_ADDR_TO_DOT(addr), node_addr);
+				return NULL;
+			}
 			done = true;
 			break;
 		default:
@@ -287,6 +292,9 @@ static struct ecm_db_node_instance *ecm_front_end_ipv4_node_establish_and_ref(st
 			 */
 			memcpy(node_addr, (uint8_t *)addr, ETH_ALEN);
 		}
+	}
+	if (!done) {
+		return NULL;
 	}
 
 	/*
