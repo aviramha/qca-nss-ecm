@@ -5360,11 +5360,11 @@ static struct ecm_db_connection_instance *ecm_front_end_ipv6_connection_from_ct_
 	ECM_NIN6_ADDR_TO_IP_ADDR(host2_addr, reply_tuple.src.u3.in6);
 	protocol = orig_tuple.dst.protonum;
 	if (protocol == IPPROTO_TCP) {
-		host1_port = orig_tuple.src.u.tcp.port;
-		host2_port = reply_tuple.src.u.tcp.port;
+		host1_port = ntohs(orig_tuple.src.u.tcp.port);
+		host2_port = ntohs(reply_tuple.src.u.tcp.port);
 	} else if (protocol == IPPROTO_UDP) {
-		host1_port = orig_tuple.src.u.udp.port;
-		host2_port = reply_tuple.src.u.udp.port;
+		host1_port = ntohs(orig_tuple.src.u.udp.port);
+		host2_port = ntohs(reply_tuple.src.u.udp.port);
 	} else if ((protocol == IPPROTO_IPIP)) {
 		host1_port = 0;
 		host2_port = 0;
