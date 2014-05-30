@@ -14,6 +14,8 @@
  **************************************************************************
  */
 
+#include <linux/printk.h>
+
 /*
  * Ported typedefs
  */
@@ -294,8 +296,8 @@ static inline bool ecm_string_to_ip_addr(ip_addr_t addr, char *ip_str)
 #define DEBUG_SET_MAGIC(i, m)
 #define DEBUG_CLEAR_MAGIC(i)
 #else
-#define DEBUG_ASSERT(c, s, ...) if (!(c)) { printk("ASSERT: %s:%d:" s, __FILE__, __LINE__, ##__VA_ARGS__); BUG(); }
-#define DEBUG_ERROR(s, ...) printk(KERN_ERR "ERROR: %s:%d:" s, __FILE__, __LINE__, ##__VA_ARGS__)
+#define DEBUG_ASSERT(c, s, ...) if (!(c)) { pr_emerg("ASSERT: %s:%d:" s, __FUNCTION__, __LINE__, ##__VA_ARGS__); BUG(); }
+#define DEBUG_ERROR(s, ...) pr_err("%s:%d:" s, __FUNCTION__, __LINE__, ##__VA_ARGS__)
 #define DEBUG_CHECK_MAGIC(i, m, s, ...) if (i->magic != m) { DEBUG_ASSERT(false, s, ##__VA_ARGS__); }
 #define DEBUG_SET_MAGIC(i, m) i->magic = m
 #define DEBUG_CLEAR_MAGIC(i) i->magic = 0
@@ -304,18 +306,18 @@ static inline bool ecm_string_to_ip_addr(ip_addr_t addr, char *ip_str)
 #if (DEBUG_LEVEL < 2)
 #define DEBUG_WARN(s, ...)
 #else
-#define DEBUG_WARN(s, ...) printk("WARN: %s:%d:" s, __FILE__, __LINE__, ##__VA_ARGS__)
+#define DEBUG_WARN(s, ...) pr_warn("%s:%d:" s, __FUNCTION__, __LINE__, ##__VA_ARGS__)
 #endif
 
 #if (DEBUG_LEVEL < 3)
 #define DEBUG_INFO(s, ...)
 #else
-#define DEBUG_INFO(s, ...) printk("INFO: %s:%d:" s, __FILE__, __LINE__, ##__VA_ARGS__)
+#define DEBUG_INFO(s, ...) pr_notice("%s:%d:" s, __FUNCTION__, __LINE__, ##__VA_ARGS__)
 #endif
 
 #if (DEBUG_LEVEL < 4)
 #define DEBUG_TRACE(s, ...)
 #else
-#define DEBUG_TRACE(s, ...) printk("TRACE: %s:%d:" s, __FILE__, __LINE__, ##__VA_ARGS__)
+#define DEBUG_TRACE(s, ...) pr_info("%s:%d:" s, __FUNCTION__, __LINE__, ##__VA_ARGS__)
 #endif
 
