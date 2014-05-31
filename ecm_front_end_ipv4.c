@@ -1190,9 +1190,9 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_decelerate(struct ecm_fr
 	 * Get addressing information
 	 */
 	ecm_db_connection_from_address_get(fecti->ci, addr);
-	ECM_IP_ADDR_TO_NIN4_ADDR(destroy.src_ip, addr);
+	ECM_IP_ADDR_TO_HIN4_ADDR(destroy.src_ip, addr);
 	ecm_db_connection_to_address_nat_get(fecti->ci, addr);
-	ECM_IP_ADDR_TO_NIN4_ADDR(destroy.dest_ip, addr);
+	ECM_IP_ADDR_TO_HIN4_ADDR(destroy.dest_ip, addr);
 	destroy.src_port = ecm_db_connection_from_port_get(fecti->ci);
 	destroy.dest_port = ecm_db_connection_to_port_nat_get(fecti->ci);
 
@@ -2061,9 +2061,9 @@ static void ecm_front_end_ipv4_connection_udp_front_end_decelerate(struct ecm_fr
 	 * Get addressing information
 	 */
 	ecm_db_connection_from_address_get(fecui->ci, addr);
-	ECM_IP_ADDR_TO_NIN4_ADDR(destroy.src_ip, addr);
+	ECM_IP_ADDR_TO_HIN4_ADDR(destroy.src_ip, addr);
 	ecm_db_connection_to_address_nat_get(fecui->ci, addr);
-	ECM_IP_ADDR_TO_NIN4_ADDR(destroy.dest_ip, addr);
+	ECM_IP_ADDR_TO_HIN4_ADDR(destroy.dest_ip, addr);
 	destroy.src_port = ecm_db_connection_from_port_get(fecui->ci);
 	destroy.dest_port = ecm_db_connection_to_port_nat_get(fecui->ci);
 
@@ -2908,9 +2908,9 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_decelerate(struct
 	 * Get addressing information
 	 */
 	ecm_db_connection_from_address_get(fecnpi->ci, addr);
-	ECM_IP_ADDR_TO_NIN4_ADDR(destroy.src_ip, addr);
+	ECM_IP_ADDR_TO_HIN4_ADDR(destroy.src_ip, addr);
 	ecm_db_connection_to_address_nat_get(fecnpi->ci, addr);
-	ECM_IP_ADDR_TO_NIN4_ADDR(destroy.dest_ip, addr);
+	ECM_IP_ADDR_TO_HIN4_ADDR(destroy.dest_ip, addr);
 	destroy.src_port = ecm_db_connection_from_port_get(fecnpi->ci);
 	destroy.dest_port = ecm_db_connection_to_port_nat_get(fecnpi->ci);
 
@@ -5519,7 +5519,7 @@ static void ecm_front_end_ipv4_net_dev_callback(struct nss_ipv4_cb_params *nicb)
 		/*
 		 * Update the neighbour entry for destination IP address
 		 */
-		ECM_NIN4_ADDR_TO_IP_ADDR(dest_ip, sync->dest_ip);
+		ECM_HIN4_ADDR_TO_IP_ADDR(dest_ip, sync->dest_ip);
 		neigh = ecm_front_end_ipv4_neigh_get(dest_ip);
 		if (!neigh) {
 			DEBUG_WARN("Neighbour entry for %pI4h not found\n", &sync->dest_ip);

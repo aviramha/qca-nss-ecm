@@ -632,7 +632,7 @@ static struct ecm_db_node_instance *ecm_front_end_ipv6_node_establish_and_ref(st
 	bool done;
 	uint8_t node_addr[ETH_ALEN];
 
-	DEBUG_INFO("Establish node for %pM\n", node_mac_addr);
+	DEBUG_INFO("Establish node for " ECM_IP_ADDR_OCTAL_FMT "\n", ECM_IP_ADDR_TO_OCTAL(addr));
 
 	/*
 	 * The node is the datalink address, typically a MAC address.
@@ -784,6 +784,12 @@ static struct ecm_db_host_instance *ecm_front_end_ipv6_host_establish_and_ref(st
 
 	DEBUG_INFO("Establish host for " ECM_IP_ADDR_OCTAL_FMT "\n", ECM_IP_ADDR_TO_OCTAL(addr));
 
+	ni = ecm_front_end_ipv6_node_establish_and_ref(dev, addr, interface_list, interface_list_first);
+	if (!ni) {
+		DEBUG_WARN("Failed to establish node\n");
+		return NULL;
+	}
+
 	/*
 	 * Locate the host
 	 */
@@ -791,12 +797,6 @@ static struct ecm_db_host_instance *ecm_front_end_ipv6_host_establish_and_ref(st
 	if (hi) {
 		DEBUG_TRACE("%p: host established\n", hi);
 		return hi;
-	}
-
-	ni = ecm_front_end_ipv6_node_establish_and_ref(dev, addr, interface_list, interface_list_first);
-	if (!ni) {
-		DEBUG_WARN("Failed to establish node\n");
-		return NULL;
 	}
 
 	/*
@@ -850,21 +850,21 @@ static struct ecm_db_mapping_instance *ecm_front_end_ipv6_mapping_establish_and_
 	DEBUG_INFO("%p: Establish mapping for " ECM_IP_ADDR_OCTAL_FMT ":%u\n", dev, ECM_IP_ADDR_TO_OCTAL(addr), port);
 
 	/*
-	 * Locate the mapping
-	 */
-	mi = ecm_db_mapping_find_and_ref(addr, port);
-	if (mi) {
-		DEBUG_TRACE("%p: mapping established\n", mi);
-		return mi;
-	}
-
-	/*
 	 * No mapping - establish host existence
 	 */
 	hi = ecm_front_end_ipv6_host_establish_and_ref(dev, addr, interface_list, interface_list_first);
 	if (!hi) {
 		DEBUG_WARN("Failed to establish host\n");
 		return NULL;
+	}
+
+	/*
+	 * Locate the mapping
+	 */
+	mi = ecm_db_mapping_find_and_ref(addr, port);
+	if (mi) {
+		DEBUG_TRACE("%p: mapping established\n", mi);
+		return mi;
 	}
 
 	/*
@@ -3583,7 +3583,7 @@ static unsigned int ecm_front_end_ipv6_tcp_process(struct net_device *out_dev, s
 		 * GGG TODO rework terms of "src/dest" - these need to be named consistently as from/to as per database terms.
 		 */
 		DEBUG_TRACE("%p: Create the 'from' interface heirarchy list\n", nci);
-		from_list_first = ecm_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, IPPROTO_TCP);
+		from_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, IPPROTO_TCP);
 		if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to obtain 'from' heirarchy list\n");
@@ -3601,7 +3601,7 @@ static unsigned int ecm_front_end_ipv6_tcp_process(struct net_device *out_dev, s
 		}
 
 		DEBUG_TRACE("%p: Create the 'to' interface heirarchy list\n", nci);
-		to_list_first = ecm_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, IPPROTO_TCP);
+		to_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, IPPROTO_TCP);
 		if (to_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_mapping_deref(src_mi);
 			ecm_db_connection_deref(nci);
@@ -4081,7 +4081,7 @@ static unsigned int ecm_front_end_ipv6_udp_process(struct net_device *out_dev, s
 		 * GGG TODO rework terms of "src/dest" - these need to be named consistently as from/to as per database terms.
 		 */
 		DEBUG_TRACE("%p: Create the 'from' interface heirarchy list\n", nci);
-		from_list_first = ecm_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, IPPROTO_UDP);
+		from_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, IPPROTO_UDP);
 		if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to obtain 'from' heirarchy list\n");
@@ -4099,7 +4099,7 @@ static unsigned int ecm_front_end_ipv6_udp_process(struct net_device *out_dev, s
 		}
 
 		DEBUG_TRACE("%p: Create the 'to' interface heirarchy list\n", nci);
-		to_list_first = ecm_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, IPPROTO_UDP);
+		to_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, IPPROTO_UDP);
 		if (to_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_mapping_deref(src_mi);
 			ecm_db_connection_deref(nci);
@@ -4559,7 +4559,7 @@ static unsigned int ecm_front_end_ipv6_non_ported_process(struct net_device *out
 		 * GGG TODO rework terms of "src/dest" - these need to be named consistently as from/to as per database terms.
 		 */
 		DEBUG_TRACE("%p: Create the 'from' interface heirarchy list\n", nci);
-		from_list_first = ecm_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, protocol);
+		from_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, protocol);
 		if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to obtain 'from' heirarchy list\n");
@@ -4577,7 +4577,7 @@ static unsigned int ecm_front_end_ipv6_non_ported_process(struct net_device *out
 		}
 
 		DEBUG_TRACE("%p: Create the 'to' interface heirarchy list\n", nci);
-		to_list_first = ecm_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, protocol);
+		to_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, protocol);
 		if (to_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_mapping_deref(src_mi);
 			ecm_db_connection_deref(nci);
