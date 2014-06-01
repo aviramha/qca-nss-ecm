@@ -232,7 +232,7 @@ struct ecm_tracker_tcp_reader_instance {
 static ecm_db_timer_group_t ecm_tracker_tcp_timer_group_from_state[] = {
 							ECM_DB_TIMER_GROUPS_CONNECTION_TCP_SHORT_TIMEOUT,	/* Unknown */
 							ECM_DB_TIMER_GROUPS_CONNECTION_TCP_SHORT_TIMEOUT,	/* Establishing */
-							ECM_DB_TIMER_GROUPS_CONNECTION_TCP_LONG_TIMEOUT,		/* Established */
+							ECM_DB_TIMER_GROUPS_CONNECTION_TCP_LONG_TIMEOUT,	/* Established */
 							ECM_DB_TIMER_GROUPS_CONNECTION_TCP_SHORT_TIMEOUT,	/* Closing */
 							ECM_DB_TIMER_GROUPS_CONNECTION_TCP_SHORT_TIMEOUT,	/* Closed */
 							ECM_DB_TIMER_GROUPS_CONNECTION_TCP_RESET_TIMEOUT,	/* Fault */

@@ -193,10 +193,13 @@ extern int nf_ct_tcp_be_liberal;
  * ecm_front_end_ipv4_node_establish_and_ref()
  *	Returns a reference to a node, possibly creating one if necessary.
  *
+ * The given_node_addr will be used if provided.
+ *
  * Returns NULL on failure.
  */
 static struct ecm_db_node_instance *ecm_front_end_ipv4_node_establish_and_ref(struct net_device *dev, ip_addr_t addr,
-							struct ecm_db_iface_instance *interface_list[], int32_t interface_list_first)
+							struct ecm_db_iface_instance *interface_list[], int32_t interface_list_first,
+							uint8_t *given_node_addr)
 {
 	struct ecm_db_node_instance *ni;
 	struct ecm_db_node_instance *nni;
@@ -219,6 +222,11 @@ static struct ecm_db_node_instance *ecm_front_end_ipv4_node_establish_and_ref(st
 	 */
 	memset(node_addr, 0, ETH_ALEN);
 	done = false;
+	if (given_node_addr) {
+		memcpy(node_addr, given_node_addr, ETH_ALEN);
+		done = true;
+		DEBUG_TRACE("Using given node address: %pM\n", node_addr);
+	}
 	for (i = ECM_DB_IFACE_HEIRARCHY_MAX - 1; (!done) && (i >= interface_list_first); i--) {
 		ecm_db_iface_type_t type;
 
@@ -245,7 +253,7 @@ static struct ecm_db_node_instance *ecm_front_end_ipv4_node_establish_and_ref(st
 			if (!ecm_interface_mac_addr_get(addr, node_addr, &on_link, gw_addr)) {
 				__be32 ipv4_addr;
 				__be32 src_ip;
-				DEBUG_TRACE("failed to obtain mac for host " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(addr));
+				DEBUG_TRACE("failed to obtain node address for host " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(addr));
 
 				/*
 				 * Issue an ARP request for it, select the src_ip from which to issue the request.
@@ -268,14 +276,19 @@ static struct ecm_db_node_instance *ecm_front_end_ipv4_node_establish_and_ref(st
 				arp_send(ARPOP_REQUEST, ETH_P_ARP, ipv4_addr, dev, src_ip, NULL, NULL, NULL);
 
 				/*
-				 * By returning NULL the connection will not be created and the packet dropped.
-				 * However the sending will no doubt re-try the transmission and by that time we shall have the MAC for it.
-				 * GGG At the moment this is no longer true - we return NF_ACCEPT in all cases but we do not create the ecm connection
-				 * until we can get all the information we need.  TODO Really need to sort this out for TCP tracker use so we can guarantee
-				 * observing traffic from the start of a connection.
+				 * Unable to get node address at this time.
 				 */
 				return NULL;
 			}
+			if (is_multicast_ether_addr(node_addr)) {
+				DEBUG_TRACE("multicast node address for host " ECM_IP_ADDR_DOT_FMT ", node_addr: %pM\n", ECM_IP_ADDR_TO_DOT(addr), node_addr);
+				return NULL;
+			}
+
+			/*
+			 * Because we are iterating from inner to outer interface, this interface is the
+			 * innermost one that has a node address - take this one.
+			 */
 			done = true;
 			break;
 		default:
@@ -287,6 +300,10 @@ static struct ecm_db_node_instance *ecm_front_end_ipv4_node_establish_and_ref(st
 			 */
 			memcpy(node_addr, (uint8_t *)addr, ETH_ALEN);
 		}
+	}
+	if (!done) {
+		DEBUG_INFO("Failed to establish node for " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(addr));
+		return NULL;
 	}
 
 	/*
@@ -349,19 +366,14 @@ static struct ecm_db_node_instance *ecm_front_end_ipv4_node_establish_and_ref(st
  * Returns NULL on failure.
  */
 static struct ecm_db_host_instance *ecm_front_end_ipv4_host_establish_and_ref(struct net_device *dev, ip_addr_t addr,
-						struct ecm_db_iface_instance *interface_list[], int32_t interface_list_first)
+						struct ecm_db_iface_instance *interface_list[], int32_t interface_list_first,
+						uint8_t *given_node_addr)
 {
 	struct ecm_db_host_instance *hi;
 	struct ecm_db_host_instance *nhi;
 	struct ecm_db_node_instance *ni;
 
 	DEBUG_INFO("Establish host for " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(addr));
-
-	ni = ecm_front_end_ipv4_node_establish_and_ref(dev, addr, interface_list, interface_list_first);
-	if (!ni) {
-		DEBUG_WARN("Failed to establish node\n");
-		return NULL;
-	}
 
 	/*
 	 * Locate the host
@@ -370,6 +382,15 @@ static struct ecm_db_host_instance *ecm_front_end_ipv4_host_establish_and_ref(st
 	if (hi) {
 		DEBUG_TRACE("%p: host established\n", hi);
 		return hi;
+	}
+
+	/*
+	 * No host - establish node
+	 */
+	ni = ecm_front_end_ipv4_node_establish_and_ref(dev, addr, interface_list, interface_list_first, given_node_addr);
+	if (!ni) {
+		DEBUG_WARN("Failed to establish node\n");
+		return NULL;
 	}
 
 	/*
@@ -414,7 +435,8 @@ static struct ecm_db_host_instance *ecm_front_end_ipv4_host_establish_and_ref(st
  * Returns NULL on failure.
  */
 static struct ecm_db_mapping_instance *ecm_front_end_ipv4_mapping_establish_and_ref(struct net_device *dev, ip_addr_t addr, int port,
-				struct ecm_db_iface_instance *interface_list[], int32_t interface_list_first)
+				struct ecm_db_iface_instance *interface_list[], int32_t interface_list_first,
+				uint8_t *given_node_addr)
 {
 	struct ecm_db_mapping_instance *mi;
 	struct ecm_db_mapping_instance *nmi;
@@ -425,7 +447,7 @@ static struct ecm_db_mapping_instance *ecm_front_end_ipv4_mapping_establish_and_
 	/*
 	 * No mapping - establish host existence
 	 */
-	hi = ecm_front_end_ipv4_host_establish_and_ref(dev, addr, interface_list, interface_list_first);
+	hi = ecm_front_end_ipv4_host_establish_and_ref(dev, addr, interface_list, interface_list_first, given_node_addr);
 	if (!hi) {
 		DEBUG_WARN("Failed to establish host\n");
 		return NULL;
@@ -3198,7 +3220,11 @@ static bool ecm_front_end_ipv4_reclassify(struct ecm_db_connection_instance *ci,
  * ecm_front_end_ipv4_tcp_process()
  *	Process a TCP packet
  */
-static unsigned int ecm_front_end_ipv4_tcp_process(struct net_device *out_dev, struct net_device *in_dev, bool can_accel, bool is_routed, struct sk_buff *skb,
+static unsigned int ecm_front_end_ipv4_tcp_process(struct net_device *out_dev, struct net_device *out_dev_nat,
+							struct net_device *in_dev, struct net_device *in_dev_nat,
+							uint8_t *src_node_addr, uint8_t *src_node_addr_nat,
+							uint8_t *dest_node_addr, uint8_t *dest_node_addr_nat,
+							bool can_accel, bool is_routed, struct sk_buff *skb,
 							struct ecm_tracker_ip_header *iph,
 							struct nf_conn *ct, enum ip_conntrack_dir ct_dir, ecm_db_direction_t ecm_dir,
 							struct nf_conntrack_tuple *orig_tuple, struct nf_conntrack_tuple *reply_tuple,
@@ -3243,28 +3269,42 @@ static unsigned int ecm_front_end_ipv4_tcp_process(struct net_device *out_dev, s
 	 * Refer to the ecm_front_end_ipv4_process() for information on how we extract this information.
 	 */
 	if (ct_dir == IP_CT_DIR_ORIGINAL) {
-		if (ecm_dir == ECM_DB_DIRECTION_EGRESS) {
+		if ((ecm_dir == ECM_DB_DIRECTION_EGRESS_NAT) || (ecm_dir == ECM_DB_DIRECTION_NON_NAT)) {
+			src_port = ntohs(orig_tuple->src.u.tcp.port);
+			dest_port = ntohs(orig_tuple->dst.u.tcp.port);
+			dest_port_nat = ntohs(reply_tuple->src.u.tcp.port);
+			src_port_nat = ntohs(reply_tuple->dst.u.tcp.port);
+		} else if (ecm_dir == ECM_DB_DIRECTION_INGRESS_NAT) {
+			src_port = ntohs(orig_tuple->src.u.tcp.port);
+			dest_port_nat = ntohs(orig_tuple->dst.u.tcp.port);
+			dest_port = ntohs(reply_tuple->src.u.tcp.port);
+			src_port_nat = ntohs(reply_tuple->dst.u.tcp.port);
+		} else if (ecm_dir == ECM_DB_DIRECTION_BRIDGED) {
 			src_port = ntohs(orig_tuple->src.u.tcp.port);
 			dest_port = ntohs(orig_tuple->dst.u.tcp.port);
 			dest_port_nat = ntohs(reply_tuple->src.u.tcp.port);
 			src_port_nat = ntohs(reply_tuple->dst.u.tcp.port);
 		} else {
-			src_port = ntohs(orig_tuple->src.u.tcp.port);
-			dest_port_nat = ntohs(orig_tuple->dst.u.tcp.port);
-			dest_port = ntohs(reply_tuple->src.u.tcp.port);
-			src_port_nat = ntohs(reply_tuple->dst.u.tcp.port);
+			DEBUG_ASSERT(false, "Unhandled ecm_dir: %d\n", ecm_dir);
 		}
 	} else {
-		if (ecm_dir == ECM_DB_DIRECTION_EGRESS) {
+		if ((ecm_dir == ECM_DB_DIRECTION_EGRESS_NAT) || (ecm_dir == ECM_DB_DIRECTION_NON_NAT)) {
+			dest_port = ntohs(orig_tuple->src.u.tcp.port);
+			src_port = ntohs(orig_tuple->dst.u.tcp.port);
+			src_port_nat = ntohs(reply_tuple->src.u.tcp.port);
+			dest_port_nat = ntohs(reply_tuple->dst.u.tcp.port);
+		} else if (ecm_dir == ECM_DB_DIRECTION_INGRESS_NAT) {
+			dest_port = ntohs(orig_tuple->src.u.tcp.port);
+			src_port_nat = ntohs(orig_tuple->dst.u.tcp.port);
+			src_port = ntohs(reply_tuple->src.u.tcp.port);
+			dest_port_nat = ntohs(reply_tuple->dst.u.tcp.port);
+		} else if (ecm_dir == ECM_DB_DIRECTION_BRIDGED) {
 			dest_port = ntohs(orig_tuple->src.u.tcp.port);
 			src_port = ntohs(orig_tuple->dst.u.tcp.port);
 			src_port_nat = ntohs(reply_tuple->src.u.tcp.port);
 			dest_port_nat = ntohs(reply_tuple->dst.u.tcp.port);
 		} else {
-			dest_port = ntohs(orig_tuple->src.u.tcp.port);
-			src_port_nat = ntohs(orig_tuple->dst.u.tcp.port);
-			src_port = ntohs(reply_tuple->src.u.tcp.port);
-			dest_port_nat = ntohs(reply_tuple->dst.u.tcp.port);
+			DEBUG_ASSERT(false, "Unhandled ecm_dir: %d\n", ecm_dir);
 		}
 	}
 
@@ -3329,9 +3369,10 @@ static unsigned int ecm_front_end_ipv4_tcp_process(struct net_device *out_dev, s
 		 * Get the src and destination mappings.
 		 * For this we also need the interface lists which we also set upon the new connection while we are at it.
 		 * GGG TODO rework terms of "src/dest" - these need to be named consistently as from/to as per database terms.
+		 * GGG TODO The empty list checks should not be needed, mapping_establish_and_ref() should fail out if there is no list anyway.
 		 */
 		DEBUG_TRACE("%p: Create the 'from' interface heirarchy list\n", nci);
-		from_list_first = ecm_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, IPPROTO_TCP, in_dev);
+		from_list_first = ecm_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, IPPROTO_TCP, in_dev, is_routed, in_dev);
 		if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to obtain 'from' heirarchy list\n");
@@ -3340,7 +3381,7 @@ static unsigned int ecm_front_end_ipv4_tcp_process(struct net_device *out_dev, s
 		ecm_db_connection_from_interfaces_reset(nci, from_list, from_list_first);
 
 		DEBUG_TRACE("%p: Create source mapping\n", nci);
-		src_mi = ecm_front_end_ipv4_mapping_establish_and_ref(in_dev, ip_src_addr, src_port, from_list, from_list_first);
+		src_mi = ecm_front_end_ipv4_mapping_establish_and_ref(in_dev, ip_src_addr, src_port, from_list, from_list_first, src_node_addr);
 		ecm_db_connection_interfaces_deref(from_list, from_list_first);
 		if (!src_mi) {
 			ecm_db_connection_deref(nci);
@@ -3349,7 +3390,7 @@ static unsigned int ecm_front_end_ipv4_tcp_process(struct net_device *out_dev, s
 		}
 
 		DEBUG_TRACE("%p: Create the 'to' interface heirarchy list\n", nci);
-		to_list_first = ecm_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, IPPROTO_TCP, in_dev);
+		to_list_first = ecm_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, IPPROTO_TCP, out_dev, is_routed, in_dev);
 		if (to_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_mapping_deref(src_mi);
 			ecm_db_connection_deref(nci);
@@ -3359,7 +3400,7 @@ static unsigned int ecm_front_end_ipv4_tcp_process(struct net_device *out_dev, s
 		ecm_db_connection_to_interfaces_reset(nci, to_list, to_list_first);
 
 		DEBUG_TRACE("%p: Create dest mapping\n", nci);
-		dest_mi = ecm_front_end_ipv4_mapping_establish_and_ref(out_dev, ip_dest_addr, dest_port, to_list, to_list_first);
+		dest_mi = ecm_front_end_ipv4_mapping_establish_and_ref(out_dev, ip_dest_addr, dest_port, to_list, to_list_first, dest_node_addr);
 		ecm_db_connection_interfaces_deref(to_list, to_list_first);
 		if (!dest_mi) {
 			ecm_db_mapping_deref(src_mi);
@@ -3372,9 +3413,10 @@ static unsigned int ecm_front_end_ipv4_tcp_process(struct net_device *out_dev, s
 		 * Get the src and destination NAT mappings
 		 * For this we also need the interface lists which we also set upon the new connection while we are at it.
 		 * GGG TODO rework terms of "src/dest" - these need to be named consistently as from/to as per database terms.
+		 * GGG TODO The empty list checks should not be needed, mapping_establish_and_ref() should fail out if there is no list anyway.
 		 */
 		DEBUG_TRACE("%p: Create the 'from NAT' interface heirarchy list\n", nci);
-		from_nat_list_first = ecm_interface_heirarchy_construct(from_nat_list, ip_dest_addr, ip_src_addr_nat, IPPROTO_TCP, in_dev);
+		from_nat_list_first = ecm_interface_heirarchy_construct(from_nat_list, ip_dest_addr, ip_src_addr_nat, IPPROTO_TCP, in_dev_nat, is_routed, in_dev_nat);
 		if (from_nat_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_mapping_deref(src_mi);
 			ecm_db_mapping_deref(dest_mi);
@@ -3384,7 +3426,7 @@ static unsigned int ecm_front_end_ipv4_tcp_process(struct net_device *out_dev, s
 		}
 		ecm_db_connection_from_nat_interfaces_reset(nci, from_nat_list, from_nat_list_first);
 
-		src_nat_mi = ecm_front_end_ipv4_mapping_establish_and_ref(in_dev, ip_src_addr_nat, src_port_nat, from_nat_list, from_nat_list_first);
+		src_nat_mi = ecm_front_end_ipv4_mapping_establish_and_ref(in_dev_nat, ip_src_addr_nat, src_port_nat, from_nat_list, from_nat_list_first, src_node_addr_nat);
 		ecm_db_connection_interfaces_deref(from_nat_list, from_nat_list_first);
 		if (!src_nat_mi) {
 			ecm_db_mapping_deref(dest_mi);
@@ -3395,7 +3437,7 @@ static unsigned int ecm_front_end_ipv4_tcp_process(struct net_device *out_dev, s
 		}
 
 		DEBUG_TRACE("%p: Create the 'to NAT' interface heirarchy list\n", nci);
-		to_nat_list_first = ecm_interface_heirarchy_construct(to_nat_list, ip_src_addr, ip_dest_addr_nat, IPPROTO_TCP, in_dev);
+		to_nat_list_first = ecm_interface_heirarchy_construct(to_nat_list, ip_src_addr, ip_dest_addr_nat, IPPROTO_TCP, out_dev_nat, is_routed, in_dev);
 		if (to_nat_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_mapping_deref(src_nat_mi);
 			ecm_db_mapping_deref(dest_mi);
@@ -3406,7 +3448,7 @@ static unsigned int ecm_front_end_ipv4_tcp_process(struct net_device *out_dev, s
 		}
 		ecm_db_connection_to_nat_interfaces_reset(nci, to_nat_list, to_nat_list_first);
 
-		dest_nat_mi = ecm_front_end_ipv4_mapping_establish_and_ref(out_dev, ip_dest_addr_nat, dest_port_nat, to_nat_list, to_nat_list_first);
+		dest_nat_mi = ecm_front_end_ipv4_mapping_establish_and_ref(out_dev_nat, ip_dest_addr_nat, dest_port_nat, to_nat_list, to_nat_list_first, dest_node_addr_nat);
 		ecm_db_connection_interfaces_deref(to_nat_list, to_nat_list_first);
 		if (!dest_nat_mi) {
 			ecm_db_mapping_deref(src_nat_mi);
@@ -3553,9 +3595,11 @@ static unsigned int ecm_front_end_ipv4_tcp_process(struct net_device *out_dev, s
 		 * NOTE: We never have to change the usual mapping->host->node_iface arrangements for each side of the connection (to/from sides)
 		 * This is because if these interfaces change then the connection is dead anyway.
 		 * But a LAG slave might change the heirarchy the connection is using but the LAG master is still sane.
+		 * GGG TODO The empty list checks may mean that stale interface list information remains on a connection - this could be bad.
+		 * GGG Investigate the removal of the empty list checks.
 		 */
 		DEBUG_TRACE("%p: Update the 'from' interface heirarchy list\n", ci);
-		from_list_first = ecm_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, IPPROTO_TCP, in_dev);
+		from_list_first = ecm_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, IPPROTO_TCP, in_dev, is_routed, in_dev);
 		if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(ci);
 			DEBUG_WARN("Failed to obtain 'from' heirarchy list\n");
@@ -3565,7 +3609,7 @@ static unsigned int ecm_front_end_ipv4_tcp_process(struct net_device *out_dev, s
 		ecm_db_connection_interfaces_deref(from_list, from_list_first);
 
 		DEBUG_TRACE("%p: Update the 'from NAT' interface heirarchy list\n", ci);
-		from_nat_list_first = ecm_interface_heirarchy_construct(from_nat_list, ip_dest_addr, ip_src_addr_nat, IPPROTO_TCP, in_dev);
+		from_nat_list_first = ecm_interface_heirarchy_construct(from_nat_list, ip_dest_addr, ip_src_addr_nat, IPPROTO_TCP, in_dev_nat, is_routed, in_dev_nat);
 		if (from_nat_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(ci);
 			DEBUG_WARN("Failed to obtain 'from NAT' heirarchy list\n");
@@ -3575,7 +3619,7 @@ static unsigned int ecm_front_end_ipv4_tcp_process(struct net_device *out_dev, s
 		ecm_db_connection_interfaces_deref(from_nat_list, from_nat_list_first);
 
 		DEBUG_TRACE("%p: Update the 'to' interface heirarchy list\n", ci);
-		to_list_first = ecm_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, IPPROTO_TCP, in_dev);
+		to_list_first = ecm_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, IPPROTO_TCP, out_dev, is_routed, in_dev);
 		if (to_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(ci);
 			DEBUG_WARN("Failed to obtain 'to' heirarchy list\n");
@@ -3585,7 +3629,7 @@ static unsigned int ecm_front_end_ipv4_tcp_process(struct net_device *out_dev, s
 		ecm_db_connection_interfaces_deref(to_list, to_list_first);
 
 		DEBUG_TRACE("%p: Update the 'to NAT' interface heirarchy list\n", ci);
-		to_nat_list_first = ecm_interface_heirarchy_construct(to_nat_list, ip_src_addr, ip_dest_addr_nat, IPPROTO_TCP, in_dev);
+		to_nat_list_first = ecm_interface_heirarchy_construct(to_nat_list, ip_src_addr, ip_dest_addr_nat, IPPROTO_TCP, out_dev_nat, is_routed, in_dev);
 		if (to_nat_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(ci);
 			DEBUG_WARN("Failed to obtain 'to NAT' heirarchy list\n");
@@ -3807,7 +3851,11 @@ static unsigned int ecm_front_end_ipv4_tcp_process(struct net_device *out_dev, s
  * ecm_front_end_ipv4_udp_process()
  *	Process a UDP packet
  */
-static unsigned int ecm_front_end_ipv4_udp_process(struct net_device *out_dev, struct net_device *in_dev, bool can_accel, bool is_routed, struct sk_buff *skb,
+static unsigned int ecm_front_end_ipv4_udp_process(struct net_device *out_dev, struct net_device *out_dev_nat,
+							struct net_device *in_dev, struct net_device *in_dev_nat,
+							uint8_t *src_node_addr, uint8_t *src_node_addr_nat,
+							uint8_t *dest_node_addr, uint8_t *dest_node_addr_nat,
+							bool can_accel, bool is_routed, struct sk_buff *skb,
 							struct ecm_tracker_ip_header *iph,
 							struct nf_conn *ct, enum ip_conntrack_dir ct_dir, ecm_db_direction_t ecm_dir,
 							struct nf_conntrack_tuple *orig_tuple, struct nf_conntrack_tuple *reply_tuple,
@@ -3867,28 +3915,42 @@ static unsigned int ecm_front_end_ipv4_udp_process(struct net_device *out_dev, s
 	 * Refer to the ecm_front_end_ipv4_process() for information on how we extract this information.
 	 */
 	if (ct_dir == IP_CT_DIR_ORIGINAL) {
-		if (ecm_dir == ECM_DB_DIRECTION_EGRESS) {
+		if ((ecm_dir == ECM_DB_DIRECTION_EGRESS_NAT) || (ecm_dir == ECM_DB_DIRECTION_NON_NAT)) {
+			src_port = ntohs(orig_tuple->src.u.udp.port);
+			dest_port = ntohs(orig_tuple->dst.u.udp.port);
+			dest_port_nat = ntohs(reply_tuple->src.u.udp.port);
+			src_port_nat = ntohs(reply_tuple->dst.u.udp.port);
+		} else if (ecm_dir == ECM_DB_DIRECTION_INGRESS_NAT) {
+			src_port = ntohs(orig_tuple->src.u.udp.port);
+			dest_port_nat = ntohs(orig_tuple->dst.u.udp.port);
+			dest_port = ntohs(reply_tuple->src.u.udp.port);
+			src_port_nat = ntohs(reply_tuple->dst.u.udp.port);
+		} else if (ecm_dir == ECM_DB_DIRECTION_BRIDGED) {
 			src_port = ntohs(orig_tuple->src.u.udp.port);
 			dest_port = ntohs(orig_tuple->dst.u.udp.port);
 			dest_port_nat = ntohs(reply_tuple->src.u.udp.port);
 			src_port_nat = ntohs(reply_tuple->dst.u.udp.port);
 		} else {
-			src_port = ntohs(orig_tuple->src.u.udp.port);
-			dest_port_nat = ntohs(orig_tuple->dst.u.udp.port);
-			dest_port = ntohs(reply_tuple->src.u.udp.port);
-			src_port_nat = ntohs(reply_tuple->dst.u.udp.port);
+			DEBUG_ASSERT(false, "Unhandled ecm_dir: %d\n", ecm_dir);
 		}
 	} else {
-		if (ecm_dir == ECM_DB_DIRECTION_EGRESS) {
+		if ((ecm_dir == ECM_DB_DIRECTION_EGRESS_NAT) || (ecm_dir == ECM_DB_DIRECTION_NON_NAT)) {
+			dest_port = ntohs(orig_tuple->src.u.udp.port);
+			src_port = ntohs(orig_tuple->dst.u.udp.port);
+			src_port_nat = ntohs(reply_tuple->src.u.udp.port);
+			dest_port_nat = ntohs(reply_tuple->dst.u.udp.port);
+		} else if (ecm_dir == ECM_DB_DIRECTION_INGRESS_NAT) {
+			dest_port = ntohs(orig_tuple->src.u.udp.port);
+			src_port_nat = ntohs(orig_tuple->dst.u.udp.port);
+			src_port = ntohs(reply_tuple->src.u.udp.port);
+			dest_port_nat = ntohs(reply_tuple->dst.u.udp.port);
+		} else if (ecm_dir == ECM_DB_DIRECTION_BRIDGED) {
 			dest_port = ntohs(orig_tuple->src.u.udp.port);
 			src_port = ntohs(orig_tuple->dst.u.udp.port);
 			src_port_nat = ntohs(reply_tuple->src.u.udp.port);
 			dest_port_nat = ntohs(reply_tuple->dst.u.udp.port);
 		} else {
-			dest_port = ntohs(orig_tuple->src.u.udp.port);
-			src_port_nat = ntohs(orig_tuple->dst.u.udp.port);
-			src_port = ntohs(reply_tuple->src.u.udp.port);
-			dest_port_nat = ntohs(reply_tuple->dst.u.udp.port);
+			DEBUG_ASSERT(false, "Unhandled ecm_dir: %d\n", ecm_dir);
 		}
 	}
 	DEBUG_TRACE("UDP src: " ECM_IP_ADDR_DOT_FMT ":%d, dest: " ECM_IP_ADDR_DOT_FMT ":%d, dir %d\n",
@@ -3950,9 +4012,10 @@ static unsigned int ecm_front_end_ipv4_udp_process(struct net_device *out_dev, s
 		 * Get the src and destination mappings.
 		 * For this we also need the interface lists which we also set upon the new connection while we are at it.
 		 * GGG TODO rework terms of "src/dest" - these need to be named consistently as from/to as per database terms.
+		 * GGG TODO The empty list checks should not be needed, mapping_establish_and_ref() should fail out if there is no list anyway.
 		 */
 		DEBUG_TRACE("%p: Create the 'from' interface heirarchy list\n", nci);
-		from_list_first = ecm_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, IPPROTO_UDP, in_dev);
+		from_list_first = ecm_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, IPPROTO_UDP, in_dev, is_routed, in_dev);
 		if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to obtain 'from' heirarchy list\n");
@@ -3961,7 +4024,7 @@ static unsigned int ecm_front_end_ipv4_udp_process(struct net_device *out_dev, s
 		ecm_db_connection_from_interfaces_reset(nci, from_list, from_list_first);
 
 		DEBUG_TRACE("%p: Create source mapping\n", nci);
-		src_mi = ecm_front_end_ipv4_mapping_establish_and_ref(in_dev, ip_src_addr, src_port, from_list, from_list_first);
+		src_mi = ecm_front_end_ipv4_mapping_establish_and_ref(in_dev, ip_src_addr, src_port, from_list, from_list_first, src_node_addr);
 		ecm_db_connection_interfaces_deref(from_list, from_list_first);
 		if (!src_mi) {
 			ecm_db_connection_deref(nci);
@@ -3970,7 +4033,7 @@ static unsigned int ecm_front_end_ipv4_udp_process(struct net_device *out_dev, s
 		}
 
 		DEBUG_TRACE("%p: Create the 'to' interface heirarchy list\n", nci);
-		to_list_first = ecm_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, IPPROTO_UDP, in_dev);
+		to_list_first = ecm_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, IPPROTO_UDP, out_dev, is_routed, in_dev);
 		if (to_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_mapping_deref(src_mi);
 			ecm_db_connection_deref(nci);
@@ -3980,7 +4043,7 @@ static unsigned int ecm_front_end_ipv4_udp_process(struct net_device *out_dev, s
 		ecm_db_connection_to_interfaces_reset(nci, to_list, to_list_first);
 
 		DEBUG_TRACE("%p: Create dest mapping\n", nci);
-		dest_mi = ecm_front_end_ipv4_mapping_establish_and_ref(out_dev, ip_dest_addr, dest_port, to_list, to_list_first);
+		dest_mi = ecm_front_end_ipv4_mapping_establish_and_ref(out_dev, ip_dest_addr, dest_port, to_list, to_list_first, dest_node_addr);
 		ecm_db_connection_interfaces_deref(to_list, to_list_first);
 		if (!dest_mi) {
 			ecm_db_mapping_deref(src_mi);
@@ -3993,9 +4056,10 @@ static unsigned int ecm_front_end_ipv4_udp_process(struct net_device *out_dev, s
 		 * Get the src and destination NAT mappings
 		 * For this we also need the interface lists which we also set upon the new connection while we are at it.
 		 * GGG TODO rework terms of "src/dest" - these need to be named consistently as from/to as per database terms.
+		 * GGG TODO The empty list checks should not be needed, mapping_establish_and_ref() should fail out if there is no list anyway.
 		 */
 		DEBUG_TRACE("%p: Create the 'from NAT' interface heirarchy list\n", nci);
-		from_nat_list_first = ecm_interface_heirarchy_construct(from_nat_list, ip_dest_addr, ip_src_addr_nat, IPPROTO_UDP, in_dev);
+		from_nat_list_first = ecm_interface_heirarchy_construct(from_nat_list, ip_dest_addr, ip_src_addr_nat, IPPROTO_UDP, in_dev_nat, is_routed, in_dev_nat);
 		if (from_nat_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_mapping_deref(dest_mi);
 			ecm_db_mapping_deref(src_mi);
@@ -4005,7 +4069,7 @@ static unsigned int ecm_front_end_ipv4_udp_process(struct net_device *out_dev, s
 		}
 		ecm_db_connection_from_nat_interfaces_reset(nci, from_nat_list, from_nat_list_first);
 
-		src_nat_mi = ecm_front_end_ipv4_mapping_establish_and_ref(in_dev, ip_src_addr_nat, src_port_nat, from_nat_list, from_nat_list_first);
+		src_nat_mi = ecm_front_end_ipv4_mapping_establish_and_ref(in_dev_nat, ip_src_addr_nat, src_port_nat, from_nat_list, from_nat_list_first, src_node_addr_nat);
 		ecm_db_connection_interfaces_deref(from_nat_list, from_nat_list_first);
 		if (!src_nat_mi) {
 			ecm_db_mapping_deref(dest_mi);
@@ -4016,7 +4080,7 @@ static unsigned int ecm_front_end_ipv4_udp_process(struct net_device *out_dev, s
 		}
 
 		DEBUG_TRACE("%p: Create the 'to NAT' interface heirarchy list\n", nci);
-		to_nat_list_first = ecm_interface_heirarchy_construct(to_nat_list, ip_src_addr, ip_dest_addr_nat, IPPROTO_UDP, in_dev);
+		to_nat_list_first = ecm_interface_heirarchy_construct(to_nat_list, ip_src_addr, ip_dest_addr_nat, IPPROTO_UDP, out_dev_nat, is_routed, in_dev);
 		if (to_nat_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_mapping_deref(src_nat_mi);
 			ecm_db_mapping_deref(dest_mi);
@@ -4027,7 +4091,7 @@ static unsigned int ecm_front_end_ipv4_udp_process(struct net_device *out_dev, s
 		}
 		ecm_db_connection_to_nat_interfaces_reset(nci, to_nat_list, to_nat_list_first);
 
-		dest_nat_mi = ecm_front_end_ipv4_mapping_establish_and_ref(out_dev, ip_dest_addr_nat, dest_port_nat, to_nat_list, to_nat_list_first);
+		dest_nat_mi = ecm_front_end_ipv4_mapping_establish_and_ref(out_dev_nat, ip_dest_addr_nat, dest_port_nat, to_nat_list, to_nat_list_first, dest_node_addr_nat);
 		ecm_db_connection_interfaces_deref(to_nat_list, to_nat_list_first);
 		if (!dest_nat_mi) {
 			ecm_db_mapping_deref(src_nat_mi);
@@ -4174,9 +4238,11 @@ static unsigned int ecm_front_end_ipv4_udp_process(struct net_device *out_dev, s
 		 * NOTE: We never have to change the usual mapping->host->node_iface arrangements for each side of the connection (to/from sides)
 		 * This is because if these interfaces change then the connection is dead anyway.
 		 * But a LAG slave might change the heirarchy the connection is using but the LAG master is still sane.
+		 * GGG TODO The empty list checks may mean that stale interface list information remains on a connection - this could be bad.
+		 * GGG Investigate the removal of the empty list checks.
 		 */
 		DEBUG_TRACE("%p: Update the 'from' interface heirarchy list\n", ci);
-		from_list_first = ecm_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, IPPROTO_UDP, in_dev);
+		from_list_first = ecm_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, IPPROTO_UDP, in_dev, is_routed, in_dev);
 		if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(ci);
 			DEBUG_WARN("Failed to obtain 'from' heirarchy list\n");
@@ -4186,7 +4252,7 @@ static unsigned int ecm_front_end_ipv4_udp_process(struct net_device *out_dev, s
 		ecm_db_connection_interfaces_deref(from_list, from_list_first);
 
 		DEBUG_TRACE("%p: Update the 'from NAT' interface heirarchy list\n", ci);
-		from_nat_list_first = ecm_interface_heirarchy_construct(from_nat_list, ip_dest_addr, ip_src_addr_nat, IPPROTO_UDP, in_dev);
+		from_nat_list_first = ecm_interface_heirarchy_construct(from_nat_list, ip_dest_addr, ip_src_addr_nat, IPPROTO_UDP, in_dev_nat, is_routed, in_dev_nat);
 		if (from_nat_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(ci);
 			DEBUG_WARN("Failed to obtain 'from NAT' heirarchy list\n");
@@ -4196,7 +4262,7 @@ static unsigned int ecm_front_end_ipv4_udp_process(struct net_device *out_dev, s
 		ecm_db_connection_interfaces_deref(from_nat_list, from_nat_list_first);
 
 		DEBUG_TRACE("%p: Update the 'to' interface heirarchy list\n", ci);
-		to_list_first = ecm_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, IPPROTO_UDP, in_dev);
+		to_list_first = ecm_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, IPPROTO_UDP, out_dev, is_routed, in_dev);
 		if (to_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(ci);
 			DEBUG_WARN("Failed to obtain 'to' heirarchy list\n");
@@ -4206,7 +4272,7 @@ static unsigned int ecm_front_end_ipv4_udp_process(struct net_device *out_dev, s
 		ecm_db_connection_interfaces_deref(to_list, to_list_first);
 
 		DEBUG_TRACE("%p: Update the 'to NAT' interface heirarchy list\n", ci);
-		to_nat_list_first = ecm_interface_heirarchy_construct(to_nat_list, ip_src_addr, ip_dest_addr_nat, IPPROTO_UDP, in_dev);
+		to_nat_list_first = ecm_interface_heirarchy_construct(to_nat_list, ip_src_addr, ip_dest_addr_nat, IPPROTO_UDP, out_dev_nat, is_routed, in_dev);
 		if (to_nat_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(ci);
 			DEBUG_WARN("Failed to obtain 'to NAT' heirarchy list\n");
@@ -4428,7 +4494,11 @@ static unsigned int ecm_front_end_ipv4_udp_process(struct net_device *out_dev, s
  * ecm_front_end_ipv4_non_ported_process()
  *	Process a protocol that does not have port based identifiers
  */
-static unsigned int ecm_front_end_ipv4_non_ported_process(struct net_device *out_dev, struct net_device *in_dev, bool can_accel, bool is_routed, struct sk_buff *skb,
+static unsigned int ecm_front_end_ipv4_non_ported_process(struct net_device *out_dev, struct net_device *out_dev_nat,
+							struct net_device *in_dev, struct net_device *in_dev_nat,
+							uint8_t *src_node_addr, uint8_t *src_node_addr_nat,
+							uint8_t *dest_node_addr, uint8_t *dest_node_addr_nat,
+							bool can_accel, bool is_routed, struct sk_buff *skb,
 							struct ecm_tracker_ip_header *ip_hdr,
 							struct nf_conn *ct, enum ip_conntrack_dir ct_dir, ecm_db_direction_t ecm_dir,
 							struct nf_conntrack_tuple *orig_tuple, struct nf_conntrack_tuple *reply_tuple,
@@ -4518,14 +4588,14 @@ static unsigned int ecm_front_end_ipv4_non_ported_process(struct net_device *out
 			return NF_ACCEPT;
 		}
 
-
 		/*
 		 * Get the src and destination mappings.
 		 * For this we also need the interface lists which we also set upon the new connection while we are at it.
 		 * GGG TODO rework terms of "src/dest" - these need to be named consistently as from/to as per database terms.
+		 * GGG TODO The empty list checks should not be needed, mapping_establish_and_ref() should fail out if there is no list anyway.
 		 */
 		DEBUG_TRACE("%p: Create the 'from' interface heirarchy list\n", nci);
-		from_list_first = ecm_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, protocol, in_dev);
+		from_list_first = ecm_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, protocol, in_dev, is_routed, in_dev);
 		if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to obtain 'from' heirarchy list\n");
@@ -4534,7 +4604,7 @@ static unsigned int ecm_front_end_ipv4_non_ported_process(struct net_device *out
 		ecm_db_connection_from_interfaces_reset(nci, from_list, from_list_first);
 
 		DEBUG_TRACE("%p: Create source mapping\n", nci);
-		src_mi = ecm_front_end_ipv4_mapping_establish_and_ref(in_dev, ip_src_addr, src_port, from_list, from_list_first);
+		src_mi = ecm_front_end_ipv4_mapping_establish_and_ref(in_dev, ip_src_addr, src_port, from_list, from_list_first, src_node_addr);
 		ecm_db_connection_interfaces_deref(from_list, from_list_first);
 		if (!src_mi) {
 			ecm_db_connection_deref(nci);
@@ -4543,7 +4613,7 @@ static unsigned int ecm_front_end_ipv4_non_ported_process(struct net_device *out
 		}
 
 		DEBUG_TRACE("%p: Create the 'to' interface heirarchy list\n", nci);
-		to_list_first = ecm_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, protocol, in_dev);
+		to_list_first = ecm_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, protocol, out_dev, is_routed, in_dev);
 		if (to_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_mapping_deref(src_mi);
 			ecm_db_connection_deref(nci);
@@ -4553,7 +4623,7 @@ static unsigned int ecm_front_end_ipv4_non_ported_process(struct net_device *out
 		ecm_db_connection_to_interfaces_reset(nci, to_list, to_list_first);
 
 		DEBUG_TRACE("%p: Create dest mapping\n", nci);
-		dest_mi = ecm_front_end_ipv4_mapping_establish_and_ref(out_dev, ip_dest_addr, dest_port, to_list, to_list_first);
+		dest_mi = ecm_front_end_ipv4_mapping_establish_and_ref(out_dev, ip_dest_addr, dest_port, to_list, to_list_first, dest_node_addr);
 		ecm_db_connection_interfaces_deref(to_list, to_list_first);
 		if (!dest_mi) {
 			ecm_db_mapping_deref(src_mi);
@@ -4566,9 +4636,10 @@ static unsigned int ecm_front_end_ipv4_non_ported_process(struct net_device *out
 		 * Get the src and destination NAT mappings
 		 * For this we also need the interface lists which we also set upon the new connection while we are at it.
 		 * GGG TODO rework terms of "src/dest" - these need to be named consistently as from/to as per database terms.
+		 * GGG TODO The empty list checks should not be needed, mapping_establish_and_ref() should fail out if there is no list anyway.
 		 */
 		DEBUG_TRACE("%p: Create the 'from NAT' interface heirarchy list\n", nci);
-		from_nat_list_first = ecm_interface_heirarchy_construct(from_nat_list, ip_dest_addr, ip_src_addr_nat, protocol, in_dev);
+		from_nat_list_first = ecm_interface_heirarchy_construct(from_nat_list, ip_dest_addr, ip_src_addr_nat, protocol, in_dev_nat, is_routed, in_dev_nat);
 		if (from_nat_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_mapping_deref(dest_mi);
 			ecm_db_mapping_deref(src_mi);
@@ -4578,7 +4649,7 @@ static unsigned int ecm_front_end_ipv4_non_ported_process(struct net_device *out
 		}
 		ecm_db_connection_from_nat_interfaces_reset(nci, from_nat_list, from_nat_list_first);
 
-		src_nat_mi = ecm_front_end_ipv4_mapping_establish_and_ref(in_dev, ip_src_addr_nat, src_port_nat, from_nat_list, from_nat_list_first);
+		src_nat_mi = ecm_front_end_ipv4_mapping_establish_and_ref(in_dev_nat, ip_src_addr_nat, src_port_nat, from_nat_list, from_nat_list_first, src_node_addr_nat);
 		ecm_db_connection_interfaces_deref(from_nat_list, from_nat_list_first);
 		if (!src_nat_mi) {
 			ecm_db_mapping_deref(dest_mi);
@@ -4589,7 +4660,7 @@ static unsigned int ecm_front_end_ipv4_non_ported_process(struct net_device *out
 		}
 
 		DEBUG_TRACE("%p: Create the 'to NAT' interface heirarchy list\n", nci);
-		to_nat_list_first = ecm_interface_heirarchy_construct(to_nat_list, ip_src_addr, ip_dest_addr_nat, protocol, in_dev);
+		to_nat_list_first = ecm_interface_heirarchy_construct(to_nat_list, ip_src_addr, ip_dest_addr_nat, protocol, out_dev_nat, is_routed, in_dev);
 		if (to_nat_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_mapping_deref(src_nat_mi);
 			ecm_db_mapping_deref(dest_mi);
@@ -4600,7 +4671,7 @@ static unsigned int ecm_front_end_ipv4_non_ported_process(struct net_device *out
 		}
 		ecm_db_connection_to_nat_interfaces_reset(nci, to_nat_list, to_nat_list_first);
 
-		dest_nat_mi = ecm_front_end_ipv4_mapping_establish_and_ref(out_dev, ip_dest_addr_nat, dest_port_nat, to_nat_list, to_nat_list_first);
+		dest_nat_mi = ecm_front_end_ipv4_mapping_establish_and_ref(out_dev_nat, ip_dest_addr_nat, dest_port_nat, to_nat_list, to_nat_list_first, dest_node_addr_nat);
 		ecm_db_connection_interfaces_deref(to_nat_list, to_nat_list_first);
 		if (!dest_nat_mi) {
 			ecm_db_mapping_deref(src_nat_mi);
@@ -4747,9 +4818,11 @@ static unsigned int ecm_front_end_ipv4_non_ported_process(struct net_device *out
 		 * NOTE: We never have to change the usual mapping->host->node_iface arrangements for each side of the connection (to/from sides)
 		 * This is because if these interfaces change then the connection is dead anyway.
 		 * But a LAG slave might change the heirarchy the connection is using but the LAG master is still sane.
+		 * GGG TODO The empty list checks may mean that stale interface list information remains on a connection - this could be bad.
+		 * GGG Investigate the removal of the empty list checks.
 		 */
 		DEBUG_TRACE("%p: Update the 'from' interface heirarchy list\n", ci);
-		from_list_first = ecm_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, protocol, in_dev);
+		from_list_first = ecm_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, protocol, in_dev, is_routed, in_dev);
 		if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(ci);
 			DEBUG_WARN("Failed to obtain 'from' heirarchy list\n");
@@ -4759,7 +4832,7 @@ static unsigned int ecm_front_end_ipv4_non_ported_process(struct net_device *out
 		ecm_db_connection_interfaces_deref(from_list, from_list_first);
 
 		DEBUG_TRACE("%p: Update the 'from NAT' interface heirarchy list\n", ci);
-		from_nat_list_first = ecm_interface_heirarchy_construct(from_nat_list, ip_dest_addr, ip_src_addr_nat, protocol, in_dev);
+		from_nat_list_first = ecm_interface_heirarchy_construct(from_nat_list, ip_dest_addr, ip_src_addr_nat, protocol, in_dev_nat, is_routed, in_dev_nat);
 		if (from_nat_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(ci);
 			DEBUG_WARN("Failed to obtain 'from NAT' heirarchy list\n");
@@ -4769,7 +4842,7 @@ static unsigned int ecm_front_end_ipv4_non_ported_process(struct net_device *out
 		ecm_db_connection_interfaces_deref(from_nat_list, from_nat_list_first);
 
 		DEBUG_TRACE("%p: Update the 'to' interface heirarchy list\n", ci);
-		to_list_first = ecm_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, protocol, in_dev);
+		to_list_first = ecm_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, protocol, out_dev, is_routed, in_dev);
 		if (to_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(ci);
 			DEBUG_WARN("Failed to obtain 'to' heirarchy list\n");
@@ -4779,7 +4852,7 @@ static unsigned int ecm_front_end_ipv4_non_ported_process(struct net_device *out
 		ecm_db_connection_interfaces_deref(to_list, to_list_first);
 
 		DEBUG_TRACE("%p: Update the 'to NAT' interface heirarchy list\n", ci);
-		to_nat_list_first = ecm_interface_heirarchy_construct(to_nat_list, ip_src_addr, ip_dest_addr_nat, protocol, in_dev);
+		to_nat_list_first = ecm_interface_heirarchy_construct(to_nat_list, ip_src_addr, ip_dest_addr_nat, protocol, out_dev_nat, is_routed, in_dev);
 		if (to_nat_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(ci);
 			DEBUG_WARN("Failed to obtain 'to NAT' heirarchy list\n");
@@ -4983,7 +5056,9 @@ static unsigned int ecm_front_end_ipv4_non_ported_process(struct net_device *out
  * ecm_front_end_ipv4_ip_process()
  *	Process IP datagram skb
  */
-static unsigned int ecm_front_end_ipv4_ip_process(struct net_device *out_dev, struct net_device *in_dev, bool can_accel, bool is_routed, struct sk_buff *skb)
+static unsigned int ecm_front_end_ipv4_ip_process(struct net_device *out_dev, struct net_device *in_dev,
+							uint8_t *src_node_addr, uint8_t *dest_node_addr,
+							bool can_accel, bool is_routed, struct sk_buff *skb)
 {
 	struct ecm_tracker_ip_header ip_hdr;
         struct nf_conn *ct;
@@ -4996,6 +5071,10 @@ static unsigned int ecm_front_end_ipv4_ip_process(struct net_device *out_dev, st
 	ip_addr_t ip_dest_addr;
 	ip_addr_t ip_src_addr_nat;
 	ip_addr_t ip_dest_addr_nat;
+	struct net_device *out_dev_nat;
+	struct net_device *in_dev_nat;
+	uint8_t *src_node_addr_nat;
+	uint8_t *dest_node_addr_nat;
 
 	/*
 	 * Obtain the IP header from the skb
@@ -5067,16 +5146,22 @@ static unsigned int ecm_front_end_ipv4_ip_process(struct net_device *out_dev, st
 		/*
 		 * Egressing NAT
 		 */
-		ecm_dir = ECM_DB_DIRECTION_EGRESS;
+		ecm_dir = ECM_DB_DIRECTION_EGRESS_NAT;
 	} else if (orig_tuple.dst.u3.ip != reply_tuple.src.u3.ip) {
 		/*
 		 * Ingressing NAT
 		 */
-		ecm_dir = ECM_DB_DIRECTION_INGRESS;
+		ecm_dir = ECM_DB_DIRECTION_INGRESS_NAT;
+	} else if (is_routed) {
+		/*
+		 * Non-NAT
+		 */
+		ecm_dir = ECM_DB_DIRECTION_NON_NAT;
 	} else {
-		ecm_dir = ECM_DB_DIRECTION_EGRESS;
-		// GGG TODO - Factor in the interface type, e.g. a packet going to a wireless interface is egress so we apply more pressure to
-		// qos in that direction.
+		/*
+		 * Bridged
+		 */
+		ecm_dir = ECM_DB_DIRECTION_BRIDGED;
 	}
 
 	DEBUG_TRACE("IP Packet ORIGINAL src: %pI4 ORIGINAL dst: %pI4 protocol: %u, ct_dir: %d ecm_dir: %d\n", &orig_tuple.src.u3.ip, &orig_tuple.dst.u3.ip, orig_tuple.dst.protonum, ct_dir, ecm_dir);
@@ -5087,19 +5172,52 @@ static unsigned int ecm_front_end_ipv4_ip_process(struct net_device *out_dev, st
 	 * INGRESS connections have their conntrack information reversed!
 	 * We have to keep in mind the connection direction AND the packet direction in order to be able to work out what is what.
 	 *
+	 * ip_src_addr and ip_dest_addr MUST always be the NON-NAT endpoint addresses and reflect PACKET direction and not connection direction 'dir'.
+	 *
+	 * Examples 1 through 4 cater for NAT and NON-NAT in the INGRESS or EGRESS cases.
+	 *
 	 * Example 1:
-	 * An 'original' direction packet to an egress connection from 192.168.0.133:12345 to 80.132.221.34:80 via NAT'ing router mapping 10.10.10.30:33333 looks like:
+	 * An 'original' direction packet to an egress connection from br-lan:192.168.0.133:12345 to eth0:80.132.221.34:80 via NAT'ing router mapping eth0:10.10.10.30:33333 looks like:
 	 *	orig_tuple->src == 192.168.0.133:12345		This becomes ip_src_addr
 	 *	orig_tuple->dst == 80.132.221.34:80		This becomes ip_dest_addr
 	 *	reply_tuple->src == 80.132.221.34:80		This becomes ip_dest_addr_nat
 	 *	reply_tuple->dest == 10.10.10.30:33333		This becomes ip_src_addr_nat
 	 *
+	 *	in_dev would be br-lan - i.e. the device of ip_src_addr
+	 *	out_dev would be eth0 - i.e. the device of ip_dest_addr
+	 *	in_dev_nat would be eth0 - i.e. out_dev, the device of ip_src_addr_nat
+	 *	out_dev_nat would be eth0 - i.e. out_dev, the device of ip_dest_addr_nat
+	 *
+	 *	From a Node address perspective we are at position X in the following topology:
+	 *	LAN_PC======BR-LAN___ETH0====X====WAN_PC
+	 *
+	 *	src_node_addr refers to node address of of ip_src_addr_nat
+	 *	src_node_addr_nat is set to src_node_addr
+	 *	src_node_addr is then set to NULL as there is no node address available here for ip_src_addr
+	 *
+	 *	dest_node_addr refers to node address of ip_dest_addr
+	 *	dest_node_addr_nat is the node of ip_dest_addr_nat which is the same as dest_node_addr
+	 *
 	 * Example 2:
-	 * However an 'original' direction packet to an ingress connection from 80.132.221.34:3321 to a LAN host (e.g. via DMZ) 192.168.0.133:12345 via NAT'ing router mapping 10.10.10.30:12345 looks like:
+	 * However an 'original' direction packet to an ingress connection from eth0:80.132.221.34:3321 to a LAN host (e.g. via DMZ) br-lan@192.168.0.133:12345 via NAT'ing router mapping eth0:10.10.10.30:12345 looks like:
 	 *	orig_tuple->src == 80.132.221.34:3321		This becomes ip_src_addr
 	 *	orig_tuple->dst == 10.10.10.30:12345		This becomes ip_dest_addr_nat
 	 *	reply_tuple->src == 192.168.0.133:12345		This becomes ip_dest_addr
 	 *	reply_tuple->dest == 80.132.221.34:3321		This becomes ip_src_addr_nat
+	 *
+	 *	in_dev would be eth0 - i.e. the device of ip_src_addr
+	 *	out_dev would be br-lan - i.e. the device of ip_dest_addr
+	 *	in_dev_nat would be eth0 - i.e. in_dev, the device of ip_src_addr_nat
+	 *	out_dev_nat would be eth0 - i.e. in_dev, the device of ip_dest_addr_nat
+	 *
+	 *	From a Node address perspective we are at position X in the following topology:
+	 *	LAN_PC===X===BR-LAN___ETH0========WAN_PC
+	 *
+	 *	src_node_addr refers to node address of br-lan which is not useful
+	 *	src_node_addr_nat AND src_node_addr become NULL
+	 *
+	 *	dest_node_addr refers to node address of ip_dest_addr
+	 *	dest_node_addr_nat is set to NULL
 	 *
 	 * When dealing with reply packets this confuses things even more.  Reply packets to the above two examples are as follows:
 	 *
@@ -5110,6 +5228,20 @@ static unsigned int ecm_front_end_ipv4_ip_process(struct net_device *out_dev, st
 	 *	reply_tuple->src == 80.132.221.34:80		This becomes ip_src_addr_nat
 	 *	reply_tuple->dest == 10.10.10.30:33333		This becomes ip_dest_addr_nat
 	 *
+	 *	in_dev would be eth0 - i.e. the device of ip_src_addr
+	 *	out_dev would be br-lan - i.e. the device of ip_dest_addr
+	 *	in_dev_nat would be eth0 - i.e. in_dev, the device of ip_src_addr_nat
+	 *	out_dev_nat would be eth0 - i.e. in_dev, the device of ip_dest_addr_nat
+	 *
+	 *	From a Node address perspective we are at position X in the following topology:
+	 *	LAN_PC===X===BR-LAN___ETH0========WAN_PC
+	 *
+	 *	src_node_addr refers to node address of br-lan which is not useful
+	 *	src_node_addr_nat AND src_node_addr become NULL
+	 *
+	 *	dest_node_addr refers to node address of ip_dest_addr
+	 *	dest_node_addr_nat is set to NULL
+	 *
 	 * Example 4:
 	 * A 'reply' direction packet to the ingress connection above:
 	 *	orig_tuple->src == 80.132.221.34:3321		This becomes ip_dest_addr
@@ -5117,10 +5249,67 @@ static unsigned int ecm_front_end_ipv4_ip_process(struct net_device *out_dev, st
 	 *	reply_tuple->src == 192.168.0.133:12345		This becomes ip_src_addr
 	 *	reply_tuple->dest == 80.132.221.34:3321		This becomes ip_dest_addr_nat
 	 *
-	 * ip_src_addr and ip_dest_addr MUST always be the NON-NAT endpoint addresses and reflect PACKET direction and not connection direction 'dir'.
+	 *	in_dev would be br-lan - i.e. the device of ip_src_addr
+	 *	out_dev would be eth0 - i.e. the device of ip_dest_addr
+	 *	in_dev_nat would be eth0 - i.e. out_dev, the device of ip_src_addr_nat
+	 *	out_dev_nat would be eth0 - i.e. out_dev, the device of ip_dest_addr_nat
+	 *
+	 *	From a Node address perspective we are at position X in the following topology:
+	 *	LAN_PC======BR-LAN___ETH0====X====WAN_PC
+	 *
+	 *	src_node_addr refers to node address of ip_src_addr_nat
+	 *	src_node_addr_nat is set to src_node_addr
+	 *	src_node_addr becomes NULL
+	 *
+	 *	dest_node_addr refers to node address of ip_dest_addr
+	 *	dest_node_addr_nat is set to dest_node_addr also.
+	 *
+	 * The following examples are for BRIDGED cases:
+	 *
+	 * Example 5:
+	 * An 'original' direction packet to an bridged connection from eth1:192.168.0.133:12345 to eth2:192.168.0.244:80 looks like:
+	 *	orig_tuple->src == 192.168.0.133:12345		This becomes ip_src_addr
+	 *	orig_tuple->dst == 192.168.0.244:80		This becomes ip_dest_addr
+	 *	reply_tuple->src == 192.168.0.244:80		This becomes ip_dest_addr_nat
+	 *	reply_tuple->dest == 192.168.0.133:12345	This becomes ip_src_addr_nat
+	 *
+	 *	in_dev would be eth1 - i.e. the device of ip_src_addr
+	 *	out_dev would be eth2 - i.e. the device of ip_dest_addr
+	 *	in_dev_nat would be eth1 - i.e. in_dev, the device of ip_src_addr_nat
+	 *	out_dev_nat would be eth2 - i.e. out_dev, the device of ip_dest_addr_nat
+	 *
+	 *	From a Node address perspective we are at position X in the following topology:
+	 *	LAN PC======ETH1___ETH2====X====LAN PC
+	 *
+	 *	src_node_addr refers to node address of ip_src_addr
+	 *	src_node_addr_nat is set to src_node_addr
+	 *
+	 *	dest_node_addr refers to node address of ip_dest_addr
+	 *	dest_node_addr_nat is set to dest_node_addr
+	 *
+	 * Example 6:
+	 * An 'reply' direction packet to the bridged connection above:
+	 *	orig_tuple->src == 192.168.0.133:12345		This becomes ip_dest_addr
+	 *	orig_tuple->dst == 192.168.0.244:80		This becomes ip_src_addr
+	 *	reply_tuple->src == 192.168.0.244:80		This becomes ip_src_addr_nat
+	 *	reply_tuple->dest == 192.168.0.133:12345	This becomes ip_dest_addr_nat
+	 *
+	 *	in_dev would be eth2 - i.e. the device of ip_src_addr
+	 *	out_dev would be eth1 - i.e. the device of ip_dest_addr
+	 *	in_dev_nat would be eth2 - i.e. in_dev, the device of ip_src_addr_nat
+	 *	out_dev_nat would be eth1 - i.e. out_dev, the device of ip_dest_addr_nat
+	 *
+	 *	From a Node address perspective we are at position X in the following topology:
+	 *	LAN PC===X===ETH1___ETH2========LAN PC
+	 *
+	 *	src_node_addr refers to node address of ip_src_addr
+	 *	src_node_addr_nat is set to src_node_addr
+	 *
+	 *	dest_node_addr refers to node address of ip_dest_addr
+	 *	dest_node_addr_nat is set to dest_node_addr
 	 */
 	if (ct_dir == IP_CT_DIR_ORIGINAL) {
-		if (ecm_dir == ECM_DB_DIRECTION_EGRESS) {
+		if ((ecm_dir == ECM_DB_DIRECTION_EGRESS_NAT) || (ecm_dir == ECM_DB_DIRECTION_NON_NAT)) {
 			/*
 			 * Example 1
 			 */
@@ -5128,7 +5317,15 @@ static unsigned int ecm_front_end_ipv4_ip_process(struct net_device *out_dev, st
 			ECM_NIN4_ADDR_TO_IP_ADDR(ip_dest_addr, orig_tuple.dst.u3.ip);
 			ECM_NIN4_ADDR_TO_IP_ADDR(ip_dest_addr_nat, reply_tuple.src.u3.ip);
 			ECM_NIN4_ADDR_TO_IP_ADDR(ip_src_addr_nat, reply_tuple.dst.u3.ip);
-		} else {
+
+			in_dev_nat = out_dev;
+			out_dev_nat = out_dev;
+
+			src_node_addr_nat = src_node_addr;
+			src_node_addr = NULL;
+
+			dest_node_addr_nat = dest_node_addr;
+		} else if (ecm_dir == ECM_DB_DIRECTION_INGRESS_NAT) {
 			/*
 			 * Example 2
 			 */
@@ -5136,9 +5333,34 @@ static unsigned int ecm_front_end_ipv4_ip_process(struct net_device *out_dev, st
 			ECM_NIN4_ADDR_TO_IP_ADDR(ip_dest_addr_nat, orig_tuple.dst.u3.ip);
 			ECM_NIN4_ADDR_TO_IP_ADDR(ip_dest_addr, reply_tuple.src.u3.ip);
 			ECM_NIN4_ADDR_TO_IP_ADDR(ip_src_addr_nat, reply_tuple.dst.u3.ip);
+
+			in_dev_nat = in_dev;
+			out_dev_nat = in_dev;
+
+			src_node_addr = NULL;
+			src_node_addr_nat = NULL;
+
+			dest_node_addr_nat = NULL;
+		} else if (ecm_dir == ECM_DB_DIRECTION_BRIDGED) {
+			/*
+			 * Example 5
+			 */
+			ECM_NIN4_ADDR_TO_IP_ADDR(ip_src_addr, orig_tuple.src.u3.ip);
+			ECM_NIN4_ADDR_TO_IP_ADDR(ip_dest_addr, orig_tuple.dst.u3.ip);
+			ECM_NIN4_ADDR_TO_IP_ADDR(ip_dest_addr_nat, reply_tuple.src.u3.ip);
+			ECM_NIN4_ADDR_TO_IP_ADDR(ip_src_addr_nat, reply_tuple.dst.u3.ip);
+
+			in_dev_nat = in_dev;
+			out_dev_nat = out_dev;
+
+			src_node_addr_nat = src_node_addr;
+
+			dest_node_addr_nat = dest_node_addr;
+		} else {
+			DEBUG_ASSERT(false, "Unhandled ecm_dir: %d\n", ecm_dir);
 		}
 	} else {
-		if (ecm_dir == ECM_DB_DIRECTION_EGRESS) {
+		if ((ecm_dir == ECM_DB_DIRECTION_EGRESS_NAT) || (ecm_dir == ECM_DB_DIRECTION_NON_NAT)) {
 			/*
 			 * Example 3
 			 */
@@ -5146,7 +5368,15 @@ static unsigned int ecm_front_end_ipv4_ip_process(struct net_device *out_dev, st
 			ECM_NIN4_ADDR_TO_IP_ADDR(ip_src_addr, orig_tuple.dst.u3.ip);
 			ECM_NIN4_ADDR_TO_IP_ADDR(ip_src_addr_nat, reply_tuple.src.u3.ip);
 			ECM_NIN4_ADDR_TO_IP_ADDR(ip_dest_addr_nat, reply_tuple.dst.u3.ip);
-		} else {
+
+			in_dev_nat  = in_dev;
+			out_dev_nat = in_dev;
+
+			src_node_addr = NULL;
+			src_node_addr_nat = NULL;
+
+			dest_node_addr_nat = NULL;
+		} else if (ecm_dir == ECM_DB_DIRECTION_INGRESS_NAT) {
 			/*
 			 * Example 4
 			 */
@@ -5154,6 +5384,31 @@ static unsigned int ecm_front_end_ipv4_ip_process(struct net_device *out_dev, st
 			ECM_NIN4_ADDR_TO_IP_ADDR(ip_src_addr_nat, orig_tuple.dst.u3.ip);
 			ECM_NIN4_ADDR_TO_IP_ADDR(ip_src_addr, reply_tuple.src.u3.ip);
 			ECM_NIN4_ADDR_TO_IP_ADDR(ip_dest_addr_nat, reply_tuple.dst.u3.ip);
+
+			in_dev_nat = out_dev;
+			out_dev_nat = out_dev;
+
+			src_node_addr_nat = src_node_addr;
+			src_node_addr = NULL;
+
+			dest_node_addr_nat = dest_node_addr;
+		} else if (ecm_dir == ECM_DB_DIRECTION_BRIDGED) {
+			/*
+			 * Example 6
+			 */
+			ECM_NIN4_ADDR_TO_IP_ADDR(ip_dest_addr, orig_tuple.src.u3.ip);
+			ECM_NIN4_ADDR_TO_IP_ADDR(ip_src_addr, orig_tuple.dst.u3.ip);
+			ECM_NIN4_ADDR_TO_IP_ADDR(ip_src_addr_nat, reply_tuple.src.u3.ip);
+			ECM_NIN4_ADDR_TO_IP_ADDR(ip_dest_addr_nat, reply_tuple.dst.u3.ip);
+
+			in_dev_nat  = in_dev;
+			out_dev_nat = out_dev;
+
+			src_node_addr_nat = src_node_addr;
+
+			dest_node_addr_nat = dest_node_addr;
+		} else {
+			DEBUG_ASSERT(false, "Unhandled ecm_dir: %d\n", ecm_dir);
 		}
 	}
 
@@ -5175,19 +5430,31 @@ static unsigned int ecm_front_end_ipv4_ip_process(struct net_device *out_dev, st
 	 * TCP and UDP are the most likliest protocols.
 	 */
 	if (likely(orig_tuple.dst.protonum == IPPROTO_TCP)) {
-		return ecm_front_end_ipv4_tcp_process(out_dev, in_dev, can_accel, is_routed, skb,
+		return ecm_front_end_ipv4_tcp_process(out_dev, out_dev_nat,
+				in_dev, in_dev_nat,
+				src_node_addr, src_node_addr_nat,
+				dest_node_addr, dest_node_addr_nat,
+				can_accel, is_routed, skb,
 				&ip_hdr,
 				ct, ct_dir, ecm_dir,
 				&orig_tuple, &reply_tuple,
 				ip_src_addr, ip_dest_addr, ip_src_addr_nat, ip_dest_addr_nat);
 	} else if (likely(orig_tuple.dst.protonum == IPPROTO_UDP)) {
-		return ecm_front_end_ipv4_udp_process(out_dev, in_dev, can_accel, is_routed, skb,
+		return ecm_front_end_ipv4_udp_process(out_dev, out_dev_nat,
+				in_dev, in_dev_nat,
+				src_node_addr, src_node_addr_nat,
+				dest_node_addr, dest_node_addr_nat,
+				can_accel, is_routed, skb,
 				&ip_hdr,
 				ct, ct_dir, ecm_dir,
 				&orig_tuple, &reply_tuple,
 				ip_src_addr, ip_dest_addr, ip_src_addr_nat, ip_dest_addr_nat);
 	}
-	return ecm_front_end_ipv4_non_ported_process(out_dev, in_dev, can_accel, is_routed, skb,
+	return ecm_front_end_ipv4_non_ported_process(out_dev, out_dev_nat,
+				in_dev, in_dev_nat,
+				src_node_addr, src_node_addr_nat,
+				dest_node_addr, dest_node_addr_nat,
+				can_accel, is_routed, skb,
 				&ip_hdr,
 				ct, ct_dir, ecm_dir,
 				&orig_tuple, &reply_tuple,
@@ -5239,7 +5506,8 @@ static unsigned int ecm_front_end_ipv4_post_routing_hook(unsigned int hooknum,
 	}
 
 	DEBUG_TRACE("Post routing process skb %p, out: %p, in: %p\n", skb, out, in);
-	result = ecm_front_end_ipv4_ip_process((struct net_device *)out, in, can_accel, true, skb);
+	result = ecm_front_end_ipv4_ip_process((struct net_device *)out, in, NULL, NULL,
+							can_accel, true, skb);
 	dev_put(in);
 	return result;
 }
@@ -5272,7 +5540,7 @@ static unsigned int ecm_front_end_ipv4_input_hook(unsigned int hooknum,
 	 * The output interface will be the same on which the packet arrived.
 	 */
 	DEBUG_TRACE("%p: Name: %s, Input skb %p\n", in, in->name, skb);
-	return ecm_front_end_ipv4_ip_process((struct net_device *)in, (struct net_device *)in, false, false, skb);
+	return ecm_front_end_ipv4_ip_process((struct net_device *)in, (struct net_device *)in, NULL, NULL, false, false, skb);
 }
 
 /*
@@ -5357,7 +5625,8 @@ static unsigned int ecm_front_end_ipv4_bridge_post_routing_hook(unsigned int hoo
 	}
 
 	DEBUG_TRACE("%p: Name: %s Bridge process skb %p, in: %p\n", out, out->name, skb, in);
-	result = ecm_front_end_ipv4_ip_process((struct net_device *)out, in, can_accel, false, skb);
+	result = ecm_front_end_ipv4_ip_process((struct net_device *)out, in,
+				skb_eth_hdr->h_source, skb_eth_hdr->h_dest, can_accel, false, skb);
 	dev_put(in);
 	return result;
 }
