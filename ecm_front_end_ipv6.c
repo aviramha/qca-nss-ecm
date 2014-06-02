@@ -4022,6 +4022,21 @@ static unsigned int ecm_front_end_ipv6_udp_process(struct net_device *out_dev, s
 	}
 
 	/*
+	 * Deny acceleration for L2TP-over-UDP tunnel
+	 */
+	if (skb->sk) {
+		if(skb->sk->sk_protocol == IPPROTO_UDP) {
+			struct udp_sock *usk = udp_sk(skb->sk);
+			if (usk) {
+				if (unlikely(usk->encap_type == UDP_ENCAP_L2TPINUDP)) {
+					DEBUG_TRACE("Skip packets for L2TP tunnel in skb %p\n", skb);
+					can_accel = false;
+				}
+			}
+		}
+	}
+
+	/*
 	 * Now extract information, if we have conntrack then use that (which would already be in the tuples)
 	 */
 	if (unlikely(!ct)) {
