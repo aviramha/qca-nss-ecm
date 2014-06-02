@@ -28,6 +28,7 @@
 #include <linux/string.h>
 #include <net/ip6_route.h>
 #include <net/ip6_fib.h>
+#include <net/addrconf.h>
 #include <net/ipv6.h>
 #include <net/tcp.h>
 #include <asm/unaligned.h>
@@ -189,6 +190,66 @@ static void *ecm_front_end_ipv6_nss_ipv6_context = NULL;		/* Registration for IP
  */
 extern int nf_ct_tcp_no_window_check;
 extern int nf_ct_tcp_be_liberal;
+
+/*
+ * ecm_front_end_ipv6_send_neighbour_solicitation()
+ *	Issue an IPv6 Neighbour soliciation request.
+ */
+void ecm_front_end_ipv6_send_neighbour_solicitation(struct net_device *dev, ip_addr_t addr)
+{
+	struct in6_addr dst_addr, src_addr;
+	struct in6_addr mc_dst_addr;
+	struct rt6_info *rt6i;
+	struct neighbour *neigh;
+	ip_addr_t ecm_mc_dst_addr, ecm_src_addr;
+	struct net *netf = dev_net(dev);
+	int ret;
+
+	char __attribute__((unused)) dst_addr_str[40];
+	char __attribute__((unused)) mc_dst_addr_str[40];
+	char __attribute__((unused)) src_addr_str[40];
+
+	/*
+	 * Find source and destination addresses in Linux format. We need
+	 * mcast destination address as well.
+	 */
+	ECM_IP_ADDR_TO_NIN6_ADDR(dst_addr, addr);
+	addrconf_addr_solict_mult(&dst_addr, &mc_dst_addr);
+	ret = ipv6_dev_get_saddr(netf, dev, &dst_addr, 0, &src_addr);
+
+	/*
+	 * IP address in string format for debug
+	 */
+	ecm_ip_addr_to_string(dst_addr_str, addr);
+	ECM_NIN6_ADDR_TO_IP_ADDR(ecm_mc_dst_addr, mc_dst_addr);
+	ecm_ip_addr_to_string(mc_dst_addr_str, ecm_mc_dst_addr);
+	ECM_NIN6_ADDR_TO_IP_ADDR(ecm_src_addr, src_addr);
+	ecm_ip_addr_to_string(src_addr_str, ecm_src_addr);
+
+	/*
+	 * Find the route entry
+	 */
+	rt6i = rt6_lookup(netf, &dst_addr, NULL, 0, 0);
+	if (!rt6i) {
+		DEBUG_TRACE("IPv6 Route lookup failure for destination IPv6 address %s\n", dst_addr_str);
+		return;
+	} else {
+		/*
+		 * Find the neighbor entry
+		 */
+		neigh = rt6i->dst.ops->neigh_lookup(&rt6i->dst, &dst_addr);
+		if (neigh == NULL) {
+			DEBUG_TRACE("Neighbour lookup failure for destination IPv6 address %s\n", dst_addr_str);
+			return;
+		} else {
+			/*
+			 * Issue a Neighbour soliciation request
+			 */
+			ndisc_send_ns(dev, neigh, &dst_addr, &mc_dst_addr, &src_addr);
+			neigh_release(neigh);
+		}
+	}
+}
 
 /*
  * ecm_front_end_ipv6_interface_heirarchy_construct()
@@ -369,6 +430,7 @@ int32_t ecm_front_end_ipv6_interface_heirarchy_construct(struct ecm_db_iface_ins
 						 * Possible ARP does not know the address yet
 						 */
 						DEBUG_WARN("Unable to obtain MAC address for " ECM_IP_ADDR_OCTAL_FMT "\n", ECM_IP_ADDR_TO_OCTAL(dest_addr));
+						ecm_front_end_ipv6_send_neighbour_solicitation(dest_dev, dest_addr);
 						dev_put(src_dev);
 						dev_put(dest_dev);
 
@@ -414,6 +476,7 @@ int32_t ecm_front_end_ipv6_interface_heirarchy_construct(struct ecm_db_iface_ins
 						 * Possible ARP does not know the address yet
 						 */
 						DEBUG_WARN("Unable to obtain MAC address for " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(src_addr));
+						ecm_front_end_ipv6_send_neighbour_solicitation(src_dev, src_addr);
 						dev_put(src_dev);
 						dev_put(dest_dev);
 
@@ -428,6 +491,7 @@ int32_t ecm_front_end_ipv6_interface_heirarchy_construct(struct ecm_db_iface_ins
 						 * Possible ARP does not know the address yet
 						 */
 						DEBUG_WARN("Unable to obtain MAC address for " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(dest_addr));
+						ecm_front_end_ipv6_send_neighbour_solicitation(dest_dev, dest_addr);
 						dev_put(src_dev);
 						dev_put(dest_dev);
 
@@ -671,37 +735,12 @@ static struct ecm_db_node_instance *ecm_front_end_ipv6_node_establish_and_ref(st
 		case ECM_DB_IFACE_TYPE_VLAN:
 		case ECM_DB_IFACE_TYPE_BRIDGE:
 			if (!ecm_interface_mac_addr_get(addr, node_addr, &on_link, gw_addr)) {
-// GGG TODO MUST FIX, USE NEIGHBOUR SOLICITATION?
-#if 0
-				__be32 ipv4_addr;
-				__be32 src_ip;
-				DEBUG_TRACE("failed to obtain mac for host " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(addr));
-
-				/*
-				 * Issue an ARP request for it, select the src_ip from which to issue the request.
-				 */
-				ECM_IP_ADDR_TO_NIN4_ADDR(ipv4_addr, addr);
-				src_ip = inet_select_addr(dev, ipv4_addr, RT_SCOPE_LINK);
-				if (!src_ip) {
-					DEBUG_TRACE("failed to lookup IP for %pI4\n", &ipv4_addr);
-					return NULL;
+				DEBUG_TRACE("Failed to obtain mac for host " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(addr));
+				if (ecm_front_end_is_bridge_port(dev)) {
+					ecm_front_end_ipv6_send_neighbour_solicitation(dev->master, addr);
+				} else {
+					ecm_front_end_ipv6_send_neighbour_solicitation(dev, addr);
 				}
-
-				/*
-				 * If we have a GW for this address, then we have to send ARP request to the GW
-				 */
-				if (!ECM_IP_ADDR_IS_NULL(gw_addr)) {
-					ECM_IP_ADDR_COPY(addr, gw_addr);
-				}
-
-				DEBUG_TRACE("Send ARP for %pI4 using src_ip as %pI4\n", &ipv4_addr, &src_ip);
-				arp_send(ARPOP_REQUEST, ETH_P_ARP, ipv4_addr, dev, src_ip, NULL, NULL, NULL);
-
-				/*
-				 * By returning NULL the connection will not be created and the packet dropped.
-				 * However the sending will no doubt re-try the transmission and by that time we shall have the MAC for it.
-				 */
-#endif
 				return NULL;
 			}
 			done = true;
