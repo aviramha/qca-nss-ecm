@@ -652,6 +652,10 @@ ecm_classifier_nl_sync_to_v4(struct ecm_classifier_instance *aci,
 		return;
 	}
 
+	cnli = (struct ecm_classifier_nl_instance *)aci;
+	DEBUG_CHECK_MAGIC(cnli, ECM_CLASSIFIER_NL_INSTANCE_MAGIC,
+			  "%p: magic failed", cnli);
+
 	switch(sync->reason) {
 	case NSS_IPV4_SYNC_REASON_FLUSH:
 		/* do nothing */
@@ -673,10 +677,6 @@ ecm_classifier_nl_sync_to_v4(struct ecm_classifier_instance *aci,
 		DEBUG_TRACE("%p: nl_sync_to_v4: unsupported reason\n", cnli);
 		break;
 	}
-
-	cnli = (struct ecm_classifier_nl_instance *)aci;
-	DEBUG_CHECK_MAGIC(cnli, ECM_CLASSIFIER_NL_INSTANCE_MAGIC,
-			  "%p: magic failed", cnli);
 
 	if (accel_ok) {
 		ecm_classifier_nl_genl_msg_ACCEL_OK(cnli);
