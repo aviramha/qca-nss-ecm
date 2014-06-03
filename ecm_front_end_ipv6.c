@@ -245,6 +245,7 @@ void ecm_front_end_ipv6_send_neighbour_solicitation(struct net_device *dev, ip_a
 			/*
 			 * Issue a Neighbour soliciation request
 			 */
+			DEBUG_TRACE("Issue Neighbour solicitation request\n");
 			ndisc_send_ns(dev, neigh, &dst_addr, &mc_dst_addr, &src_addr);
 			neigh_release(neigh);
 		}
@@ -274,17 +275,13 @@ void ecm_front_end_ipv6_send_neighbour_solicitation(struct net_device *dev, ip_a
  *
  * GGG TODO Remove this in favour of the ecm_interface version - understand any refactoring needs first.
  */
-int32_t ecm_front_end_ipv6_interface_heirarchy_construct(struct ecm_db_iface_instance *interfaces[], ip_addr_t packet_src_addr, ip_addr_t packet_dest_addr, int packet_protocol)
+int32_t ecm_front_end_ipv6_interface_heirarchy_construct(struct ecm_db_iface_instance *interfaces[], ip_addr_t packet_src_addr, ip_addr_t packet_dest_addr, int packet_protocol, struct net_device *in_dev)
 {
 	char __attribute__((unused)) src_addr_str[40];
 	char __attribute__((unused)) dest_addr_str[40];
 	int protocol;
 	ip_addr_t src_addr;
 	ip_addr_t dest_addr;
-	struct ecm_interface_route src_rt;
-	struct ecm_interface_route dest_rt;
-	struct dst_entry *src_dst;
-	struct dst_entry *dest_dst;
 	struct net_device *src_dev;
 	struct net_device *dest_dev;
 	char *src_dev_name;
@@ -304,44 +301,117 @@ int32_t ecm_front_end_ipv6_interface_heirarchy_construct(struct ecm_db_iface_ins
 	DEBUG_TRACE("Construct interface heirarchy for from src_addr: %s to dest_addr: %s, protocol: %d\n", src_addr_str, dest_addr_str, protocol);
 
 	/*
-	 * Begin by finding the interface to which we reach the given addresses
+	 * Get device from the given addresses
+	 * Is the address a local IP?
 	 */
-	if (!ecm_interface_find_route_by_addr(src_addr, &src_rt)) {
-		DEBUG_WARN("Construct interface heirarchy failed from src_addr: %s to dest_addr: %s, protocol: %d\n", src_addr_str, dest_addr_str, protocol);
-		return ECM_DB_IFACE_HEIRARCHY_MAX;
-	}
-	DEBUG_ASSERT(!src_rt.v4_route, "Should not be v4");
-	if (!ecm_interface_find_route_by_addr(dest_addr, &dest_rt)) {
+	src_dev = ecm_interface_dev_find_by_addr(src_addr);
+	if (!src_dev) {
+		struct ecm_interface_route src_rt;
+		struct dst_entry *src_dst;
+
+		DEBUG_TRACE("src_addr: %s is not local\n", src_addr_str);
+
+		/*
+		 * Not local.
+		 * Try a route to the address
+		 */
+		if (!ecm_interface_find_route_by_addr(src_addr, &src_rt)) {
+			DEBUG_WARN("Construct interface heirarchy failed from src_addr: %s to dest_addr: %s, protocol: %d\n", src_addr_str, dest_addr_str, protocol);
+			return ECM_DB_IFACE_HEIRARCHY_MAX;
+		}
+
+		DEBUG_ASSERT(!src_rt.v4_route, "Should not be v4");
+
+		/*
+		 * A route contains a dst_entry, from which we can get the net device that reaches it.
+		 */
+		src_dst = src_rt.dst;
+		src_dev = src_dst->dev;
+		dev_hold(src_dev);
+
+		/*
+		 * Release route (we hold devices for ourselves)
+		 */
 		ecm_interface_route_release(&src_rt);
-		DEBUG_WARN("Construct interface heirarchy failed from src_addr: %s to dest_addr: %s, protocol: %d\n", src_addr_str, dest_addr_str, protocol);
-		return ECM_DB_IFACE_HEIRARCHY_MAX;
+		DEBUG_TRACE("src_addr: %s uses dev: %p(%s)\n", src_addr_str, src_dev, src_dev->name);
+	} else {
+		/*
+		 * If Local
+		 * Check if it is a tunnel packet
+		 */
+		if (protocol == IPPROTO_IPIP) {
+			src_dev = in_dev;
+			dev_hold(src_dev);
+			DEBUG_TRACE("IPIP tunnel packet with src_addr: %s uses dev: %p(%s)\n", src_addr_str, src_dev, src_dev->name);
+		}
 	}
-	DEBUG_ASSERT(!dest_rt.v4_route, "Should not be v4");
 
-	/*
-	 * A route contains a dst_entry, from which we can get the net device that reaches it.
-	 */
-	src_dst = src_rt.dst;
-	dest_dst = dest_rt.dst;
-
-	/*
-	 * Get device from the destination entries
-	 */
-	src_dev = src_dst->dev;
-	dev_hold(src_dev);
 	src_dev_name = src_dev->name;
 	src_dev_type = src_dev->type;
 
-	dest_dev = dest_dst->dev;
-	dev_hold(dest_dev);
+	dest_dev = ecm_interface_dev_find_by_addr(dest_addr);
+	if (!dest_dev) {
+		struct ecm_interface_route dest_rt;
+		struct dst_entry *dest_dst;
+
+		DEBUG_TRACE("dest_addr: %s is not local\n", dest_addr_str);
+
+		/*
+		 * Not local.
+		 * Try a route to the address
+		 */
+		if (!ecm_interface_find_route_by_addr(dest_addr, &dest_rt)) {
+			ecm_interface_route_release(&dest_rt);
+			DEBUG_WARN("Construct interface heirarchy failed from src_addr: %s to dest_addr: %s, protocol: %d\n", src_addr_str, dest_addr_str, protocol);
+			return ECM_DB_IFACE_HEIRARCHY_MAX;
+		}
+		DEBUG_ASSERT(!dest_rt.v4_route, "Should not be v4");
+
+		/*
+		 * A route contains a dst_entry, from which we can get the net device that reaches it.
+		 */
+		dest_dst = dest_rt.dst;
+		dest_dev = dest_dst->dev;
+		dev_hold(dest_dev);
+
+		/*
+		 * Release route (we hold devices for ourselves)
+		 */
+		ecm_interface_route_release(&dest_rt);
+		DEBUG_TRACE("dest_addr: %s uses dev: %p(%s)\n", dest_addr_str, dest_dev, dest_dev->name);
+	} else {
+		/*
+		 * If local
+		 * Check if it a tunnel packet
+		 */
+		if (protocol == IPPROTO_IPIP) {
+			dest_dev = in_dev;
+			dev_hold(dest_dev);
+			DEBUG_TRACE("IPIP tunnel packet with dest_addr: %s uses dev: %p(%s)\n", dest_addr_str, dest_dev, dest_dev->name);
+		}
+	}
+
 	dest_dev_name = dest_dev->name;
 	dest_dev_type = dest_dev->type;
 
 	/*
-	 * Release route (we hold devices for ourselves)
+	 * Check if source and dest dev are same
+	 * For the forwarded flows which involve
+	 * tunnels this will happen when called
+	 * from input hook
 	 */
-	ecm_interface_route_release(&src_rt);
-	ecm_interface_route_release(&dest_rt);
+	if (src_dev == dest_dev) {
+		DEBUG_TRACE("Protocol is :%d source dev and dest dev are same\n", protocol);
+		if (protocol == IPPROTO_IPIP) {
+			/*
+			 * This happens from the input hook
+			 * We do not want to create a connection entry for this
+			 */
+			dev_put(src_dev);
+			dev_put(dest_dev);
+			return ECM_DB_IFACE_HEIRARCHY_MAX;
+		}
+	}
 
 	/*
 	 * Iterate until we are done or get to the max number of interfaces we can record.
@@ -735,7 +805,7 @@ static struct ecm_db_node_instance *ecm_front_end_ipv6_node_establish_and_ref(st
 		case ECM_DB_IFACE_TYPE_VLAN:
 		case ECM_DB_IFACE_TYPE_BRIDGE:
 			if (!ecm_interface_mac_addr_get(addr, node_addr, &on_link, gw_addr)) {
-				DEBUG_TRACE("Failed to obtain mac for host " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(addr));
+				DEBUG_TRACE("Failed to obtain mac for host " ECM_IP_ADDR_OCTAL_FMT "\n", ECM_IP_ADDR_TO_OCTAL(addr));
 				if (ecm_front_end_is_bridge_port(dev)) {
 					ecm_front_end_ipv6_send_neighbour_solicitation(dev->master, addr);
 				} else {
@@ -2670,7 +2740,7 @@ static void ecm_front_end_ipv6_connection_non_ported_front_end_accelerate(struct
 	 * For non-ported protocols we only support IPv6 in 4 or ESP
 	 */
 	protocol = ecm_db_connection_protocol_get(fecnpi->ci);
-	if ((protocol != IPPROTO_IPV6) && (protocol != IPPROTO_ESP)) {
+	if ((protocol != IPPROTO_IPIP) && (protocol != IPPROTO_ESP)) {
 		DEBUG_TRACE("%p: unsupported protocol: %d\n", fecnpi, protocol);
 		return;
 	}
@@ -3343,7 +3413,8 @@ static int ecm_front_end_ipv6_connection_non_ported_front_end_xml_state_get(stru
 static struct ecm_front_end_ipv6_connection_non_ported_instance *ecm_front_end_ipv6_connection_non_ported_instance_alloc(
 								struct ecm_db_connection_instance *ci,
 								struct ecm_db_mapping_instance *src_mi,
-								struct ecm_db_mapping_instance *dest_mi)
+								struct ecm_db_mapping_instance *dest_mi,
+								bool can_accel)
 {
 	struct ecm_front_end_ipv6_connection_non_ported_instance *fecnpi;
 
@@ -3359,6 +3430,13 @@ static struct ecm_front_end_ipv6_connection_non_ported_instance *ecm_front_end_i
 	fecnpi->refs = 1;
 	DEBUG_SET_MAGIC(fecnpi, ECM_FRONT_END_IPV6_CONNECTION_NON_PORTED_INSTANCE_MAGIC);
 	spin_lock_init(&fecnpi->lock);
+
+
+	fecnpi->accel_mode = ECM_CLASSIFIER_ACCELERATION_MODE_NO;
+	fecnpi->can_accel = can_accel;
+	spin_lock_bh(&ecm_front_end_ipv6_lock);
+	fecnpi->accel_limit = ecm_front_end_ipv6_accel_limit_default;
+	spin_unlock_bh(&ecm_front_end_ipv6_lock);
 
 	/*
 	 * Copy reference to connection - no need to ref ci as ci maintains a ref to this instance instead (this instance persists for as long as ci does)
@@ -3600,7 +3678,7 @@ static unsigned int ecm_front_end_ipv6_tcp_process(struct net_device *out_dev, s
 		 * GGG TODO rework terms of "src/dest" - these need to be named consistently as from/to as per database terms.
 		 */
 		DEBUG_TRACE("%p: Create the 'from' interface heirarchy list\n", nci);
-		from_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, IPPROTO_TCP);
+		from_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, IPPROTO_TCP, in_dev);
 		if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to obtain 'from' heirarchy list\n");
@@ -3618,7 +3696,7 @@ static unsigned int ecm_front_end_ipv6_tcp_process(struct net_device *out_dev, s
 		}
 
 		DEBUG_TRACE("%p: Create the 'to' interface heirarchy list\n", nci);
-		to_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, IPPROTO_TCP);
+		to_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, IPPROTO_TCP, in_dev);
 		if (to_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_mapping_deref(src_mi);
 			ecm_db_connection_deref(nci);
@@ -3763,7 +3841,7 @@ static unsigned int ecm_front_end_ipv6_tcp_process(struct net_device *out_dev, s
 		 * But a LAG slave might change the heirarchy the connection is using but the LAG master is still sane.
 		 */
 		DEBUG_TRACE("%p: Update the 'from' interface heirarchy list\n", ci);
-		from_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, IPPROTO_TCP);
+		from_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, IPPROTO_TCP, in_dev);
 		if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(ci);
 			DEBUG_WARN("Failed to obtain 'from' heirarchy list\n");
@@ -3773,7 +3851,7 @@ static unsigned int ecm_front_end_ipv6_tcp_process(struct net_device *out_dev, s
 		ecm_db_connection_interfaces_deref(from_list, from_list_first);
 
 		DEBUG_TRACE("%p: Update the 'to' interface heirarchy list\n", ci);
-		to_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, IPPROTO_TCP);
+		to_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, IPPROTO_TCP, in_dev);
 		if (to_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(ci);
 			DEBUG_WARN("Failed to obtain 'to' heirarchy list\n");
@@ -4113,7 +4191,7 @@ static unsigned int ecm_front_end_ipv6_udp_process(struct net_device *out_dev, s
 		 * GGG TODO rework terms of "src/dest" - these need to be named consistently as from/to as per database terms.
 		 */
 		DEBUG_TRACE("%p: Create the 'from' interface heirarchy list\n", nci);
-		from_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, IPPROTO_UDP);
+		from_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, IPPROTO_UDP, in_dev);
 		if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to obtain 'from' heirarchy list\n");
@@ -4131,7 +4209,7 @@ static unsigned int ecm_front_end_ipv6_udp_process(struct net_device *out_dev, s
 		}
 
 		DEBUG_TRACE("%p: Create the 'to' interface heirarchy list\n", nci);
-		to_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, IPPROTO_UDP);
+		to_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, IPPROTO_UDP, in_dev);
 		if (to_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_mapping_deref(src_mi);
 			ecm_db_connection_deref(nci);
@@ -4276,7 +4354,7 @@ static unsigned int ecm_front_end_ipv6_udp_process(struct net_device *out_dev, s
 		 * But a LAG slave might change the heirarchy the connection is using but the LAG master is still sane.
 		 */
 		DEBUG_TRACE("%p: Update the 'from' interface heirarchy list\n", ci);
-		from_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, IPPROTO_UDP);
+		from_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, IPPROTO_UDP, in_dev);
 		if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(ci);
 			DEBUG_WARN("Failed to obtain 'from' heirarchy list\n");
@@ -4286,7 +4364,7 @@ static unsigned int ecm_front_end_ipv6_udp_process(struct net_device *out_dev, s
 		ecm_db_connection_interfaces_deref(from_list, from_list_first);
 
 		DEBUG_TRACE("%p: Update the 'to' interface heirarchy list\n", ci);
-		to_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, IPPROTO_UDP);
+		to_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, IPPROTO_UDP, in_dev);
 		if (to_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(ci);
 			DEBUG_WARN("Failed to obtain 'to' heirarchy list\n");
@@ -4591,7 +4669,7 @@ static unsigned int ecm_front_end_ipv6_non_ported_process(struct net_device *out
 		 * GGG TODO rework terms of "src/dest" - these need to be named consistently as from/to as per database terms.
 		 */
 		DEBUG_TRACE("%p: Create the 'from' interface heirarchy list\n", nci);
-		from_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, protocol);
+		from_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, protocol, in_dev);
 		if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to obtain 'from' heirarchy list\n");
@@ -4609,7 +4687,7 @@ static unsigned int ecm_front_end_ipv6_non_ported_process(struct net_device *out
 		}
 
 		DEBUG_TRACE("%p: Create the 'to' interface heirarchy list\n", nci);
-		to_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, protocol);
+		to_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, protocol, in_dev);
 		if (to_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_mapping_deref(src_mi);
 			ecm_db_connection_deref(nci);
@@ -4631,7 +4709,7 @@ static unsigned int ecm_front_end_ipv6_non_ported_process(struct net_device *out
 		/*
 		 * Connection must have a front end instance associated with it
 		 */
-		feci = (struct ecm_front_end_connection_instance *)ecm_front_end_ipv6_connection_non_ported_instance_alloc(nci, src_mi, dest_mi);
+		feci = (struct ecm_front_end_connection_instance *)ecm_front_end_ipv6_connection_non_ported_instance_alloc(nci, src_mi, dest_mi, can_accel);
 		if (!feci) {
 			ecm_db_mapping_deref(dest_mi);
 			ecm_db_mapping_deref(src_mi);
@@ -4754,7 +4832,7 @@ static unsigned int ecm_front_end_ipv6_non_ported_process(struct net_device *out
 		 * But a LAG slave might change the heirarchy the connection is using but the LAG master is still sane.
 		 */
 		DEBUG_TRACE("%p: Update the 'from' interface heirarchy list\n", ci);
-		from_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, protocol);
+		from_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, protocol, in_dev);
 		if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(ci);
 			DEBUG_WARN("Failed to obtain 'from' heirarchy list\n");
@@ -4764,7 +4842,7 @@ static unsigned int ecm_front_end_ipv6_non_ported_process(struct net_device *out
 		ecm_db_connection_interfaces_deref(from_list, from_list_first);
 
 		DEBUG_TRACE("%p: Update the 'to' interface heirarchy list\n", ci);
-		to_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, protocol);
+		to_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, protocol, in_dev);
 		if (to_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(ci);
 			DEBUG_WARN("Failed to obtain 'to' heirarchy list\n");

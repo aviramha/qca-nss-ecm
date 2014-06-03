@@ -3040,7 +3040,8 @@ static int ecm_front_end_ipv4_connection_non_ported_front_end_xml_state_get(stru
 static struct ecm_front_end_ipv4_connection_non_ported_instance *ecm_front_end_ipv4_connection_non_ported_instance_alloc(
 								struct ecm_db_connection_instance *ci,
 								struct ecm_db_mapping_instance *src_mi,
-								struct ecm_db_mapping_instance *dest_mi)
+								struct ecm_db_mapping_instance *dest_mi,
+								bool can_accel)
 {
 	struct ecm_front_end_ipv4_connection_non_ported_instance *fecnpi;
 
@@ -3056,6 +3057,12 @@ static struct ecm_front_end_ipv4_connection_non_ported_instance *ecm_front_end_i
 	fecnpi->refs = 1;
 	DEBUG_SET_MAGIC(fecnpi, ECM_FRONT_END_IPV4_CONNECTION_NON_PORTED_INSTANCE_MAGIC);
 	spin_lock_init(&fecnpi->lock);
+
+	fecnpi->can_accel = can_accel;
+	fecnpi->accel_mode = ECM_CLASSIFIER_ACCELERATION_MODE_NO;
+	spin_lock_bh(&ecm_front_end_ipv4_lock);
+	fecnpi->accel_limit = ecm_front_end_ipv4_accel_limit_default;
+	spin_unlock_bh(&ecm_front_end_ipv4_lock);
 
 	/*
 	 * Copy reference to connection - no need to ref ci as ci maintains a ref to this instance instead (this instance persists for as long as ci does)
@@ -3324,7 +3331,7 @@ static unsigned int ecm_front_end_ipv4_tcp_process(struct net_device *out_dev, s
 		 * GGG TODO rework terms of "src/dest" - these need to be named consistently as from/to as per database terms.
 		 */
 		DEBUG_TRACE("%p: Create the 'from' interface heirarchy list\n", nci);
-		from_list_first = ecm_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, IPPROTO_TCP);
+		from_list_first = ecm_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, IPPROTO_TCP, in_dev);
 		if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to obtain 'from' heirarchy list\n");
@@ -3342,7 +3349,7 @@ static unsigned int ecm_front_end_ipv4_tcp_process(struct net_device *out_dev, s
 		}
 
 		DEBUG_TRACE("%p: Create the 'to' interface heirarchy list\n", nci);
-		to_list_first = ecm_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, IPPROTO_TCP);
+		to_list_first = ecm_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, IPPROTO_TCP, in_dev);
 		if (to_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_mapping_deref(src_mi);
 			ecm_db_connection_deref(nci);
@@ -3367,7 +3374,7 @@ static unsigned int ecm_front_end_ipv4_tcp_process(struct net_device *out_dev, s
 		 * GGG TODO rework terms of "src/dest" - these need to be named consistently as from/to as per database terms.
 		 */
 		DEBUG_TRACE("%p: Create the 'from NAT' interface heirarchy list\n", nci);
-		from_nat_list_first = ecm_interface_heirarchy_construct(from_nat_list, ip_dest_addr, ip_src_addr_nat, IPPROTO_TCP);
+		from_nat_list_first = ecm_interface_heirarchy_construct(from_nat_list, ip_dest_addr, ip_src_addr_nat, IPPROTO_TCP, in_dev);
 		if (from_nat_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_mapping_deref(src_mi);
 			ecm_db_mapping_deref(dest_mi);
@@ -3388,7 +3395,7 @@ static unsigned int ecm_front_end_ipv4_tcp_process(struct net_device *out_dev, s
 		}
 
 		DEBUG_TRACE("%p: Create the 'to NAT' interface heirarchy list\n", nci);
-		to_nat_list_first = ecm_interface_heirarchy_construct(to_nat_list, ip_src_addr, ip_dest_addr_nat, IPPROTO_TCP);
+		to_nat_list_first = ecm_interface_heirarchy_construct(to_nat_list, ip_src_addr, ip_dest_addr_nat, IPPROTO_TCP, in_dev);
 		if (to_nat_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_mapping_deref(src_nat_mi);
 			ecm_db_mapping_deref(dest_mi);
@@ -3548,7 +3555,7 @@ static unsigned int ecm_front_end_ipv4_tcp_process(struct net_device *out_dev, s
 		 * But a LAG slave might change the heirarchy the connection is using but the LAG master is still sane.
 		 */
 		DEBUG_TRACE("%p: Update the 'from' interface heirarchy list\n", ci);
-		from_list_first = ecm_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, IPPROTO_TCP);
+		from_list_first = ecm_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, IPPROTO_TCP, in_dev);
 		if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(ci);
 			DEBUG_WARN("Failed to obtain 'from' heirarchy list\n");
@@ -3558,7 +3565,7 @@ static unsigned int ecm_front_end_ipv4_tcp_process(struct net_device *out_dev, s
 		ecm_db_connection_interfaces_deref(from_list, from_list_first);
 
 		DEBUG_TRACE("%p: Update the 'from NAT' interface heirarchy list\n", ci);
-		from_nat_list_first = ecm_interface_heirarchy_construct(from_nat_list, ip_dest_addr, ip_src_addr_nat, IPPROTO_TCP);
+		from_nat_list_first = ecm_interface_heirarchy_construct(from_nat_list, ip_dest_addr, ip_src_addr_nat, IPPROTO_TCP, in_dev);
 		if (from_nat_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(ci);
 			DEBUG_WARN("Failed to obtain 'from NAT' heirarchy list\n");
@@ -3568,7 +3575,7 @@ static unsigned int ecm_front_end_ipv4_tcp_process(struct net_device *out_dev, s
 		ecm_db_connection_interfaces_deref(from_nat_list, from_nat_list_first);
 
 		DEBUG_TRACE("%p: Update the 'to' interface heirarchy list\n", ci);
-		to_list_first = ecm_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, IPPROTO_TCP);
+		to_list_first = ecm_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, IPPROTO_TCP, in_dev);
 		if (to_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(ci);
 			DEBUG_WARN("Failed to obtain 'to' heirarchy list\n");
@@ -3578,7 +3585,7 @@ static unsigned int ecm_front_end_ipv4_tcp_process(struct net_device *out_dev, s
 		ecm_db_connection_interfaces_deref(to_list, to_list_first);
 
 		DEBUG_TRACE("%p: Update the 'to NAT' interface heirarchy list\n", ci);
-		to_nat_list_first = ecm_interface_heirarchy_construct(to_nat_list, ip_src_addr, ip_dest_addr_nat, IPPROTO_TCP);
+		to_nat_list_first = ecm_interface_heirarchy_construct(to_nat_list, ip_src_addr, ip_dest_addr_nat, IPPROTO_TCP, in_dev);
 		if (to_nat_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(ci);
 			DEBUG_WARN("Failed to obtain 'to NAT' heirarchy list\n");
@@ -3945,7 +3952,7 @@ static unsigned int ecm_front_end_ipv4_udp_process(struct net_device *out_dev, s
 		 * GGG TODO rework terms of "src/dest" - these need to be named consistently as from/to as per database terms.
 		 */
 		DEBUG_TRACE("%p: Create the 'from' interface heirarchy list\n", nci);
-		from_list_first = ecm_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, IPPROTO_UDP);
+		from_list_first = ecm_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, IPPROTO_UDP, in_dev);
 		if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to obtain 'from' heirarchy list\n");
@@ -3963,7 +3970,7 @@ static unsigned int ecm_front_end_ipv4_udp_process(struct net_device *out_dev, s
 		}
 
 		DEBUG_TRACE("%p: Create the 'to' interface heirarchy list\n", nci);
-		to_list_first = ecm_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, IPPROTO_UDP);
+		to_list_first = ecm_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, IPPROTO_UDP, in_dev);
 		if (to_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_mapping_deref(src_mi);
 			ecm_db_connection_deref(nci);
@@ -3988,7 +3995,7 @@ static unsigned int ecm_front_end_ipv4_udp_process(struct net_device *out_dev, s
 		 * GGG TODO rework terms of "src/dest" - these need to be named consistently as from/to as per database terms.
 		 */
 		DEBUG_TRACE("%p: Create the 'from NAT' interface heirarchy list\n", nci);
-		from_nat_list_first = ecm_interface_heirarchy_construct(from_nat_list, ip_dest_addr, ip_src_addr_nat, IPPROTO_UDP);
+		from_nat_list_first = ecm_interface_heirarchy_construct(from_nat_list, ip_dest_addr, ip_src_addr_nat, IPPROTO_UDP, in_dev);
 		if (from_nat_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_mapping_deref(dest_mi);
 			ecm_db_mapping_deref(src_mi);
@@ -4009,7 +4016,7 @@ static unsigned int ecm_front_end_ipv4_udp_process(struct net_device *out_dev, s
 		}
 
 		DEBUG_TRACE("%p: Create the 'to NAT' interface heirarchy list\n", nci);
-		to_nat_list_first = ecm_interface_heirarchy_construct(to_nat_list, ip_src_addr, ip_dest_addr_nat, IPPROTO_UDP);
+		to_nat_list_first = ecm_interface_heirarchy_construct(to_nat_list, ip_src_addr, ip_dest_addr_nat, IPPROTO_UDP, in_dev);
 		if (to_nat_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_mapping_deref(src_nat_mi);
 			ecm_db_mapping_deref(dest_mi);
@@ -4169,7 +4176,7 @@ static unsigned int ecm_front_end_ipv4_udp_process(struct net_device *out_dev, s
 		 * But a LAG slave might change the heirarchy the connection is using but the LAG master is still sane.
 		 */
 		DEBUG_TRACE("%p: Update the 'from' interface heirarchy list\n", ci);
-		from_list_first = ecm_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, IPPROTO_UDP);
+		from_list_first = ecm_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, IPPROTO_UDP, in_dev);
 		if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(ci);
 			DEBUG_WARN("Failed to obtain 'from' heirarchy list\n");
@@ -4179,7 +4186,7 @@ static unsigned int ecm_front_end_ipv4_udp_process(struct net_device *out_dev, s
 		ecm_db_connection_interfaces_deref(from_list, from_list_first);
 
 		DEBUG_TRACE("%p: Update the 'from NAT' interface heirarchy list\n", ci);
-		from_nat_list_first = ecm_interface_heirarchy_construct(from_nat_list, ip_dest_addr, ip_src_addr_nat, IPPROTO_UDP);
+		from_nat_list_first = ecm_interface_heirarchy_construct(from_nat_list, ip_dest_addr, ip_src_addr_nat, IPPROTO_UDP, in_dev);
 		if (from_nat_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(ci);
 			DEBUG_WARN("Failed to obtain 'from NAT' heirarchy list\n");
@@ -4189,7 +4196,7 @@ static unsigned int ecm_front_end_ipv4_udp_process(struct net_device *out_dev, s
 		ecm_db_connection_interfaces_deref(from_nat_list, from_nat_list_first);
 
 		DEBUG_TRACE("%p: Update the 'to' interface heirarchy list\n", ci);
-		to_list_first = ecm_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, IPPROTO_UDP);
+		to_list_first = ecm_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, IPPROTO_UDP, in_dev);
 		if (to_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(ci);
 			DEBUG_WARN("Failed to obtain 'to' heirarchy list\n");
@@ -4199,7 +4206,7 @@ static unsigned int ecm_front_end_ipv4_udp_process(struct net_device *out_dev, s
 		ecm_db_connection_interfaces_deref(to_list, to_list_first);
 
 		DEBUG_TRACE("%p: Update the 'to NAT' interface heirarchy list\n", ci);
-		to_nat_list_first = ecm_interface_heirarchy_construct(to_nat_list, ip_src_addr, ip_dest_addr_nat, IPPROTO_UDP);
+		to_nat_list_first = ecm_interface_heirarchy_construct(to_nat_list, ip_src_addr, ip_dest_addr_nat, IPPROTO_UDP, in_dev);
 		if (to_nat_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(ci);
 			DEBUG_WARN("Failed to obtain 'to NAT' heirarchy list\n");
@@ -4518,7 +4525,7 @@ static unsigned int ecm_front_end_ipv4_non_ported_process(struct net_device *out
 		 * GGG TODO rework terms of "src/dest" - these need to be named consistently as from/to as per database terms.
 		 */
 		DEBUG_TRACE("%p: Create the 'from' interface heirarchy list\n", nci);
-		from_list_first = ecm_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, protocol);
+		from_list_first = ecm_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, protocol, in_dev);
 		if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to obtain 'from' heirarchy list\n");
@@ -4536,7 +4543,7 @@ static unsigned int ecm_front_end_ipv4_non_ported_process(struct net_device *out
 		}
 
 		DEBUG_TRACE("%p: Create the 'to' interface heirarchy list\n", nci);
-		to_list_first = ecm_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, protocol);
+		to_list_first = ecm_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, protocol, in_dev);
 		if (to_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_mapping_deref(src_mi);
 			ecm_db_connection_deref(nci);
@@ -4561,7 +4568,7 @@ static unsigned int ecm_front_end_ipv4_non_ported_process(struct net_device *out
 		 * GGG TODO rework terms of "src/dest" - these need to be named consistently as from/to as per database terms.
 		 */
 		DEBUG_TRACE("%p: Create the 'from NAT' interface heirarchy list\n", nci);
-		from_nat_list_first = ecm_interface_heirarchy_construct(from_nat_list, ip_dest_addr, ip_src_addr_nat, protocol);
+		from_nat_list_first = ecm_interface_heirarchy_construct(from_nat_list, ip_dest_addr, ip_src_addr_nat, protocol, in_dev);
 		if (from_nat_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_mapping_deref(dest_mi);
 			ecm_db_mapping_deref(src_mi);
@@ -4582,7 +4589,7 @@ static unsigned int ecm_front_end_ipv4_non_ported_process(struct net_device *out
 		}
 
 		DEBUG_TRACE("%p: Create the 'to NAT' interface heirarchy list\n", nci);
-		to_nat_list_first = ecm_interface_heirarchy_construct(to_nat_list, ip_src_addr, ip_dest_addr_nat, protocol);
+		to_nat_list_first = ecm_interface_heirarchy_construct(to_nat_list, ip_src_addr, ip_dest_addr_nat, protocol, in_dev);
 		if (to_nat_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_mapping_deref(src_nat_mi);
 			ecm_db_mapping_deref(dest_mi);
@@ -4607,7 +4614,7 @@ static unsigned int ecm_front_end_ipv4_non_ported_process(struct net_device *out
 		/*
 		 * Connection must have a front end instance associated with it
 		 */
-		feci = (struct ecm_front_end_connection_instance *)ecm_front_end_ipv4_connection_non_ported_instance_alloc(nci, src_mi, dest_mi);
+		feci = (struct ecm_front_end_connection_instance *)ecm_front_end_ipv4_connection_non_ported_instance_alloc(nci, src_mi, dest_mi, can_accel);
 		if (!feci) {
 			ecm_db_mapping_deref(dest_nat_mi);
 			ecm_db_mapping_deref(src_nat_mi);
@@ -4742,7 +4749,7 @@ static unsigned int ecm_front_end_ipv4_non_ported_process(struct net_device *out
 		 * But a LAG slave might change the heirarchy the connection is using but the LAG master is still sane.
 		 */
 		DEBUG_TRACE("%p: Update the 'from' interface heirarchy list\n", ci);
-		from_list_first = ecm_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, protocol);
+		from_list_first = ecm_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, protocol, in_dev);
 		if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(ci);
 			DEBUG_WARN("Failed to obtain 'from' heirarchy list\n");
@@ -4752,7 +4759,7 @@ static unsigned int ecm_front_end_ipv4_non_ported_process(struct net_device *out
 		ecm_db_connection_interfaces_deref(from_list, from_list_first);
 
 		DEBUG_TRACE("%p: Update the 'from NAT' interface heirarchy list\n", ci);
-		from_nat_list_first = ecm_interface_heirarchy_construct(from_nat_list, ip_dest_addr, ip_src_addr_nat, protocol);
+		from_nat_list_first = ecm_interface_heirarchy_construct(from_nat_list, ip_dest_addr, ip_src_addr_nat, protocol, in_dev);
 		if (from_nat_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(ci);
 			DEBUG_WARN("Failed to obtain 'from NAT' heirarchy list\n");
@@ -4762,7 +4769,7 @@ static unsigned int ecm_front_end_ipv4_non_ported_process(struct net_device *out
 		ecm_db_connection_interfaces_deref(from_nat_list, from_nat_list_first);
 
 		DEBUG_TRACE("%p: Update the 'to' interface heirarchy list\n", ci);
-		to_list_first = ecm_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, protocol);
+		to_list_first = ecm_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, protocol, in_dev);
 		if (to_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(ci);
 			DEBUG_WARN("Failed to obtain 'to' heirarchy list\n");
@@ -4772,7 +4779,7 @@ static unsigned int ecm_front_end_ipv4_non_ported_process(struct net_device *out
 		ecm_db_connection_interfaces_deref(to_list, to_list_first);
 
 		DEBUG_TRACE("%p: Update the 'to NAT' interface heirarchy list\n", ci);
-		to_nat_list_first = ecm_interface_heirarchy_construct(to_nat_list, ip_src_addr, ip_dest_addr_nat, protocol);
+		to_nat_list_first = ecm_interface_heirarchy_construct(to_nat_list, ip_src_addr, ip_dest_addr_nat, protocol, in_dev);
 		if (to_nat_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(ci);
 			DEBUG_WARN("Failed to obtain 'to NAT' heirarchy list\n");

@@ -1302,7 +1302,7 @@ EXPORT_SYMBOL(ecm_interface_establish_and_ref);
  *
  * GGG TODO Make this function work for IPv6!!!!!!!!!!!!!!
  */
-int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfaces[], ip_addr_t packet_src_addr, ip_addr_t packet_dest_addr, int packet_protocol)
+int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfaces[], ip_addr_t packet_src_addr, ip_addr_t packet_dest_addr, int packet_protocol, struct net_device *in_dev)
 {
 	char __attribute__((unused)) src_addr_str[40];
 	char __attribute__((unused)) dest_addr_str[40];
@@ -1346,12 +1346,31 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfac
 			DEBUG_WARN("src_addr: %s - no route\n", src_addr_str);
 			return ECM_DB_IFACE_HEIRARCHY_MAX;
 		}
+
+		/*
+		 * A route contains a dst_entry, from which we can get the net device that reaches it.
+		 */
 		dst = ecm_rt.dst;
 		src_dev = dst->dev;
 		dev_hold(src_dev);
+
+		/*
+		 * Release route (we hold devices for ourselves)
+		 */
 		ecm_interface_route_release(&ecm_rt);
 		DEBUG_TRACE("src_addr: %s uses dev: %p(%s)\n", src_addr_str, src_dev, src_dev->name);
+	} else {
+		/*
+		 * If local
+		 * Check if it is a tunnel packet
+		 */
+		if (protocol == IPPROTO_IPV6) {
+			src_dev = in_dev;
+			dev_hold(src_dev);
+			DEBUG_TRACE("SIT tunnel packet with src_addr: %s uses dev: %p(%s)\n", src_addr_str, src_dev, src_dev->name);
+		}
 	}
+
 	src_dev_name = src_dev->name;
 	src_dev_type = src_dev->type;
 
@@ -1363,6 +1382,7 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfac
 		DEBUG_TRACE("dest_addr: %s is not local\n", dest_addr_str);
 
 		/*
+		 * Not local.
 		 * Try a route to the address
 		 */
 		if (!ecm_interface_find_route_by_addr(dest_addr, &ecm_rt)) {
@@ -1370,14 +1390,52 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfac
 			dev_put(src_dev);
 			return ECM_DB_IFACE_HEIRARCHY_MAX;
 		}
+
+		/*
+		 * A route contains a dst_entry, from which we can get the net device that reaches it.
+		 */
 		dst = ecm_rt.dst;
 		dest_dev = dst->dev;
 		dev_hold(dest_dev);
+
+		/*
+		 * Release route (we hold devices for ourselves)
+		 */
 		ecm_interface_route_release(&ecm_rt);
 		DEBUG_TRACE("dest_addr: %s uses dev: %p(%s)\n", dest_addr_str, dest_dev, dest_dev->name);
+	}  else {
+		/*
+		 * If local
+		 * Check if it a tunnel packet
+		 */
+		if (protocol == IPPROTO_IPV6) {
+			dest_dev = in_dev;
+			dev_hold(dest_dev);
+			DEBUG_TRACE("SIT tunnel packet with dest_addr: %s uses dev: %p(%s)\n", dest_addr_str, dest_dev, dest_dev->name);
+		}
 	}
+
 	dest_dev_name = dest_dev->name;
 	dest_dev_type = dest_dev->type;
+
+	/*
+	 * Check if source and dest dev are same
+	 * For the forwarded flows which involve
+	 * tunnels this will happen when called
+	 * from input hook
+	 */
+	if (src_dev == dest_dev) {
+		DEBUG_TRACE("protocol is :%d source dev and dest dev are same\n", protocol);
+		if(protocol == IPPROTO_IPV6) {
+			/*
+			 * This happens from input hook
+			 * We do not want to create a connection entry for this
+			 */
+			dev_put(src_dev);
+			dev_put(dest_dev);
+			return ECM_DB_IFACE_HEIRARCHY_MAX;
+		}
+	}
 
 	/*
 	 * Iterate until we are done or get to the max number of interfaces we can record.
@@ -1789,7 +1847,7 @@ static void ecm_interface_list_stats_update(int iface_list_first, struct ecm_db_
 			struct rtnl_link_stats64 stats;
 
 			case ECM_DB_IFACE_TYPE_VLAN:
-				DEBUG_INFO("%VLAN\n");
+				DEBUG_INFO("VLAN\n");
 				stats.rx_packets = rx_packets;
 				stats.rx_bytes = rx_bytes;
 				stats.tx_packets = tx_packets;
