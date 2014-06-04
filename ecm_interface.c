@@ -1365,6 +1365,7 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfac
 		 * Check if it is a tunnel packet
 		 */
 		if (protocol == IPPROTO_IPV6) {
+			dev_put(src_dev);
 			src_dev = in_dev;
 			dev_hold(src_dev);
 			DEBUG_TRACE("SIT tunnel packet with src_addr: %s uses dev: %p(%s)\n", src_addr_str, src_dev, src_dev->name);
@@ -1409,6 +1410,7 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfac
 		 * Check if it a tunnel packet
 		 */
 		if (protocol == IPPROTO_IPV6) {
+			dev_put(dest_dev);
 			dest_dev = in_dev;
 			dev_hold(dest_dev);
 			DEBUG_TRACE("SIT tunnel packet with dest_addr: %s uses dev: %p(%s)\n", dest_addr_str, dest_dev, dest_dev->name);
