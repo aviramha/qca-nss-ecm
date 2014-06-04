@@ -468,17 +468,11 @@ static int ecm_classifier_nl_deref(struct ecm_classifier_instance *ci)
 
 	/*
 	 * send a closed event to multicast if we previously issued
-	 * an accelerated-ok event without issuing a closed event.
-	 * actually, this case should be caught by the sync_to_v4
-	 * function, so we'll DEBUG_WARN here to let us know that
-	 * we may have missed something.
+	 * an accelerated-ok event.
 	 */
-	if ((cnli->flags & ECM_CLASSIFIER_NL_F_ACCEL_OK) &&
-	    !(cnli->flags & ECM_CLASSIFIER_NL_F_CLOSED)) {
+	if (cnli->flags & ECM_CLASSIFIER_NL_F_ACCEL_OK) {
 		spin_unlock_bh(&ecm_classifier_nl_lock);
 		ecm_classifier_nl_genl_msg_CLOSED(cnli);
-		DEBUG_WARN("Caught unclosed accelerated connection "
-			   "in destroy\n");
 		spin_lock_bh(&ecm_classifier_nl_lock);
 	}
 
@@ -634,12 +628,10 @@ ecm_classifier_nl_sync_to_v4(struct ecm_classifier_instance *aci,
 			     struct nss_ipv4_cb_params *params)
 {
 	int accel_ok;
-	int close;
 	struct nss_ipv4_sync *sync;
 	struct ecm_classifier_nl_instance *cnli;
 
 	accel_ok = 0;
-	close = 0;
 
 	DEBUG_ASSERT(params->reason == NSS_IPV4_CB_REASON_SYNC,
 		     "sync_to_v4 callback issued for non-sync reason\n");
@@ -667,7 +659,6 @@ ecm_classifier_nl_sync_to_v4(struct ecm_classifier_instance *aci,
 		break;
 	case NSS_IPV4_SYNC_REASON_DESTROY:
 		DEBUG_TRACE("%p: nl_sync_to_v4: SYNC_DESTROY\n", cnli);
-		close = 1;
 		break;
 	case NSS_IPV4_SYNC_REASON_STATS:
 		DEBUG_TRACE("%p: nl_sync_to_v4: SYNC_STATS\n", cnli);
@@ -680,8 +671,6 @@ ecm_classifier_nl_sync_to_v4(struct ecm_classifier_instance *aci,
 
 	if (accel_ok) {
 		ecm_classifier_nl_genl_msg_ACCEL_OK(cnli);
-	} else if (close) {
-		ecm_classifier_nl_genl_msg_CLOSED(cnli);
 	}
 }
 
