@@ -3519,6 +3519,7 @@ static struct ecm_classifier_instance *ecm_front_end_ipv6_assign_classifier(stru
 		return (struct ecm_classifier_instance *)cnli;
 	}
 
+#ifdef ECM_CLASSIFIER_HYFI_ENABLE
 	if (type == ECM_CLASSIFIER_TYPE_HYFI) {
 		struct ecm_classifier_hyfi_instance *chfi;
 		chfi = ecm_classifier_hyfi_instance_alloc(ci);
@@ -3530,6 +3531,7 @@ static struct ecm_classifier_instance *ecm_front_end_ipv6_assign_classifier(stru
 		ecm_db_connection_classifier_assign(ci, (struct ecm_classifier_instance *)chfi);
 		return (struct ecm_classifier_instance *)chfi;
 	}
+#endif
 
 	// GGG TODO Add other classifier types.
 	DEBUG_ASSERT(NULL, "%p: Unsupported type: %d\n", ci, type);

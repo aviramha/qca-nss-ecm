@@ -37,8 +37,10 @@ extern void ecm_classifier_default_exit(void);
 extern int ecm_classifier_nl_rules_init(void);
 extern void ecm_classifier_nl_rules_exit(void);
 
+#ifdef ECM_CLASSIFIER_HYFI_ENABLE
 extern int ecm_classifier_hyfi_rules_init(void);
 extern void ecm_classifier_hyfi_rules_exit(void);
+#endif
 
 extern int ecm_interface_init(void);
 extern void ecm_interface_stop(int);
@@ -103,10 +105,12 @@ static int __init ecm_init(void)
 		goto err_cls_nl;
 	}
 
+#ifdef ECM_CLASSIFIER_HYFI_ENABLE
 	ret = ecm_classifier_hyfi_rules_init();
 	if (0 != ret) {
 		goto err_cls_hyfi;
 	}
+#endif
 
 	ret = ecm_interface_init();
 	if (0 != ret) {
@@ -145,8 +149,10 @@ err_fe_ipv4:
 err_bond:
 	ecm_interface_exit();
 err_iface:
+#ifdef ECM_CLASSIFIER_HYFI_ENABLE
 	ecm_classifier_hyfi_rules_exit();
 err_cls_hyfi:
+#endif
 	ecm_classifier_nl_rules_exit();
 err_cls_nl:
 	ecm_classifier_default_exit();
@@ -197,8 +203,10 @@ static void __exit ecm_exit(void)
 	ecm_bond_notifier_exit();
 	printk(KERN_INFO "exit interface\n");
 	ecm_interface_exit();
+#ifdef ECM_CLASSIFIER_HYFI_ENABLE
 	printk(KERN_INFO "exit hyfi classifier\n");
 	ecm_classifier_hyfi_rules_exit();
+#endif
 	printk(KERN_INFO "exit nl classifier\n");
 	ecm_classifier_nl_rules_exit();
 	printk(KERN_INFO "exit default classifier\n");
