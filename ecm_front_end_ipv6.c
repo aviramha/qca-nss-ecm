@@ -5908,9 +5908,10 @@ static void ecm_front_end_ipv6_conntrack_event_mark(struct nf_conn *ct)
 	 * GGG TODO Add a classifier method to propagate this information to any and all types of classifier.
 	 */
 	cls = ecm_db_connection_assigned_classifier_find_and_ref(ci, ECM_CLASSIFIER_TYPE_NL);
-	DEBUG_ASSERT(cls, "NL classifier should never have unassigned\n");
-	ecm_classifier_nl_process_mark((struct ecm_classifier_nl_instance *)cls, ct->mark);
-	cls->deref(cls);
+	if (cls) {
+		ecm_classifier_nl_process_mark((struct ecm_classifier_nl_instance *)cls, ct->mark);
+		cls->deref(cls);
+	}
 
 	/*
 	 * All done

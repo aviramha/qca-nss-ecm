@@ -402,7 +402,6 @@ static int ecm_classifier_nl_genl_msg_ACCEL(struct sk_buff *skb,
 	cnli = (struct ecm_classifier_nl_instance *)
 		ecm_db_connection_assigned_classifier_find_and_ref(ci,
 			ECM_CLASSIFIER_TYPE_NL);
-	DEBUG_ASSERT(cnli, "NL classifier should never have unassigned\n");
 	if (!cnli) {
 		ecm_db_connection_deref(ci);
 		return -EUNATCH;
@@ -998,7 +997,10 @@ static ssize_t ecm_classifier_nl_set_command(struct sys_device *dev,
 	 * Get the NL classifier
 	 */
 	cnli = (struct ecm_classifier_nl_instance *)ecm_db_connection_assigned_classifier_find_and_ref(ci, ECM_CLASSIFIER_TYPE_NL);
-	DEBUG_ASSERT(cnli, "NL classifier should never have unassigned\n");
+	if (!cnli) {
+		ecm_db_connection_deref(ci);
+		return 0;
+	}
 
 	/*
 	 * Now action the command
