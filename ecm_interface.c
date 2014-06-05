@@ -1592,43 +1592,10 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfac
 					 * Link aggregation
 					 * Figure out which slave device of the link aggregation will be used to reach the destination.
 					 */
-					bool src_on_link;
-					bool dest_on_link;
-					ip_addr_t src_gw_addr;
-					ip_addr_t dest_gw_addr;
 					uint32_t src_addr_32;
 					uint32_t dest_addr_32;
 					uint8_t src_mac_addr[ETH_ALEN];
 					uint8_t dest_mac_addr[ETH_ALEN];
-
-					if (!ecm_interface_mac_addr_get(src_addr, src_mac_addr, &src_on_link, src_gw_addr)) {
-						/*
-						 * Possible ARP does not know the address yet
-						 */
-						DEBUG_WARN("Unable to obtain MAC address for " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(src_addr));
-						dev_put(src_dev);
-						dev_put(dest_dev);
-
-						/*
-						 * Release the interfaces heirarchy we constructed to this point.
-						 */
-						ecm_db_connection_interfaces_deref(interfaces, current_interface_index);
-						return ECM_DB_IFACE_HEIRARCHY_MAX;
-					}
-					if (!ecm_interface_mac_addr_get(dest_addr, dest_mac_addr, &dest_on_link, dest_gw_addr)) {
-						/*
-						 * Possible ARP does not know the address yet
-						 */
-						DEBUG_WARN("Unable to obtain MAC address for " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(dest_addr));
-						dev_put(src_dev);
-						dev_put(dest_dev);
-
-						/*
-						 * Release the interfaces heirarchy we constructed to this point.
-						 */
-						ecm_db_connection_interfaces_deref(interfaces, current_interface_index);
-						return ECM_DB_IFACE_HEIRARCHY_MAX;
-					}
 
 					ECM_IP_ADDR_TO_HIN4_ADDR(src_addr_32, src_addr);
 					ECM_IP_ADDR_TO_HIN4_ADDR(dest_addr_32, dest_addr);
