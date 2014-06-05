@@ -4838,8 +4838,6 @@ void ecm_db_connection_classifier_unassign(struct ecm_db_connection_instance *ci
 
 	DEBUG_ASSERT(cci->type_get(cci) != ECM_CLASSIFIER_TYPE_DEFAULT, "%p: Cannot unassign default", ci);
 
-	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed\n", ci);
-
 	/*
 	 * Get the type
 	 */
@@ -4851,9 +4849,13 @@ void ecm_db_connection_classifier_unassign(struct ecm_db_connection_instance *ci
 
 	/*
 	 * Remove from assignments_by_type
+	 * NOTEL It is possible that in SMP this classifier has already been unassigned.
 	 */
-	DEBUG_ASSERT(ci->assignments_by_type[ca_type] == cci, "%p: Invalid unassign, type: %d, expecting: %p, existing: %p\n",
-			ci, ca_type, cci, ci->assignments_by_type[ca_type]);
+	if (ci->assignments_by_type[ca_type] == NULL) {
+		spin_unlock_bh(&ecm_db_lock);
+		DEBUG_TRACE("%p: Classifier type: %d already unassigned\n", ci, ca_type);
+		return;
+	}
 	ci->assignments_by_type[ca_type] = NULL;
 
 	/*
