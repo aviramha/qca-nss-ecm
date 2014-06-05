@@ -362,7 +362,6 @@ int32_t ecm_front_end_ipv6_interface_heirarchy_construct(struct ecm_db_iface_ins
 		 * Try a route to the address
 		 */
 		if (!ecm_interface_find_route_by_addr(dest_addr, &dest_rt)) {
-			ecm_interface_route_release(&dest_rt);
 			DEBUG_WARN("Construct interface heirarchy failed from src_addr: %s to dest_addr: %s, protocol: %d\n", src_addr_str, dest_addr_str, protocol);
 			return ECM_DB_IFACE_HEIRARCHY_MAX;
 		}
