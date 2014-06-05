@@ -259,14 +259,14 @@ static inline bool ecm_string_to_ip_addr(ip_addr_t addr, char *ip_str)
 	uint8_t *dptr = dbuf.s6_addr;
 	if (in4_pton(ip_str, -1, dptr, '\0', NULL) > 0) {
 		/*
-	 	 * IPv4
+		 * IPv4
 		 */
 		ECM_NIN4_ADDR_TO_IP_ADDR(addr, dbuf.s6_addr[0]);
 		return true;
 	}
 	if (in6_pton(ip_str, -1, dptr, '\0', NULL) > 0) {
 		/*
-	 	 * IPv6
+		 * IPv6
 		 */
 		ECM_NIN6_ADDR_TO_IP_ADDR(addr, dbuf);
 		return true;
@@ -295,14 +295,28 @@ static inline bool ecm_string_to_ip_addr(ip_addr_t addr, char *ip_str)
 #define DEBUG_CHECK_MAGIC(i, m, s, ...)
 #define DEBUG_SET_MAGIC(i, m)
 #define DEBUG_CLEAR_MAGIC(i)
+
 #else
 #define DEBUG_ASSERT(c, s, ...) if (!(c)) { pr_emerg("ASSERT: %s:%d:" s, __FUNCTION__, __LINE__, ##__VA_ARGS__); BUG(); }
 #define DEBUG_ERROR(s, ...) pr_err("%s:%d:" s, __FUNCTION__, __LINE__, ##__VA_ARGS__)
 #define DEBUG_CHECK_MAGIC(i, m, s, ...) if (i->magic != m) { DEBUG_ASSERT(false, s, ##__VA_ARGS__); }
 #define DEBUG_SET_MAGIC(i, m) i->magic = m
 #define DEBUG_CLEAR_MAGIC(i) i->magic = 0
+
 #endif
 
+#if defined(CONFIG_DYNAMIC_DEBUG)
+/*
+ * Compile messages for dynamic enable/disable
+ */
+#define DEBUG_WARN(s, ...) pr_debug("%s:%d:" s, __FUNCTION__, __LINE__, ##__VA_ARGS__)
+#define DEBUG_INFO(s, ...) pr_debug("%s:%d:" s, __FUNCTION__, __LINE__, ##__VA_ARGS__)
+#define DEBUG_TRACE(s, ...) pr_debug("%s:%d:" s, __FUNCTION__, __LINE__, ##__VA_ARGS__)
+#else
+
+/*
+ * Statically compile messages at different levels
+ */
 #if (DEBUG_LEVEL < 2)
 #define DEBUG_WARN(s, ...)
 #else
@@ -320,4 +334,4 @@ static inline bool ecm_string_to_ip_addr(ip_addr_t addr, char *ip_str)
 #else
 #define DEBUG_TRACE(s, ...) pr_info("%s:%d:" s, __FUNCTION__, __LINE__, ##__VA_ARGS__)
 #endif
-
+#endif
