@@ -246,6 +246,12 @@ static struct ecm_db_node_instance *ecm_front_end_ipv4_node_establish_and_ref(st
 			memcpy(node_addr, pppoe_info.remote_mac, ETH_ALEN);
 			done = true;
 			break;
+
+		case ECM_DB_IFACE_TYPE_SIT:
+		case ECM_DB_IFACE_TYPE_TUNIPIP6:
+			done = true;
+			break;
+
 		case ECM_DB_IFACE_TYPE_ETHERNET:
 		case ECM_DB_IFACE_TYPE_LAG:
 		case ECM_DB_IFACE_TYPE_VLAN:
@@ -254,7 +260,6 @@ static struct ecm_db_node_instance *ecm_front_end_ipv4_node_establish_and_ref(st
 				__be32 ipv4_addr;
 				__be32 src_ip;
 				DEBUG_TRACE("failed to obtain node address for host " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(addr));
-
 				/*
 				 * Issue an ARP request for it, select the src_ip from which to issue the request.
 				 */
@@ -4638,8 +4643,17 @@ static unsigned int ecm_front_end_ipv4_non_ported_process(struct net_device *out
 		 * GGG TODO rework terms of "src/dest" - these need to be named consistently as from/to as per database terms.
 		 * GGG TODO The empty list checks should not be needed, mapping_establish_and_ref() should fail out if there is no list anyway.
 		 */
+
+		/*
+		 * NOTE: For SIT tunnels use the in_dev instead of in_dev_nat
+		 */
 		DEBUG_TRACE("%p: Create the 'from NAT' interface heirarchy list\n", nci);
-		from_nat_list_first = ecm_interface_heirarchy_construct(from_nat_list, ip_dest_addr, ip_src_addr_nat, protocol, in_dev_nat, is_routed, in_dev_nat);
+		if (protocol == IPPROTO_IPV6) {
+			from_nat_list_first = ecm_interface_heirarchy_construct(from_nat_list, ip_dest_addr, ip_src_addr_nat, protocol, in_dev, is_routed, in_dev);
+		} else {
+			from_nat_list_first = ecm_interface_heirarchy_construct(from_nat_list, ip_dest_addr, ip_src_addr_nat, protocol, in_dev_nat, is_routed, in_dev);
+		}
+
 		if (from_nat_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_mapping_deref(dest_mi);
 			ecm_db_mapping_deref(src_mi);

@@ -824,6 +824,12 @@ static struct ecm_db_node_instance *ecm_front_end_ipv6_node_establish_and_ref(st
 			memcpy(node_addr, pppoe_info.remote_mac, ETH_ALEN);
 			done = true;
 			break;
+
+		case ECM_DB_IFACE_TYPE_SIT:
+		case ECM_DB_IFACE_TYPE_TUNIPIP6:
+			done = true;
+			break;
+
 		case ECM_DB_IFACE_TYPE_ETHERNET:
 		case ECM_DB_IFACE_TYPE_LAG:
 		case ECM_DB_IFACE_TYPE_VLAN:
