@@ -273,7 +273,7 @@ static struct ecm_db_node_instance *ecm_front_end_ipv4_node_establish_and_ref(st
 				/*
 				 * If we have a GW for this address, then we have to send ARP request to the GW
 				 */
-				if (!on_link) {
+				if (!on_link && !ECM_IP_ADDR_IS_NULL(gw_addr)) {
 					ECM_IP_ADDR_TO_NIN4_ADDR(ipv4_addr, gw_addr);
 				}
 

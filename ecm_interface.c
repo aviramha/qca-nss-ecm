@@ -1581,7 +1581,7 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfac
 					 * Figure out which port device the skb will go to using the dest_addr.
 					 */
 					bool on_link;
-					ip_addr_t gw_addr;
+					ip_addr_t gw_addr = ECM_IP_ADDR_NULL;
 					uint8_t mac_addr[ETH_ALEN];
 					if (!ecm_interface_mac_addr_get(dest_addr, mac_addr, &on_link, gw_addr)) {
 						/*
@@ -1613,7 +1613,7 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfac
 							/*
 							 * If we have a GW for this address, then we have to send ARP request to the GW
 							 */
-							if (!on_link) {
+							if (!on_link && !ECM_IP_ADDR_IS_NULL(gw_addr)) {
 								ECM_IP_ADDR_TO_NIN4_ADDR(ipv4_addr, gw_addr);
 							}
 
