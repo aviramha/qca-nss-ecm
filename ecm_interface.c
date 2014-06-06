@@ -30,6 +30,7 @@
 #include <net/ip6_fib.h>
 #include <net/ipv6.h>
 #include <net/route.h>
+#include <net/ip_fib.h>
 #include <net/ip.h>
 #include <net/tcp.h>
 #include <asm/unaligned.h>
@@ -111,10 +112,10 @@ static int ecm_interface_stopped = 0;			/* When non-zero further traffic will no
 static bool ecm_interface_terminate_pending = false;		/* True when the user has signalled we should quit */
 
 /*
- * ecm_interface_dev_find_by_addr_ipv4()
- *	Return a hold to the device for the given IP address.  Returns NULL on failure.
+ * ecm_interface_dev_find_by_local_addr_ipv4()
+ *	Return a hold to the device for the given local IP address.  Returns NULL on failure.
  */
-static struct net_device *ecm_interface_dev_find_by_addr_ipv4(ip_addr_t addr)
+static struct net_device *ecm_interface_dev_find_by_local_addr_ipv4(ip_addr_t addr)
 {
 	__be32 be_addr;
 	struct net_device *dev;
@@ -125,10 +126,10 @@ static struct net_device *ecm_interface_dev_find_by_addr_ipv4(ip_addr_t addr)
 }
 
 /*
- * ecm_interface_dev_find_by_addr_ipv6()
- *	Return a hold to the device for the given IP address.  Returns NULL on failure.
+ * ecm_interface_dev_find_by_local_addr_ipv6()
+ *	Return a hold to the device for the given local IP address.  Returns NULL on failure.
  */
-static struct net_device *ecm_interface_dev_find_by_addr_ipv6(ip_addr_t addr)
+static struct net_device *ecm_interface_dev_find_by_local_addr_ipv6(ip_addr_t addr)
 {
 	struct in6_addr addr6;
 	struct net_device *dev;
@@ -139,23 +140,71 @@ static struct net_device *ecm_interface_dev_find_by_addr_ipv6(ip_addr_t addr)
 }
 
 /*
- * ecm_interface_dev_find_by_addr()
- *	Return the address locate the device on which it resides.
+ * ecm_interface_dev_find_by_local_addr()
+ *	Return the device on which the local address resides.
  *
  * Returns a hold to the device or NULL on failure.
  */
-struct net_device *ecm_interface_dev_find_by_addr(ip_addr_t addr)
+struct net_device *ecm_interface_dev_find_by_local_addr(ip_addr_t addr)
 {
 	char __attribute__((unused)) addr_str[40];
 
-	ecm_ip_addr_to_string(addr_str, addr);
+	DEBUG_ECM_IP_ADDR_TO_STRING(addr_str, addr);
 	DEBUG_TRACE("Locate dev for: %s\n", addr_str);
 
 	if (ECM_IP_ADDR_IS_V4(addr)) {
-		return ecm_interface_dev_find_by_addr_ipv4(addr);
+		return ecm_interface_dev_find_by_local_addr_ipv4(addr);
 	}
 
-	return ecm_interface_dev_find_by_addr_ipv6(addr);
+	return ecm_interface_dev_find_by_local_addr_ipv6(addr);
+}
+EXPORT_SYMBOL(ecm_interface_dev_find_by_local_addr);
+
+/*
+ * ecm_interface_dev_find_by_addr()
+ *	Return the net device on which the given IP address resides.  Returns NULL on faiure.
+ *
+ * NOTE: The device may be the device upon which has a default gateway to reach the address.
+ * from_local_addr is true when the device was found by a local address search.
+ */
+struct net_device *ecm_interface_dev_find_by_addr(ip_addr_t addr, bool *from_local_addr)
+{
+	char __attribute__((unused)) addr_str[40];
+	struct ecm_interface_route ecm_rt;
+	struct net_device *dev;
+	struct dst_entry *dst;
+
+	DEBUG_ECM_IP_ADDR_TO_STRING(addr_str, addr);
+
+	/*
+	 * Is the address a local IP?
+	 */
+	DEBUG_TRACE("find net device for address: %s\n", addr_str);
+	dev = ecm_interface_dev_find_by_local_addr(addr);
+	if (dev) {
+		 *from_local_addr = true;
+		DEBUG_TRACE("addr: %s is local: %p (%s)\n", addr_str, dev, dev->name);
+		return dev;
+	}
+
+	DEBUG_TRACE("addr: %s is not local\n", addr_str);
+
+	/*
+	 * Try a route to the address instead
+	 * NOTE: This will locate a route entry in the route destination *cache*.
+	 */
+	if (!ecm_interface_find_route_by_addr(addr, &ecm_rt)) {
+		DEBUG_WARN("addr: %s - no dev locatable\n", addr_str);
+		return NULL;
+	}
+
+	*from_local_addr = false;
+	dst = ecm_rt.dst;
+	dev = dst->dev;
+	dev_hold(dev);
+	ecm_interface_route_release(&ecm_rt);
+	DEBUG_TRACE("dest_addr: %s uses dev: %p(%s)\n", addr_str, dev, dev->name);
+	return dev;
 }
 EXPORT_SYMBOL(ecm_interface_dev_find_by_addr);
 
@@ -427,7 +476,7 @@ bool ecm_interface_find_route_by_addr(ip_addr_t addr, struct ecm_interface_route
 {
 	char __attribute__((unused)) addr_str[40];
 
-	ecm_ip_addr_to_string(addr_str, addr);
+	DEBUG_ECM_IP_ADDR_TO_STRING(addr_str, addr);
 	DEBUG_TRACE("Locate route to: %s\n", addr_str);
 
 	if (ECM_IP_ADDR_IS_V4(addr)) {
@@ -1285,6 +1334,10 @@ EXPORT_SYMBOL(ecm_interface_establish_and_ref);
  *
  * Using the given addressing, locate the interface heirarchy used to emit packets to that destination.
  * This is the heirarchy of interfaces a packet would transit to emit from the device.
+ *
+ * We will use the given src/dest devices when is_routed is false.
+ * When is_routed is true we will try routing tables first, failing back to any given.
+ *
  * For example, with this network arrangement:
  *
  * PPPoE--VLAN--BRIDGE--BRIDGE_PORT(LAG_MASTER)--LAG_SLAVE_0--10.22.33.11
@@ -1302,20 +1355,20 @@ EXPORT_SYMBOL(ecm_interface_establish_and_ref);
  *
  * GGG TODO Make this function work for IPv6!!!!!!!!!!!!!!
  */
-int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfaces[], ip_addr_t packet_src_addr, ip_addr_t packet_dest_addr, int packet_protocol, struct net_device *in_dev)
+int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfaces[], ip_addr_t packet_src_addr, ip_addr_t packet_dest_addr, int packet_protocol,
+						struct net_device *given_dest_dev, bool is_routed, struct net_device *given_src_dev)
 {
-	char __attribute__((unused)) src_addr_str[40];
-	char __attribute__((unused)) dest_addr_str[40];
 	int protocol;
 	ip_addr_t src_addr;
 	ip_addr_t dest_addr;
-	struct net_device *src_dev;
 	struct net_device *dest_dev;
-	char *src_dev_name;
 	char *dest_dev_name;
-	int32_t src_dev_type;
 	int32_t dest_dev_type;
+	struct net_device *src_dev;
+	char *src_dev_name;
+	int32_t src_dev_type;
 	int32_t current_interface_index;
+	bool from_local_addr;
 
 	/*
 	 * Get a big endian of the IPv4 address we have been given as our starting point.
@@ -1323,115 +1376,124 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfac
 	protocol = packet_protocol;
 	ECM_IP_ADDR_COPY(src_addr, packet_src_addr);
 	ECM_IP_ADDR_COPY(dest_addr, packet_dest_addr);
-	ecm_ip_addr_to_string(src_addr_str, src_addr);
-	ecm_ip_addr_to_string(dest_addr_str, dest_addr);
-	DEBUG_TRACE("Construct interface heirarchy for from src_addr: %s to dest_addr: %s, protocol: %d\n", src_addr_str, dest_addr_str, protocol);
+	DEBUG_TRACE("Construct interface heirarchy for from src_addr: " ECM_IP_ADDR_DOT_FMT " to dest_addr: " ECM_IP_ADDR_DOT_FMT ", protocol: %d\n",
+			ECM_IP_ADDR_TO_DOT(src_addr), ECM_IP_ADDR_TO_DOT(dest_addr), protocol);
 
 	/*
-	 * Get device from the given addresses
-	 * Is the address a local IP?
+	 * Get device to reach the given destination address.
+	 * If the heirarchy is for a routed connection we must try route lookup first, falling back to any given_dest_dev.
+	 * If the heirarchy is NOT for a routed connection we try the given_dest_dev first, followed by routed lookup.
 	 */
-	src_dev = ecm_interface_dev_find_by_addr(src_addr);
-	if (!src_dev) {
-		struct ecm_interface_route ecm_rt;
-		struct dst_entry *dst;
-
-		DEBUG_TRACE("src_addr: %s is not local\n", src_addr_str);
-
-		/*
-		 * Not local.
-		 * Try a route to the address
-		 */
-		if (!ecm_interface_find_route_by_addr(src_addr, &ecm_rt)) {
-			DEBUG_WARN("src_addr: %s - no route\n", src_addr_str);
-			return ECM_DB_IFACE_HEIRARCHY_MAX;
+	from_local_addr = false;
+	if (is_routed) {
+		dest_dev = ecm_interface_dev_find_by_addr(dest_addr, &from_local_addr);
+		if (!dest_dev && given_dest_dev) {
+			/*
+			 * Fall back to any given
+			 */
+			dest_dev = given_dest_dev;
+			dev_hold(dest_dev);
 		}
-
-		/*
-		 * A route contains a dst_entry, from which we can get the net device that reaches it.
-		 */
-		dst = ecm_rt.dst;
-		src_dev = dst->dev;
-		dev_hold(src_dev);
-
-		/*
-		 * Release route (we hold devices for ourselves)
-		 */
-		ecm_interface_route_release(&ecm_rt);
-		DEBUG_TRACE("src_addr: %s uses dev: %p(%s)\n", src_addr_str, src_dev, src_dev->name);
+	} else if (given_dest_dev) {
+		dest_dev = given_dest_dev;
+		dev_hold(dest_dev);
 	} else {
 		/*
-		 * If local
-		 * Check if it is a tunnel packet
+		 * Fall back to routed look up
 		 */
-		if (protocol == IPPROTO_IPV6) {
-			dev_put(src_dev);
-			src_dev = in_dev;
-			dev_hold(src_dev);
-			DEBUG_TRACE("SIT tunnel packet with src_addr: %s uses dev: %p(%s)\n", src_addr_str, src_dev, src_dev->name);
-		}
+		dest_dev = ecm_interface_dev_find_by_addr(dest_addr, &from_local_addr);
 	}
 
-	src_dev_name = src_dev->name;
-	src_dev_type = src_dev->type;
-
-	dest_dev = ecm_interface_dev_find_by_addr(dest_addr);
-	if (!dest_dev) {
-		struct ecm_interface_route ecm_rt;
-		struct dst_entry *dst;
-
-		DEBUG_TRACE("dest_addr: %s is not local\n", dest_addr_str);
-
-		/*
-		 * Not local.
-		 * Try a route to the address
-		 */
-		if (!ecm_interface_find_route_by_addr(dest_addr, &ecm_rt)) {
-			DEBUG_WARN("dest_addr: %s - no route\n", dest_addr_str);
-			dev_put(src_dev);
-			return ECM_DB_IFACE_HEIRARCHY_MAX;
-		}
-
-		/*
-		 * A route contains a dst_entry, from which we can get the net device that reaches it.
-		 */
-		dst = ecm_rt.dst;
-		dest_dev = dst->dev;
-		dev_hold(dest_dev);
-
-		/*
-		 * Release route (we hold devices for ourselves)
-		 */
-		ecm_interface_route_release(&ecm_rt);
-		DEBUG_TRACE("dest_addr: %s uses dev: %p(%s)\n", dest_addr_str, dest_dev, dest_dev->name);
-	}  else {
-		/*
-		 * If local
-		 * Check if it a tunnel packet
-		 */
-		if (protocol == IPPROTO_IPV6) {
-			dev_put(dest_dev);
-			dest_dev = in_dev;
+	/*
+	 * GGG ALERT: If the address is a local address and protocol is an IP tunnel
+	 * then this connection is a tunnel endpoint made to this device.
+	 * In which case we circumvent all proper procedure and just hack the devices to make stuff work.
+	 * GGG TODO THIS MUST BE FIXED - WE MUST USE THE INTERFACE HIERARCHY FOR ITS INTENDED PURPOSE TO
+	 * PARSE THE DEVICES AND WORK OUT THE PROPER INTERFACES INVOLVED.
+	 * E.G. IF WE TRIED TO RUN A TUNNEL OVER A VLAN OR QINQ THIS WILL BREAK AS WE DON'T DISCOVER THAT HIERARCHY
+	 */
+	if (dest_dev && from_local_addr && (protocol == IPPROTO_IPV6)) {
+		dev_put(dest_dev);
+		dest_dev = given_dest_dev;
+		if (dest_dev) {
 			dev_hold(dest_dev);
-			DEBUG_TRACE("SIT tunnel packet with dest_addr: %s uses dev: %p(%s)\n", dest_addr_str, dest_dev, dest_dev->name);
+			DEBUG_TRACE("HACK: IPV6 tunnel packet with dest_addr: " ECM_IP_ADDR_OCTAL_FMT " uses dev: %p(%s)\n", ECM_IP_ADDR_TO_OCTAL(dest_addr), dest_dev, dest_dev->name);
 		}
 	}
-
+	if (!dest_dev) {
+		DEBUG_WARN("dest_addr: " ECM_IP_ADDR_OCTAL_FMT " - cannot locate device\n", ECM_IP_ADDR_TO_OCTAL(dest_addr));
+		return ECM_DB_IFACE_HEIRARCHY_MAX;
+	}
 	dest_dev_name = dest_dev->name;
 	dest_dev_type = dest_dev->type;
 
 	/*
-	 * Check if source and dest dev are same
-	 * For the forwarded flows which involve
-	 * tunnels this will happen when called
-	 * from input hook
+	 * Get device to reach the given source address.
+	 * If the heirarchy is for a routed connection we must try route lookup first, falling back to any given_src_dev.
+	 * If the heirarchy is NOT for a routed connection we try the given_src_dev first, followed by routed lookup.
+	 */
+	from_local_addr = false;
+	if (is_routed) {
+		src_dev = ecm_interface_dev_find_by_addr(src_addr, &from_local_addr);
+		if (!src_dev && given_src_dev) {
+			/*
+			 * Fall back to any given
+			 */
+			src_dev = given_src_dev;
+			dev_hold(src_dev);
+		}
+	} else if (given_src_dev) {
+		src_dev = given_src_dev;
+		dev_hold(src_dev);
+	} else {
+		/*
+		 * Fall back to routed look up
+		 */
+		src_dev = ecm_interface_dev_find_by_addr(src_addr, &from_local_addr);
+	}
+
+	/*
+	 * GGG ALERT: If the address is a local address and protocol is an IP tunnel
+	 * then this connection is a tunnel endpoint made to this device.
+	 * In which case we circumvent all proper procedure and just hack the devices to make stuff work.
+	 * GGG TODO THIS MUST BE FIXED - WE MUST USE THE INTERFACE HIERARCHY FOR ITS INTENDED PURPOSE TO
+	 * PARSE THE DEVICES AND WORK OUT THE PROPER INTERFACES INVOLVED.
+	 * E.G. IF WE TRIED TO RUN A TUNNEL OVER A VLAN OR QINQ THIS WILL BREAK AS WE DON'T DISCOVER THAT HIERARCHY
+	 */
+	if (src_dev && from_local_addr && (protocol == IPPROTO_IPV6)) {
+		dev_put(src_dev);
+		src_dev = given_src_dev;
+		if (src_dev) {
+			dev_hold(src_dev);
+			DEBUG_TRACE("HACK: IPV6 tunnel packet with src_addr: " ECM_IP_ADDR_OCTAL_FMT " uses dev: %p(%s)\n", ECM_IP_ADDR_TO_OCTAL(src_addr), src_dev, src_dev->name);
+		}
+	}
+	if (!src_dev) {
+		DEBUG_WARN("src_addr: " ECM_IP_ADDR_OCTAL_FMT " - cannot locate device\n", ECM_IP_ADDR_TO_OCTAL(src_addr));
+		dev_put(dest_dev);
+		return ECM_DB_IFACE_HEIRARCHY_MAX;
+	}
+	src_dev_name = src_dev->name;
+	src_dev_type = src_dev->type;
+
+	/*
+	 * Check if source and dest dev are same.
+	 * For the forwarded flows which involve tunnels this will happen when called from input hook.
 	 */
 	if (src_dev == dest_dev) {
-		DEBUG_TRACE("protocol is :%d source dev and dest dev are same\n", protocol);
-		if(protocol == IPPROTO_IPV6) {
+		DEBUG_TRACE("Protocol is :%d source dev and dest dev are same\n", protocol);
+		if (protocol == IPPROTO_IPV6) {
 			/*
-			 * This happens from input hook
+			 * This happens from the input hook
 			 * We do not want to create a connection entry for this
+			 * GGG TODO YES WE DO.
+			 * GGG TODO THIS CONCERNS ME AS THIS SHOULD BE CAUGHT MUCH
+			 * EARLIER IN THE FRONT END IF POSSIBLE TO AVOID PERFORMANCE PENALTIES.
+			 * WE HAVE DONE A TREMENDOUS AMOUT OF WORK TO GET TO THIS POINT.
+			 * WE WILL ABORT HERE AND THIS WILL BE REPEATED FOR EVERY PACKET.
+			 * IN KEEPING WITH THE ECM DESIGN IT IS BETTER TO CREATE A CONNECTION AND RECORD IN THE HIERARCHY
+			 * ENOUGH INFORMATION TO ENSURE THAT ACCELERATION IS NOT BROKEN / DOES NOT OCCUR AT ALL.
+			 * THAT WAY WE DO A HEAVYWEIGHT ESTABLISHING OF A CONNECTION ONCE AND NEVER AGAIN...
 			 */
 			dev_put(src_dev);
 			dev_put(dest_dev);
@@ -1559,6 +1621,7 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfac
 							arp_send(ARPOP_REQUEST, ETH_P_ARP, ipv4_addr, dest_dev, src_ip, NULL, NULL, NULL);
 						}
 
+						DEBUG_WARN("Unable to obtain MAC address for " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(dest_addr));
 						dev_put(src_dev);
 						dev_put(dest_dev);
 
@@ -1650,6 +1713,7 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfac
 			 */
 			if (dest_dev_type == ARPHRD_SIT) {
 				DEBUG_TRACE("Net device: %p is SIT (6-in-4) type: %d\n", dest_dev, dest_dev_type);
+				// GGG TODO Figure out the next device the tunnel is using...
 				break;
 			}
 
@@ -1658,6 +1722,7 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfac
 			 */
 			if (dest_dev_type == ARPHRD_TUNNEL6) {
 				DEBUG_TRACE("Net device: %p is TUNIPIP6 type: %d\n", dest_dev, dest_dev_type);
+				// GGG TODO Figure out the next device the tunnel is using...
 				break;
 			}
 
@@ -1757,7 +1822,6 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfac
 			 * Release src_dev now
 			 */
 			dev_put(src_dev);
-
 			return current_interface_index;
 		}
 

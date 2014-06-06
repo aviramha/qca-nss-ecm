@@ -618,7 +618,7 @@ struct ecm_classifier_default_instance *ecm_classifier_default_instance_alloc(st
 	/*
 	 * Using the connection direction identify egress and ingress host addresses
 	 */
-	if (dir == ECM_DB_DIRECTION_INGRESS) {
+	if (dir == ECM_DB_DIRECTION_INGRESS_NAT) {
 		cdii->ingress_sender = ECM_TRACKER_SENDER_TYPE_SRC;
 		cdii->egress_sender = ECM_TRACKER_SENDER_TYPE_DEST;
 	} else {

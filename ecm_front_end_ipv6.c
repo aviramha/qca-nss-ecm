@@ -233,6 +233,7 @@ void ecm_front_end_ipv6_send_neighbour_solicitation(struct net_device *dev, ip_a
 	if (!rt6i) {
 		DEBUG_TRACE("IPv6 Route lookup failure for destination IPv6 address %s\n", dst_addr_str);
 		return;
+		// GGG TODO Flatten
 	} else {
 		/*
 		 * Find the neighbor entry
@@ -258,6 +259,10 @@ void ecm_front_end_ipv6_send_neighbour_solicitation(struct net_device *dev, ip_a
  *
  * Using the given addressing, locate the interface heirarchy used to emit packets to that destination.
  * This is the heirarchy of interfaces a packet would transit to emit from the device.
+ *
+ * We will use the given src/dest devices when is_routed is false.
+ * When is_routed is true we will try routing tables first, failing back to any given.
+ *
  * For example, with this network arrangement:
  *
  * PPPoE--VLAN--BRIDGE--BRIDGE_PORT(LAG_MASTER)--LAG_SLAVE_0--10.22.33.11
@@ -275,20 +280,20 @@ void ecm_front_end_ipv6_send_neighbour_solicitation(struct net_device *dev, ip_a
  *
  * GGG TODO Remove this in favour of the ecm_interface version - understand any refactoring needs first.
  */
-int32_t ecm_front_end_ipv6_interface_heirarchy_construct(struct ecm_db_iface_instance *interfaces[], ip_addr_t packet_src_addr, ip_addr_t packet_dest_addr, int packet_protocol, struct net_device *in_dev)
+int32_t ecm_front_end_ipv6_interface_heirarchy_construct(struct ecm_db_iface_instance *interfaces[], ip_addr_t packet_src_addr, ip_addr_t packet_dest_addr, int packet_protocol,
+								struct net_device *given_dest_dev, bool is_routed, struct net_device *given_src_dev)
 {
-	char __attribute__((unused)) src_addr_str[40];
-	char __attribute__((unused)) dest_addr_str[40];
 	int protocol;
 	ip_addr_t src_addr;
 	ip_addr_t dest_addr;
-	struct net_device *src_dev;
 	struct net_device *dest_dev;
-	char *src_dev_name;
 	char *dest_dev_name;
-	int32_t src_dev_type;
 	int32_t dest_dev_type;
+	struct net_device *src_dev;
+	char *src_dev_name;
+	int32_t src_dev_type;
 	int32_t current_interface_index;
+	bool from_local_addr;
 
 	/*
 	 * Get a big endian of the IPv6 address we have been given as our starting point.
@@ -296,110 +301,109 @@ int32_t ecm_front_end_ipv6_interface_heirarchy_construct(struct ecm_db_iface_ins
 	protocol = packet_protocol;
 	ECM_IP_ADDR_COPY(src_addr, packet_src_addr);
 	ECM_IP_ADDR_COPY(dest_addr, packet_dest_addr);
-	ecm_ip_addr_to_string(src_addr_str, src_addr);
-	ecm_ip_addr_to_string(dest_addr_str, dest_addr);
-	DEBUG_TRACE("Construct interface heirarchy for from src_addr: %s to dest_addr: %s, protocol: %d\n", src_addr_str, dest_addr_str, protocol);
+	DEBUG_TRACE("Construct interface heirarchy for from src_addr: " ECM_IP_ADDR_OCTAL_FMT " to dest_addr: " ECM_IP_ADDR_OCTAL_FMT ", protocol: %d\n",
+			ECM_IP_ADDR_TO_OCTAL(src_addr), ECM_IP_ADDR_TO_OCTAL(dest_addr), protocol);
 
 	/*
-	 * Get device from the given addresses
-	 * Is the address a local IP?
+	 * Get device to reach the given destination address.
+	 * If the heirarchy is for a routed connection we must try route lookup first, falling back to any given_dest_dev.
+	 * If the heirarchy is NOT for a routed connection we try the given_dest_dev first, followed by routed lookup.
 	 */
-	src_dev = ecm_interface_dev_find_by_addr(src_addr);
-	if (!src_dev) {
-		struct ecm_interface_route src_rt;
-		struct dst_entry *src_dst;
-
-		DEBUG_TRACE("src_addr: %s is not local\n", src_addr_str);
-
-		/*
-		 * Not local.
-		 * Try a route to the address
-		 */
-		if (!ecm_interface_find_route_by_addr(src_addr, &src_rt)) {
-			DEBUG_WARN("Construct interface heirarchy failed from src_addr: %s to dest_addr: %s, protocol: %d\n", src_addr_str, dest_addr_str, protocol);
-			return ECM_DB_IFACE_HEIRARCHY_MAX;
-		}
-
-		DEBUG_ASSERT(!src_rt.v4_route, "Should not be v4");
-
-		/*
-		 * A route contains a dst_entry, from which we can get the net device that reaches it.
-		 */
-		src_dst = src_rt.dst;
-		src_dev = src_dst->dev;
-		dev_hold(src_dev);
-
-		/*
-		 * Release route (we hold devices for ourselves)
-		 */
-		ecm_interface_route_release(&src_rt);
-		DEBUG_TRACE("src_addr: %s uses dev: %p(%s)\n", src_addr_str, src_dev, src_dev->name);
-	} else {
-		/*
-		 * If Local
-		 * Check if it is a tunnel packet
-		 */
-		if (protocol == IPPROTO_IPIP) {
-			dev_put(src_dev);
-			src_dev = in_dev;
-			dev_hold(src_dev);
-			DEBUG_TRACE("IPIP tunnel packet with src_addr: %s uses dev: %p(%s)\n", src_addr_str, src_dev, src_dev->name);
-		}
-	}
-
-	src_dev_name = src_dev->name;
-	src_dev_type = src_dev->type;
-
-	dest_dev = ecm_interface_dev_find_by_addr(dest_addr);
-	if (!dest_dev) {
-		struct ecm_interface_route dest_rt;
-		struct dst_entry *dest_dst;
-
-		DEBUG_TRACE("dest_addr: %s is not local\n", dest_addr_str);
-
-		/*
-		 * Not local.
-		 * Try a route to the address
-		 */
-		if (!ecm_interface_find_route_by_addr(dest_addr, &dest_rt)) {
-			DEBUG_WARN("Construct interface heirarchy failed from src_addr: %s to dest_addr: %s, protocol: %d\n", src_addr_str, dest_addr_str, protocol);
-			return ECM_DB_IFACE_HEIRARCHY_MAX;
-		}
-		DEBUG_ASSERT(!dest_rt.v4_route, "Should not be v4");
-
-		/*
-		 * A route contains a dst_entry, from which we can get the net device that reaches it.
-		 */
-		dest_dst = dest_rt.dst;
-		dest_dev = dest_dst->dev;
-		dev_hold(dest_dev);
-
-		/*
-		 * Release route (we hold devices for ourselves)
-		 */
-		ecm_interface_route_release(&dest_rt);
-		DEBUG_TRACE("dest_addr: %s uses dev: %p(%s)\n", dest_addr_str, dest_dev, dest_dev->name);
-	} else {
-		/*
-		 * If local
-		 * Check if it a tunnel packet
-		 */
-		if (protocol == IPPROTO_IPIP) {
-			dev_put(dest_dev);
-			dest_dev = in_dev;
+	from_local_addr = false;
+	if (is_routed) {
+		dest_dev = ecm_interface_dev_find_by_addr(dest_addr, &from_local_addr);
+		if (!dest_dev && given_dest_dev) {
+			/*
+			 * Fall back to any given
+			 */
+			dest_dev = given_dest_dev;
 			dev_hold(dest_dev);
-			DEBUG_TRACE("IPIP tunnel packet with dest_addr: %s uses dev: %p(%s)\n", dest_addr_str, dest_dev, dest_dev->name);
 		}
+	} else if (given_dest_dev) {
+		dest_dev = given_dest_dev;
+		dev_hold(dest_dev);
+	} else {
+		/*
+		 * Fall back to routed look up
+		 */
+		dest_dev = ecm_interface_dev_find_by_addr(dest_addr, &from_local_addr);
 	}
 
+	/*
+	 * GGG ALERT: If the address is a local address and protocol is an IP tunnel
+	 * then this connection is a tunnel endpoint made to this device.
+	 * In which case we circumvent all proper procedure and just hack the devices to make stuff work.
+	 * GGG TODO THIS MUST BE FIXED - WE MUST USE THE INTERFACE HIERARCHY FOR ITS INTENDED PURPOSE TO
+	 * PARSE THE DEVICES AND WORK OUT THE PROPER INTERFACES INVOLVED.
+	 * E.G. IF WE TRIED TO RUN A TUNNEL OVER A VLAN OR QINQ THIS WILL BREAK AS WE DON'T DISCOVER THAT HIERARCHY
+	 */
+	if (dest_dev && from_local_addr && (protocol == IPPROTO_IPIP)) {
+		dev_put(dest_dev);
+		dest_dev = given_dest_dev;
+		if (dest_dev) {
+			dev_hold(dest_dev);
+			DEBUG_TRACE("HACK: IPIP tunnel packet with dest_addr: " ECM_IP_ADDR_OCTAL_FMT " uses dev: %p(%s)\n", ECM_IP_ADDR_TO_OCTAL(dest_addr), dest_dev, dest_dev->name);
+		}
+	}
+	if (!dest_dev) {
+		DEBUG_WARN("dest_addr: " ECM_IP_ADDR_OCTAL_FMT " - cannot locate device\n", ECM_IP_ADDR_TO_OCTAL(dest_addr));
+		return ECM_DB_IFACE_HEIRARCHY_MAX;
+	}
 	dest_dev_name = dest_dev->name;
 	dest_dev_type = dest_dev->type;
 
 	/*
-	 * Check if source and dest dev are same
-	 * For the forwarded flows which involve
-	 * tunnels this will happen when called
-	 * from input hook
+	 * Get device to reach the given source address.
+	 * If the heirarchy is for a routed connection we must try route lookup first, falling back to any given_src_dev.
+	 * If the heirarchy is NOT for a routed connection we try the given_src_dev first, followed by routed lookup.
+	 */
+	from_local_addr = false;
+	if (is_routed) {
+		src_dev = ecm_interface_dev_find_by_addr(src_addr, &from_local_addr);
+		if (!src_dev && given_src_dev) {
+			/*
+			 * Fall back to any given
+			 */
+			src_dev = given_src_dev;
+			dev_hold(src_dev);
+		}
+	} else if (given_src_dev) {
+		src_dev = given_src_dev;
+		dev_hold(src_dev);
+	} else {
+		/*
+		 * Fall back to routed look up
+		 */
+		src_dev = ecm_interface_dev_find_by_addr(src_addr, &from_local_addr);
+	}
+
+	/*
+	 * GGG ALERT: If the address is a local address and protocol is an IP tunnel
+	 * then this connection is a tunnel endpoint made to this device.
+	 * In which case we circumvent all proper procedure and just hack the devices to make stuff work.
+	 * GGG TODO THIS MUST BE FIXED - WE MUST USE THE INTERFACE HIERARCHY FOR ITS INTENDED PURPOSE TO
+	 * PARSE THE DEVICES AND WORK OUT THE PROPER INTERFACES INVOLVED.
+	 * E.G. IF WE TRIED TO RUN A TUNNEL OVER A VLAN OR QINQ THIS WILL BREAK AS WE DON'T DISCOVER THAT HIERARCHY
+	 */
+	if (src_dev && from_local_addr && (protocol == IPPROTO_IPIP)) {
+		dev_put(src_dev);
+		src_dev = given_src_dev;
+		if (src_dev) {
+			dev_hold(src_dev);
+			DEBUG_TRACE("HACK: IPIP tunnel packet with src_addr: " ECM_IP_ADDR_OCTAL_FMT " uses dev: %p(%s)\n", ECM_IP_ADDR_TO_OCTAL(src_addr), src_dev, src_dev->name);
+		}
+	}
+	if (!src_dev) {
+		DEBUG_WARN("src_addr: " ECM_IP_ADDR_OCTAL_FMT " - cannot locate device\n", ECM_IP_ADDR_TO_OCTAL(src_addr));
+		dev_put(dest_dev);
+		return ECM_DB_IFACE_HEIRARCHY_MAX;
+	}
+	src_dev_name = src_dev->name;
+	src_dev_type = src_dev->type;
+
+	/*
+	 * Check if source and dest dev are same.
+	 * For the forwarded flows which involve tunnels this will happen when called from input hook.
 	 */
 	if (src_dev == dest_dev) {
 		DEBUG_TRACE("Protocol is :%d source dev and dest dev are same\n", protocol);
@@ -407,6 +411,14 @@ int32_t ecm_front_end_ipv6_interface_heirarchy_construct(struct ecm_db_iface_ins
 			/*
 			 * This happens from the input hook
 			 * We do not want to create a connection entry for this
+			 * GGG TODO YES WE DO.
+			 * GGG TODO THIS CONCERNS ME AS THIS SHOULD BE CAUGHT MUCH
+			 * EARLIER IN THE FRONT END IF POSSIBLE TO AVOID PERFORMANCE PENALTIES.
+			 * WE HAVE DONE A TREMENDOUS AMOUT OF WORK TO GET TO THIS POINT.
+			 * WE WILL ABORT HERE AND THIS WILL BE REPEATED FOR EVERY PACKET.
+			 * IN KEEPING WITH THE ECM DESIGN IT IS BETTER TO CREATE A CONNECTION AND RECORD IN THE HIERARCHY
+			 * ENOUGH INFORMATION TO ENSURE THAT ACCELERATION IS NOT BROKEN / DOES NOT OCCUR AT ALL.
+			 * THAT WAY WE DO A HEAVYWEIGHT ESTABLISHING OF A CONNECTION ONCE AND NEVER AGAIN...
 			 */
 			dev_put(src_dev);
 			dev_put(dest_dev);
@@ -623,6 +635,7 @@ int32_t ecm_front_end_ipv6_interface_heirarchy_construct(struct ecm_db_iface_ins
 			 */
 			if (dest_dev_type == ARPHRD_SIT) {
 				DEBUG_TRACE("Net device: %p is SIT (6-in-4) type: %d\n", dest_dev, dest_dev_type);
+				// GGG TODO Figure out the next device the tunnel is using...
 				break;
 			}
 
@@ -631,6 +644,7 @@ int32_t ecm_front_end_ipv6_interface_heirarchy_construct(struct ecm_db_iface_ins
 			 */
 			if (dest_dev_type == ARPHRD_TUNNEL6) {
 				DEBUG_TRACE("Net device: %p is TUNIPIP6 type: %d\n", dest_dev, dest_dev_type);
+				// GGG TODO Figure out the next device the tunnel is using...
 				break;
 			}
 
@@ -722,7 +736,8 @@ int32_t ecm_front_end_ipv6_interface_heirarchy_construct(struct ecm_db_iface_ins
 #if DEBUG_LEVEL > 1
 			for (i = current_interface_index; i < ECM_DB_IFACE_HEIRARCHY_MAX; ++i) {
 				DEBUG_TRACE("\tInterface @ %d: %p, type: %d, name: %s\n",
-						i, interfaces[i], ecm_db_connection_iface_type_get(interfaces[i]), ecm_db_interface_type_to_string(ecm_db_connection_iface_type_get(interfaces[i])));
+						i, interfaces[i], ecm_db_connection_iface_type_get(interfaces[i]),
+						ecm_db_interface_type_to_string(ecm_db_connection_iface_type_get(interfaces[i])));
 			}
 #endif
 			/*
@@ -756,10 +771,13 @@ int32_t ecm_front_end_ipv6_interface_heirarchy_construct(struct ecm_db_iface_ins
  * ecm_front_end_ipv6_node_establish_and_ref()
  *	Returns a reference to a node, possibly creating one if necessary.
  *
+ * The given_node_addr will be used if provided.
+ *
  * Returns NULL on failure.
  */
 static struct ecm_db_node_instance *ecm_front_end_ipv6_node_establish_and_ref(struct net_device *dev, ip_addr_t addr,
-							struct ecm_db_iface_instance *interface_list[], int32_t interface_list_first)
+							struct ecm_db_iface_instance *interface_list[], int32_t interface_list_first,
+							uint8_t *given_node_addr)
 {
 	struct ecm_db_node_instance *ni;
 	struct ecm_db_node_instance *nni;
@@ -782,6 +800,11 @@ static struct ecm_db_node_instance *ecm_front_end_ipv6_node_establish_and_ref(st
 	 */
 	memset(node_addr, 0, ETH_ALEN);
 	done = false;
+	if (given_node_addr) {
+		memcpy(node_addr, given_node_addr, ETH_ALEN);
+		done = true;
+		DEBUG_TRACE("Using given node address: %pM\n", node_addr);
+	}
 	for (i = ECM_DB_IFACE_HEIRARCHY_MAX - 1; (!done) && (i >= interface_list_first); i--) {
 		ecm_db_iface_type_t type;
 
@@ -814,6 +837,11 @@ static struct ecm_db_node_instance *ecm_front_end_ipv6_node_establish_and_ref(st
 				}
 				return NULL;
 			}
+			if (is_multicast_ether_addr(node_addr)) {
+				DEBUG_TRACE("multicast node address for host " ECM_IP_ADDR_OCTAL_FMT ", node_addr: %pM\n", ECM_IP_ADDR_TO_OCTAL(addr), node_addr);
+				return NULL;
+			}
+
 			done = true;
 			break;
 		default:
@@ -825,6 +853,10 @@ static struct ecm_db_node_instance *ecm_front_end_ipv6_node_establish_and_ref(st
 			 */
 			memcpy(node_addr, (uint8_t *)addr, ETH_ALEN);
 		}
+	}
+	if (!done) {
+		DEBUG_INFO("Failed to establish node for " ECM_IP_ADDR_OCTAL_FMT "\n", ECM_IP_ADDR_TO_OCTAL(addr));
+		return NULL;
 	}
 
 	/*
@@ -887,19 +919,14 @@ static struct ecm_db_node_instance *ecm_front_end_ipv6_node_establish_and_ref(st
  * Returns NULL on failure.
  */
 static struct ecm_db_host_instance *ecm_front_end_ipv6_host_establish_and_ref(struct net_device *dev, ip_addr_t addr,
-						struct ecm_db_iface_instance *interface_list[], int32_t interface_list_first)
+						struct ecm_db_iface_instance *interface_list[], int32_t interface_list_first,
+						uint8_t *given_node_addr)
 {
 	struct ecm_db_host_instance *hi;
 	struct ecm_db_host_instance *nhi;
 	struct ecm_db_node_instance *ni;
 
 	DEBUG_INFO("Establish host for " ECM_IP_ADDR_OCTAL_FMT "\n", ECM_IP_ADDR_TO_OCTAL(addr));
-
-	ni = ecm_front_end_ipv6_node_establish_and_ref(dev, addr, interface_list, interface_list_first);
-	if (!ni) {
-		DEBUG_WARN("Failed to establish node\n");
-		return NULL;
-	}
 
 	/*
 	 * Locate the host
@@ -908,6 +935,12 @@ static struct ecm_db_host_instance *ecm_front_end_ipv6_host_establish_and_ref(st
 	if (hi) {
 		DEBUG_TRACE("%p: host established\n", hi);
 		return hi;
+	}
+
+	ni = ecm_front_end_ipv6_node_establish_and_ref(dev, addr, interface_list, interface_list_first, given_node_addr);
+	if (!ni) {
+		DEBUG_WARN("Failed to establish node\n");
+		return NULL;
 	}
 
 	/*
@@ -952,7 +985,8 @@ static struct ecm_db_host_instance *ecm_front_end_ipv6_host_establish_and_ref(st
  * Returns NULL on failure.
  */
 static struct ecm_db_mapping_instance *ecm_front_end_ipv6_mapping_establish_and_ref(struct net_device *dev, ip_addr_t addr, int port,
-						struct ecm_db_iface_instance *interface_list[], int32_t interface_list_first)
+						struct ecm_db_iface_instance *interface_list[], int32_t interface_list_first,
+						uint8_t *given_node_addr)
 {
 	struct ecm_db_mapping_instance *mi;
 	struct ecm_db_mapping_instance *nmi;
@@ -963,7 +997,7 @@ static struct ecm_db_mapping_instance *ecm_front_end_ipv6_mapping_establish_and_
 	/*
 	 * No mapping - establish host existence
 	 */
-	hi = ecm_front_end_ipv6_host_establish_and_ref(dev, addr, interface_list, interface_list_first);
+	hi = ecm_front_end_ipv6_host_establish_and_ref(dev, addr, interface_list, interface_list_first, given_node_addr);
 	if (!hi) {
 		DEBUG_WARN("Failed to establish host\n");
 		return NULL;
@@ -3573,7 +3607,11 @@ static bool ecm_front_end_ipv6_reclassify(struct ecm_db_connection_instance *ci,
  * ecm_front_end_ipv6_tcp_process()
  *	Process a TCP packet
  */
-static unsigned int ecm_front_end_ipv6_tcp_process(struct net_device *out_dev, struct net_device *in_dev, bool can_accel,  bool is_routed, struct sk_buff *skb,
+static unsigned int ecm_front_end_ipv6_tcp_process(struct net_device *out_dev,
+							struct net_device *in_dev,
+							uint8_t *src_node_addr,
+							uint8_t *dest_node_addr,
+							bool can_accel,  bool is_routed, struct sk_buff *skb,
 							struct ecm_tracker_ip_header *iph,
 							struct nf_conn *ct, enum ip_conntrack_dir ct_dir, ecm_db_direction_t ecm_dir,
 							struct nf_conntrack_tuple *orig_tuple, struct nf_conntrack_tuple *reply_tuple,
@@ -3613,14 +3651,28 @@ static unsigned int ecm_front_end_ipv6_tcp_process(struct net_device *out_dev, s
 
 	/*
 	 * Extract transport port information
-	 * Refer to the ecm_front_end_ipv6_process() for information on how we extract this information.
+	 * Refer to the ecm_front_end_ipv4_process() for information on how we extract this information.
 	 */
 	if (ct_dir == IP_CT_DIR_ORIGINAL) {
-		src_port = ntohs(orig_tuple->src.u.tcp.port);
-		dest_port = ntohs(orig_tuple->dst.u.tcp.port);
+		switch(ecm_dir) {
+		case ECM_DB_DIRECTION_NON_NAT:
+		case ECM_DB_DIRECTION_BRIDGED:
+			src_port = ntohs(orig_tuple->src.u.tcp.port);
+			dest_port = ntohs(orig_tuple->dst.u.tcp.port);
+			break;
+		default:
+			DEBUG_ASSERT(false, "Unhandled ecm_dir: %d\n", ecm_dir);
+		}
 	} else {
-		dest_port = ntohs(orig_tuple->src.u.tcp.port);
-		src_port = ntohs(orig_tuple->dst.u.tcp.port);
+		switch(ecm_dir) {
+		case ECM_DB_DIRECTION_NON_NAT:
+		case ECM_DB_DIRECTION_BRIDGED:
+			dest_port = ntohs(orig_tuple->src.u.tcp.port);
+			src_port = ntohs(orig_tuple->dst.u.tcp.port);
+			break;
+		default:
+			DEBUG_ASSERT(false, "Unhandled ecm_dir: %d\n", ecm_dir);
+		}
 	}
 
 	DEBUG_TRACE("TCP src: " ECM_IP_ADDR_OCTAL_FMT ":%d, dest: " ECM_IP_ADDR_OCTAL_FMT ":%d, dir %d\n",
@@ -3677,9 +3729,10 @@ static unsigned int ecm_front_end_ipv6_tcp_process(struct net_device *out_dev, s
 		 * Get the src and destination mappings
 		 * For this we also need the interface lists which we also set upon the new connection while we are at it.
 		 * GGG TODO rework terms of "src/dest" - these need to be named consistently as from/to as per database terms.
+		 * GGG TODO The empty list checks should not be needed, mapping_establish_and_ref() should fail out if there is no list anyway.
 		 */
 		DEBUG_TRACE("%p: Create the 'from' interface heirarchy list\n", nci);
-		from_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, IPPROTO_TCP, in_dev);
+		from_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, IPPROTO_TCP, in_dev, is_routed, in_dev);
 		if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to obtain 'from' heirarchy list\n");
@@ -3688,7 +3741,7 @@ static unsigned int ecm_front_end_ipv6_tcp_process(struct net_device *out_dev, s
 		ecm_db_connection_from_interfaces_reset(nci, from_list, from_list_first);
 
 		DEBUG_TRACE("%p: Create source mapping\n", nci);
-		src_mi = ecm_front_end_ipv6_mapping_establish_and_ref(in_dev, ip_src_addr, src_port, from_list, from_list_first);
+		src_mi = ecm_front_end_ipv6_mapping_establish_and_ref(in_dev, ip_src_addr, src_port, from_list, from_list_first, src_node_addr);
 		ecm_db_connection_interfaces_deref(from_list, from_list_first);
 		if (!src_mi) {
 			ecm_db_connection_deref(nci);
@@ -3697,7 +3750,7 @@ static unsigned int ecm_front_end_ipv6_tcp_process(struct net_device *out_dev, s
 		}
 
 		DEBUG_TRACE("%p: Create the 'to' interface heirarchy list\n", nci);
-		to_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, IPPROTO_TCP, in_dev);
+		to_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, IPPROTO_TCP, out_dev, is_routed, in_dev);
 		if (to_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_mapping_deref(src_mi);
 			ecm_db_connection_deref(nci);
@@ -3707,7 +3760,7 @@ static unsigned int ecm_front_end_ipv6_tcp_process(struct net_device *out_dev, s
 		ecm_db_connection_to_interfaces_reset(nci, to_list, to_list_first);
 
 		DEBUG_TRACE("%p: Create dest mapping\n", nci);
-		dest_mi = ecm_front_end_ipv6_mapping_establish_and_ref(out_dev, ip_dest_addr, dest_port, to_list, to_list_first);
+		dest_mi = ecm_front_end_ipv6_mapping_establish_and_ref(out_dev, ip_dest_addr, dest_port, to_list, to_list_first, dest_node_addr);
 		ecm_db_connection_interfaces_deref(to_list, to_list_first);
 		if (!dest_mi) {
 			ecm_db_mapping_deref(src_mi);
@@ -3840,9 +3893,11 @@ static unsigned int ecm_front_end_ipv6_tcp_process(struct net_device *out_dev, s
 		 * NOTE: We never have to change the usual mapping->host->node_iface arrangements for each side of the connection (to/from sides)
 		 * This is because if these interfaces change then the connection is dead anyway.
 		 * But a LAG slave might change the heirarchy the connection is using but the LAG master is still sane.
+		 * GGG TODO The empty list checks may mean that stale interface list information remains on a connection - this could be bad.
+		 * GGG Investigate the removal of the empty list checks.
 		 */
 		DEBUG_TRACE("%p: Update the 'from' interface heirarchy list\n", ci);
-		from_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, IPPROTO_TCP, in_dev);
+		from_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, IPPROTO_TCP, in_dev, is_routed, in_dev);
 		if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(ci);
 			DEBUG_WARN("Failed to obtain 'from' heirarchy list\n");
@@ -3852,7 +3907,7 @@ static unsigned int ecm_front_end_ipv6_tcp_process(struct net_device *out_dev, s
 		ecm_db_connection_interfaces_deref(from_list, from_list_first);
 
 		DEBUG_TRACE("%p: Update the 'to' interface heirarchy list\n", ci);
-		to_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, IPPROTO_TCP, in_dev);
+		to_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, IPPROTO_TCP, out_dev, is_routed, in_dev);
 		if (to_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(ci);
 			DEBUG_WARN("Failed to obtain 'to' heirarchy list\n");
@@ -4072,7 +4127,11 @@ static unsigned int ecm_front_end_ipv6_tcp_process(struct net_device *out_dev, s
  * ecm_front_end_ipv6_udp_process()
  *	Process a UDP packet
  */
-static unsigned int ecm_front_end_ipv6_udp_process(struct net_device *out_dev, struct net_device *in_dev, bool can_accel, bool is_routed, struct sk_buff *skb,
+static unsigned int ecm_front_end_ipv6_udp_process(struct net_device *out_dev,
+							struct net_device *in_dev,
+							uint8_t *src_node_addr,
+							uint8_t *dest_node_addr,
+							bool can_accel, bool is_routed, struct sk_buff *skb,
 							struct ecm_tracker_ip_header *iph,
 							struct nf_conn *ct, enum ip_conntrack_dir ct_dir, ecm_db_direction_t ecm_dir,
 							struct nf_conntrack_tuple *orig_tuple, struct nf_conntrack_tuple *reply_tuple,
@@ -4127,14 +4186,28 @@ static unsigned int ecm_front_end_ipv6_udp_process(struct net_device *out_dev, s
 
 	/*
 	 * Extract transport port information
-	 * Refer to the ecm_front_end_ipv6_process() for information on how we extract this information.
+	 * Refer to the ecm_front_end_ipv4_process() for information on how we extract this information.
 	 */
 	if (ct_dir == IP_CT_DIR_ORIGINAL) {
-		src_port = ntohs(orig_tuple->src.u.udp.port);
-		dest_port = ntohs(orig_tuple->dst.u.udp.port);
+		switch(ecm_dir) {
+		case ECM_DB_DIRECTION_NON_NAT:
+		case ECM_DB_DIRECTION_BRIDGED:
+			src_port = ntohs(orig_tuple->src.u.udp.port);
+			dest_port = ntohs(orig_tuple->dst.u.udp.port);
+			break;
+		default:
+			DEBUG_ASSERT(false, "Unhandled ecm_dir: %d\n", ecm_dir);
+		}
 	} else {
-		dest_port = ntohs(orig_tuple->src.u.udp.port);
-		src_port = ntohs(orig_tuple->dst.u.udp.port);
+		switch(ecm_dir) {
+		case ECM_DB_DIRECTION_NON_NAT:
+		case ECM_DB_DIRECTION_BRIDGED:
+			dest_port = ntohs(orig_tuple->src.u.udp.port);
+			src_port = ntohs(orig_tuple->dst.u.udp.port);
+			break;
+		default:
+			DEBUG_ASSERT(false, "Unhandled ecm_dir: %d\n", ecm_dir);
+		}
 	}
 	DEBUG_TRACE("UDP src: " ECM_IP_ADDR_OCTAL_FMT ":%d, dest: " ECM_IP_ADDR_OCTAL_FMT ":%d, dir %d\n",
 			ECM_IP_ADDR_TO_OCTAL(ip_src_addr), src_port, ECM_IP_ADDR_TO_OCTAL(ip_dest_addr), dest_port, ecm_dir);
@@ -4190,9 +4263,10 @@ static unsigned int ecm_front_end_ipv6_udp_process(struct net_device *out_dev, s
 		 * Get the src and destination mappings
 		 * For this we also need the interface lists which we also set upon the new connection while we are at it.
 		 * GGG TODO rework terms of "src/dest" - these need to be named consistently as from/to as per database terms.
+		 * GGG TODO The empty list checks should not be needed, mapping_establish_and_ref() should fail out if there is no list anyway.
 		 */
 		DEBUG_TRACE("%p: Create the 'from' interface heirarchy list\n", nci);
-		from_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, IPPROTO_UDP, in_dev);
+		from_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, IPPROTO_UDP, in_dev, is_routed, in_dev);
 		if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to obtain 'from' heirarchy list\n");
@@ -4201,7 +4275,7 @@ static unsigned int ecm_front_end_ipv6_udp_process(struct net_device *out_dev, s
 		ecm_db_connection_from_interfaces_reset(nci, from_list, from_list_first);
 
 		DEBUG_TRACE("%p: Create source mapping\n", nci);
-		src_mi = ecm_front_end_ipv6_mapping_establish_and_ref(in_dev, ip_src_addr, src_port, from_list, from_list_first);
+		src_mi = ecm_front_end_ipv6_mapping_establish_and_ref(in_dev, ip_src_addr, src_port, from_list, from_list_first, src_node_addr);
 		ecm_db_connection_interfaces_deref(from_list, from_list_first);
 		if (!src_mi) {
 			ecm_db_connection_deref(nci);
@@ -4210,7 +4284,7 @@ static unsigned int ecm_front_end_ipv6_udp_process(struct net_device *out_dev, s
 		}
 
 		DEBUG_TRACE("%p: Create the 'to' interface heirarchy list\n", nci);
-		to_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, IPPROTO_UDP, in_dev);
+		to_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, IPPROTO_UDP, out_dev, is_routed, in_dev);
 		if (to_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_mapping_deref(src_mi);
 			ecm_db_connection_deref(nci);
@@ -4220,7 +4294,7 @@ static unsigned int ecm_front_end_ipv6_udp_process(struct net_device *out_dev, s
 		ecm_db_connection_to_interfaces_reset(nci, to_list, to_list_first);
 
 		DEBUG_TRACE("%p: Create dest mapping\n", nci);
-		dest_mi = ecm_front_end_ipv6_mapping_establish_and_ref(out_dev, ip_dest_addr, dest_port, to_list, to_list_first);
+		dest_mi = ecm_front_end_ipv6_mapping_establish_and_ref(out_dev, ip_dest_addr, dest_port, to_list, to_list_first, dest_node_addr);
 		ecm_db_connection_interfaces_deref(to_list, to_list_first);
 		if (!dest_mi) {
 			ecm_db_mapping_deref(src_mi);
@@ -4353,9 +4427,11 @@ static unsigned int ecm_front_end_ipv6_udp_process(struct net_device *out_dev, s
 		 * NOTE: We never have to change the usual mapping->host->node_iface arrangements for each side of the connection (to/from sides)
 		 * This is because if these interfaces change then the connection is dead anyway.
 		 * But a LAG slave might change the heirarchy the connection is using but the LAG master is still sane.
+		 * GGG TODO The empty list checks may mean that stale interface list information remains on a connection - this could be bad.
+		 * GGG Investigate the removal of the empty list checks.
 		 */
 		DEBUG_TRACE("%p: Update the 'from' interface heirarchy list\n", ci);
-		from_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, IPPROTO_UDP, in_dev);
+		from_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, IPPROTO_UDP, in_dev, is_routed, in_dev);
 		if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(ci);
 			DEBUG_WARN("Failed to obtain 'from' heirarchy list\n");
@@ -4365,7 +4441,7 @@ static unsigned int ecm_front_end_ipv6_udp_process(struct net_device *out_dev, s
 		ecm_db_connection_interfaces_deref(from_list, from_list_first);
 
 		DEBUG_TRACE("%p: Update the 'to' interface heirarchy list\n", ci);
-		to_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, IPPROTO_UDP, in_dev);
+		to_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, IPPROTO_UDP, out_dev, is_routed, in_dev);
 		if (to_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(ci);
 			DEBUG_WARN("Failed to obtain 'to' heirarchy list\n");
@@ -4585,7 +4661,11 @@ static unsigned int ecm_front_end_ipv6_udp_process(struct net_device *out_dev, s
  * ecm_front_end_ipv6_non_ported_process()
  *	Process a protocol that does not have port based identifiers
  */
-static unsigned int ecm_front_end_ipv6_non_ported_process(struct net_device *out_dev, struct net_device *in_dev, bool can_accel, bool is_routed, struct sk_buff *skb,
+static unsigned int ecm_front_end_ipv6_non_ported_process(struct net_device *out_dev,
+							struct net_device *in_dev,
+							uint8_t *src_node_addr,
+							uint8_t *dest_node_addr,
+							bool can_accel, bool is_routed, struct sk_buff *skb,
 							struct ecm_tracker_ip_header *ip_hdr,
 							struct nf_conn *ct, enum ip_conntrack_dir ct_dir, ecm_db_direction_t ecm_dir,
 							struct nf_conntrack_tuple *orig_tuple, struct nf_conntrack_tuple *reply_tuple,
@@ -4668,9 +4748,10 @@ static unsigned int ecm_front_end_ipv6_non_ported_process(struct net_device *out
 		 * Get the src and destination mappings
 		 * For this we also need the interface lists which we also set upon the new connection while we are at it.
 		 * GGG TODO rework terms of "src/dest" - these need to be named consistently as from/to as per database terms.
+		 * GGG TODO The empty list checks should not be needed, mapping_establish_and_ref() should fail out if there is no list anyway.
 		 */
 		DEBUG_TRACE("%p: Create the 'from' interface heirarchy list\n", nci);
-		from_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, protocol, in_dev);
+		from_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, protocol, in_dev, is_routed, in_dev);
 		if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to obtain 'from' heirarchy list\n");
@@ -4679,7 +4760,7 @@ static unsigned int ecm_front_end_ipv6_non_ported_process(struct net_device *out
 		ecm_db_connection_from_interfaces_reset(nci, from_list, from_list_first);
 
 		DEBUG_TRACE("%p: Create source mapping\n", nci);
-		src_mi = ecm_front_end_ipv6_mapping_establish_and_ref(in_dev, ip_src_addr, src_port, from_list, from_list_first);
+		src_mi = ecm_front_end_ipv6_mapping_establish_and_ref(in_dev, ip_src_addr, src_port, from_list, from_list_first, src_node_addr);
 		ecm_db_connection_interfaces_deref(from_list, from_list_first);
 		if (!src_mi) {
 			ecm_db_connection_deref(nci);
@@ -4688,7 +4769,7 @@ static unsigned int ecm_front_end_ipv6_non_ported_process(struct net_device *out
 		}
 
 		DEBUG_TRACE("%p: Create the 'to' interface heirarchy list\n", nci);
-		to_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, protocol, in_dev);
+		to_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, protocol, out_dev, is_routed, in_dev);
 		if (to_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_mapping_deref(src_mi);
 			ecm_db_connection_deref(nci);
@@ -4698,7 +4779,7 @@ static unsigned int ecm_front_end_ipv6_non_ported_process(struct net_device *out
 		ecm_db_connection_to_interfaces_reset(nci, to_list, to_list_first);
 
 		DEBUG_TRACE("%p: Create dest mapping\n", nci);
-		dest_mi = ecm_front_end_ipv6_mapping_establish_and_ref(out_dev, ip_dest_addr, dest_port, to_list, to_list_first);
+		dest_mi = ecm_front_end_ipv6_mapping_establish_and_ref(out_dev, ip_dest_addr, dest_port, to_list, to_list_first, dest_node_addr);
 		ecm_db_connection_interfaces_deref(to_list, to_list_first);
 		if (!dest_mi) {
 			ecm_db_mapping_deref(src_mi);
@@ -4831,9 +4912,11 @@ static unsigned int ecm_front_end_ipv6_non_ported_process(struct net_device *out
 		 * NOTE: We never have to change the usual mapping->host->node_iface arrangements for each side of the connection (to/from sides)
 		 * This is because if these interfaces change then the connection is dead anyway.
 		 * But a LAG slave might change the heirarchy the connection is using but the LAG master is still sane.
+		 * GGG TODO The empty list checks may mean that stale interface list information remains on a connection - this could be bad.
+		 * GGG Investigate the removal of the empty list checks.
 		 */
 		DEBUG_TRACE("%p: Update the 'from' interface heirarchy list\n", ci);
-		from_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, protocol, in_dev);
+		from_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, protocol, in_dev, is_routed, in_dev);
 		if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(ci);
 			DEBUG_WARN("Failed to obtain 'from' heirarchy list\n");
@@ -4843,7 +4926,7 @@ static unsigned int ecm_front_end_ipv6_non_ported_process(struct net_device *out
 		ecm_db_connection_interfaces_deref(from_list, from_list_first);
 
 		DEBUG_TRACE("%p: Update the 'to' interface heirarchy list\n", ci);
-		to_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, protocol, in_dev);
+		to_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, protocol, out_dev, is_routed, in_dev);
 		if (to_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(ci);
 			DEBUG_WARN("Failed to obtain 'to' heirarchy list\n");
@@ -5045,7 +5128,9 @@ static unsigned int ecm_front_end_ipv6_non_ported_process(struct net_device *out
  * ecm_front_end_ipv6_ip_process()
  *	Process IP datagram skb
  */
-static unsigned int ecm_front_end_ipv6_ip_process(struct net_device *out_dev, struct net_device *in_dev, bool can_accel, bool is_routed, struct sk_buff *skb)
+static unsigned int ecm_front_end_ipv6_ip_process(struct net_device *out_dev, struct net_device *in_dev,
+							uint8_t *src_node_addr, uint8_t *dest_node_addr,
+							bool can_accel, bool is_routed, struct sk_buff *skb)
 {
 	struct ecm_tracker_ip_header ip_hdr;
         struct nf_conn *ct;
@@ -5053,7 +5138,7 @@ static unsigned int ecm_front_end_ipv6_ip_process(struct net_device *out_dev, st
 	struct nf_conntrack_tuple orig_tuple;
 	struct nf_conntrack_tuple reply_tuple;
 	enum ip_conntrack_dir ct_dir;
-	ecm_db_direction_t ecm_dir = ECM_DB_DIRECTION_EGRESS;
+	ecm_db_direction_t ecm_dir = ECM_DB_DIRECTION_EGRESS_NAT;
 	ip_addr_t ip_src_addr;
 	ip_addr_t ip_dest_addr;
 
@@ -5122,12 +5207,45 @@ static unsigned int ecm_front_end_ipv6_ip_process(struct net_device *out_dev, st
 		}
 	}
 
-	if (ct_dir == IP_CT_DIR_ORIGINAL) {
-		ECM_NIN6_ADDR_TO_IP_ADDR(ip_src_addr, orig_tuple.src.u3.in6);
-		ECM_NIN6_ADDR_TO_IP_ADDR(ip_dest_addr, orig_tuple.dst.u3.in6);
+	/*
+	 * Work out if this packet involves routing or not.
+	 */
+	if (is_routed) {
+		/*
+		 * Non-NAT only supported for IPv6
+		 */
+		ecm_dir = ECM_DB_DIRECTION_NON_NAT;
 	} else {
-		ECM_NIN6_ADDR_TO_IP_ADDR(ip_dest_addr, orig_tuple.src.u3.in6);
-		ECM_NIN6_ADDR_TO_IP_ADDR(ip_src_addr, orig_tuple.dst.u3.in6);
+		/*
+		 * Bridged
+		 */
+		ecm_dir = ECM_DB_DIRECTION_BRIDGED;
+	}
+
+	if (ct_dir == IP_CT_DIR_ORIGINAL) {
+		if (ecm_dir == ECM_DB_DIRECTION_NON_NAT) {
+			ECM_NIN6_ADDR_TO_IP_ADDR(ip_src_addr, orig_tuple.src.u3.in6);
+			ECM_NIN6_ADDR_TO_IP_ADDR(ip_dest_addr, orig_tuple.dst.u3.in6);
+
+			src_node_addr = NULL;
+		} else if (ecm_dir == ECM_DB_DIRECTION_BRIDGED) {
+			ECM_NIN6_ADDR_TO_IP_ADDR(ip_src_addr, orig_tuple.src.u3.in6);
+			ECM_NIN6_ADDR_TO_IP_ADDR(ip_dest_addr, orig_tuple.dst.u3.in6);
+		} else {
+			DEBUG_ASSERT(false, "Unhandled ecm_dir: %d\n", ecm_dir);
+		}
+	} else {
+		if (ecm_dir == ECM_DB_DIRECTION_NON_NAT) {
+			ECM_NIN6_ADDR_TO_IP_ADDR(ip_dest_addr, orig_tuple.src.u3.in6);
+			ECM_NIN6_ADDR_TO_IP_ADDR(ip_src_addr, orig_tuple.dst.u3.in6);
+
+			src_node_addr = NULL;
+		} else if (ecm_dir == ECM_DB_DIRECTION_BRIDGED) {
+			ECM_NIN6_ADDR_TO_IP_ADDR(ip_dest_addr, orig_tuple.src.u3.in6);
+			ECM_NIN6_ADDR_TO_IP_ADDR(ip_src_addr, orig_tuple.dst.u3.in6);
+		} else {
+			DEBUG_ASSERT(false, "Unhandled ecm_dir: %d\n", ecm_dir);
+		}
 	}
 
 	DEBUG_TRACE("IP Packet src: " ECM_IP_ADDR_OCTAL_FMT "dst: " ECM_IP_ADDR_OCTAL_FMT " protocol: %u, ct_dir: %d ecm_dir: %d\n",
@@ -5153,19 +5271,28 @@ static unsigned int ecm_front_end_ipv6_ip_process(struct net_device *out_dev, st
 	 * TCP and UDP are the most likliest protocols.
 	 */
 	if (likely(orig_tuple.dst.protonum == IPPROTO_TCP)) {
-		return ecm_front_end_ipv6_tcp_process(out_dev, in_dev, can_accel, is_routed, skb,
+		return ecm_front_end_ipv6_tcp_process(out_dev, in_dev,
+				src_node_addr,
+				dest_node_addr,
+				can_accel, is_routed, skb,
 				&ip_hdr,
 				ct, ct_dir, ecm_dir,
 				&orig_tuple, &reply_tuple,
 				ip_src_addr, ip_dest_addr);
 	} else if (likely(orig_tuple.dst.protonum == IPPROTO_UDP)) {
-		return ecm_front_end_ipv6_udp_process(out_dev, in_dev, can_accel, is_routed, skb,
+		return ecm_front_end_ipv6_udp_process(out_dev, in_dev,
+				src_node_addr,
+				dest_node_addr,
+				can_accel, is_routed, skb,
 				&ip_hdr,
 				ct, ct_dir, ecm_dir,
 				&orig_tuple, &reply_tuple,
 				ip_src_addr, ip_dest_addr);
 	}
-	return ecm_front_end_ipv6_non_ported_process(out_dev, in_dev, can_accel, is_routed, skb,
+	return ecm_front_end_ipv6_non_ported_process(out_dev, in_dev,
+				src_node_addr,
+				dest_node_addr,
+				can_accel, is_routed, skb,
 				&ip_hdr,
 				ct, ct_dir, ecm_dir,
 				&orig_tuple, &reply_tuple,
@@ -5217,7 +5344,7 @@ static unsigned int ecm_front_end_ipv6_post_routing_hook(unsigned int hooknum,
 	}
 
 	DEBUG_TRACE("Post routing process skb %p, out: %p, in: %p\n", skb, out, in);
-	result = ecm_front_end_ipv6_ip_process((struct net_device *)out, in, can_accel, true, skb);
+	result = ecm_front_end_ipv6_ip_process((struct net_device *)out, in, NULL, NULL, can_accel, true, skb);
 	dev_put(in);
 	return result;
 }
@@ -5250,7 +5377,7 @@ static unsigned int ecm_front_end_ipv6_input_hook(unsigned int hooknum,
 	 * The output interface will be the same on which the packet arrived.
 	 */
 	DEBUG_TRACE("%p: Name: %s, Input skb %p\n", in, in->name, skb);
-	return ecm_front_end_ipv6_ip_process((struct net_device *)in, (struct net_device *)in, false, false, skb);
+	return ecm_front_end_ipv6_ip_process((struct net_device *)in, (struct net_device *)in, NULL, NULL, false, false, skb);
 }
 
 /*
@@ -5335,7 +5462,8 @@ static unsigned int ecm_front_end_ipv6_bridge_post_routing_hook(unsigned int hoo
 	}
 
 	DEBUG_TRACE("%p: Name: %s Bridge process skb %p, in: %p\n", out, out->name, skb, in);
-	result = ecm_front_end_ipv6_ip_process((struct net_device *)out, in, can_accel, false, skb);
+	result = ecm_front_end_ipv6_ip_process((struct net_device *)out, in,
+							skb_eth_hdr->h_source, skb_eth_hdr->h_dest, can_accel, false, skb);
 	dev_put(in);
 	return result;
 }

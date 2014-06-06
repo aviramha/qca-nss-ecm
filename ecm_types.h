@@ -295,14 +295,14 @@ static inline bool ecm_string_to_ip_addr(ip_addr_t addr, char *ip_str)
 #define DEBUG_CHECK_MAGIC(i, m, s, ...)
 #define DEBUG_SET_MAGIC(i, m)
 #define DEBUG_CLEAR_MAGIC(i)
-
+#define DEBUG_ECM_IP_ADDR_TO_STRING(addr_str, addr)
 #else
 #define DEBUG_ASSERT(c, s, ...) if (!(c)) { pr_emerg("ASSERT: %s:%d:" s, __FUNCTION__, __LINE__, ##__VA_ARGS__); BUG(); }
 #define DEBUG_ERROR(s, ...) pr_err("%s:%d:" s, __FUNCTION__, __LINE__, ##__VA_ARGS__)
 #define DEBUG_CHECK_MAGIC(i, m, s, ...) if (i->magic != m) { DEBUG_ASSERT(false, s, ##__VA_ARGS__); }
 #define DEBUG_SET_MAGIC(i, m) i->magic = m
 #define DEBUG_CLEAR_MAGIC(i) i->magic = 0
-
+#define DEBUG_ECM_IP_ADDR_TO_STRING(addr_str, addr) ecm_ip_addr_to_string(addr_str, addr);
 #endif
 
 #if defined(CONFIG_DYNAMIC_DEBUG)

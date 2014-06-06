@@ -162,8 +162,10 @@ struct ecm_db_timer_group_entry {
 struct ecm_db_connection_instance;
 
 enum ecm_db_directions {
-	ECM_DB_DIRECTION_INGRESS = 0,				/* Connection is from the WAN */
-	ECM_DB_DIRECTION_EGRESS = 1,				/* Connection is to the WAN */
+	ECM_DB_DIRECTION_EGRESS_NAT,			/* LAN->WAN NAT */
+	ECM_DB_DIRECTION_INGRESS_NAT,			/* WAN->LAN NAT */
+	ECM_DB_DIRECTION_NON_NAT,			/* NET<>NET */
+	ECM_DB_DIRECTION_BRIDGED,			/* BRIDGED */
 };
 typedef enum ecm_db_directions ecm_db_direction_t;
 
