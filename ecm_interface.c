@@ -1551,8 +1551,8 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfac
 							/*
 							 * If we have a GW for this address, then we have to send ARP request to the GW
 							 */
-							if (!ECM_IP_ADDR_IS_NULL(gw_addr)) {
-								ECM_IP_ADDR_COPY(dest_addr, gw_addr);
+							if (!on_link) {
+								ECM_IP_ADDR_TO_NIN4_ADDR(ipv4_addr, gw_addr);
 							}
 
 							DEBUG_TRACE("Send ARP for %pI4 using src_ip as %pI4\n", &ipv4_addr, &src_ip);
