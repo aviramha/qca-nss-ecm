@@ -1803,6 +1803,7 @@ bool ecm_db_timer_group_entry_touch(struct ecm_db_timer_group_entry *tge)
 	/*
 	 * Link in to head.
 	 */
+	tge->timeout = timer_group->time + ecm_db_time;
 	tge->prev = NULL;
 	tge->next = timer_group->head;
 	timer_group->head->prev = tge;
