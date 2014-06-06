@@ -56,10 +56,21 @@ typedef uint32_t ip_addr_t[4];
 #define ECM_IP_ADDR_NULL {0, 0, 0, 0}
 
 /*
+ * Type checking functions for various forms of IP address
+ * Placing these in a macro, enables the compiler to check
+ * that the caller is doing the right thing.
+ */
+static inline void ecm_nss_type_check_ecm_ip_addr(ip_addr_t ipaddr){}
+static inline void ecm_nss_type_check_linux_ipv4(__be32 ipaddr){}
+static inline void ecm_nss_type_check_linux_ipv6(struct in6_addr in6){}
+static inline void ecm_nss_type_check_nss_ipv6(uint32_t ip6[4]){}
+static inline void ecm_nss_type_check_nss_ipv4(uint32_t addr){}
+
+/*
  * This macro copies ip_addr_t's
  * It's usually quicker than a memcpy().
  */
-#define ECM_IP_ADDR_COPY(d, s) \
+#define __ECM_IP_ADDR_COPY_NO_CHECK(d, s) \
 	{ \
 		d[0] = s[0]; \
 		d[1] = s[1]; \
@@ -67,11 +78,41 @@ typedef uint32_t ip_addr_t[4];
 		d[3] = s[3]; \
 	}
 
+#define ECM_IP_ADDR_COPY(d,s) \
+	{ \
+		ecm_nss_type_check_ecm_ip_addr(d); \
+		ecm_nss_type_check_ecm_ip_addr(s); \
+		__ECM_IP_ADDR_COPY_NO_CHECK(d,s); \
+	}
+
+#define ECM_LINUX6_TO_IP_ADDR(d,s) \
+	{ \
+		ecm_nss_type_check_ecm_ip_addr(d); \
+		ecm_nss_type_check_nss_ipv6(&s); \
+		__ECM_IP_ADDR_COPY_NO_CHECK(d,s); \
+	}
+
+#define ECM_IP_ADDR_TO_LINUX6(d,s) \
+	{ \
+		ecm_nss_type_check_nss_ipv6(&d); \
+		ecm_nss_type_check_ecm_ip_addr(s); \
+		__ECM_IP_ADDR_COPY_NO_CHECK(d,s); \
+	}
+
+#define ECM_LINUX6_TO_IP_ADDR(d,s) \
+	{ \
+		ecm_nss_type_check_ecm_ip_addr(d); \
+		ecm_nss_type_check_nss_ipv6(&s); \
+		__ECM_IP_ADDR_COPY_NO_CHECK(d,s); \
+	}
+
 /*
  * This macro converts from Linux IPv6 address (network order) to ECM ip_addr_t
  */
 #define ECM_NIN6_ADDR_TO_IP_ADDR(ipaddrt, nin6) \
 	{ \
+		ecm_nss_type_check_ecm_ip_addr(ipaddrt); \
+		ecm_nss_type_check_linux_ipv6(nin6); \
 		ipaddrt[0] = ntohl(nin6.in6_u.u6_addr32[3]); \
 		ipaddrt[1] = ntohl(nin6.in6_u.u6_addr32[2]); \
 		ipaddrt[2] = ntohl(nin6.in6_u.u6_addr32[1]); \
@@ -83,6 +124,8 @@ typedef uint32_t ip_addr_t[4];
  */
 #define ECM_IP_ADDR_TO_NIN6_ADDR(nin6, ipaddrt) \
 	{ \
+		ecm_nss_type_check_linux_ipv6(nin6); \
+		ecm_nss_type_check_ecm_ip_addr(ipaddrt); \
 		nin6.in6_u.u6_addr32[3] = htonl(ipaddrt[0]); \
 		nin6.in6_u.u6_addr32[2] = htonl(ipaddrt[1]); \
 		nin6.in6_u.u6_addr32[1] = htonl(ipaddrt[2]); \
@@ -94,6 +137,8 @@ typedef uint32_t ip_addr_t[4];
  */
 #define ECM_NIN4_ADDR_TO_IP_ADDR(ipaddrt, nin4) \
 	{ \
+		ecm_nss_type_check_ecm_ip_addr(ipaddrt); \
+		ecm_nss_type_check_linux_ipv4(nin4); \
 		ipaddrt[0] = ntohl(nin4); \
 		ipaddrt[1] = 0x0000ffff; \
 		ipaddrt[2] = 0x00000000; \
@@ -105,6 +150,8 @@ typedef uint32_t ip_addr_t[4];
  */
 #define ECM_IP_ADDR_TO_NIN4_ADDR(nin4, ipaddrt) \
 	{ \
+		ecm_nss_type_check_linux_ipv4(nin4); \
+		ecm_nss_type_check_ecm_ip_addr(ipaddrt); \
 		DEBUG_ASSERT(!ipaddrt[3] && !ipaddrt[2] && (ipaddrt[1] == 0x0000ffff), "Not IPv4 address: " ECM_IP_ADDR_OCTAL_FMT "\n", ECM_IP_ADDR_TO_OCTAL(ipaddrt)); \
 		nin4 = htonl(ipaddrt[0]); \
 	}
@@ -114,10 +161,12 @@ typedef uint32_t ip_addr_t[4];
  */
 #define ECM_HIN6_ADDR_TO_IP_ADDR(ipaddrt, hin6) \
 	{ \
-		ipaddrt[0] = hin6.in6_u.u6_addr32[0]; \
-		ipaddrt[1] = hin6.in6_u.u6_addr32[1]; \
-		ipaddrt[2] = hin6.in6_u.u6_addr32[2]; \
-		ipaddrt[3] = hin6.in6_u.u6_addr32[3]; \
+		ecm_nss_type_check_ecm_ip_addr(ipaddrt); \
+		ecm_nss_type_check_linux_ipv6(hin6); \
+		ipaddrt[0] = in6.in6_u.u6_addr32[0]; \
+		ipaddrt[1] = in6.in6_u.u6_addr32[1]; \
+		ipaddrt[2] = in6.in6_u.u6_addr32[2]; \
+		ipaddrt[3] = in6.in6_u.u6_addr32[3]; \
 	}
 
 /*
@@ -125,10 +174,12 @@ typedef uint32_t ip_addr_t[4];
  */
 #define ECM_IP_ADDR_TO_HIN6_ADDR(hin6, ipaddrt) \
 	{ \
-		hin6.in6_u.u6_addr32[3] = ipaddrt[3]; \
-		hin6.in6_u.u6_addr32[2] = ipaddrt[2]; \
-		hin6.in6_u.u6_addr32[1] = ipaddrt[1]; \
-		hin6.in6_u.u6_addr32[0] = ipaddrt[0]; \
+		ecm_nss_type_check_linux_ipv6(hin6); \
+		ecm_nss_type_check_ecm_ip_addr(ipaddrt); \
+		in6.in6_u.u6_addr32[3] = ipaddrt[3]; \
+		in6.in6_u.u6_addr32[2] = ipaddrt[2]; \
+		in6.in6_u.u6_addr32[1] = ipaddrt[1]; \
+		in6.in6_u.u6_addr32[0] = ipaddrt[0]; \
 	}
 
 /*
@@ -136,6 +187,8 @@ typedef uint32_t ip_addr_t[4];
  */
 #define ECM_HIN4_ADDR_TO_IP_ADDR(ipaddrt, hin4) \
 	{ \
+		ecm_nss_type_check_linux_ipv4(hin4); \
+		ecm_nss_type_check_ecm_ip_addr(ipaddrt); \
 		ipaddrt[0] = hin4; \
 		ipaddrt[1] = 0x0000ffff; \
 		ipaddrt[2] = 0x00000000; \
@@ -147,6 +200,8 @@ typedef uint32_t ip_addr_t[4];
  */
 #define ECM_IP_ADDR_TO_HIN4_ADDR(hin4, ipaddrt) \
 	{ \
+		ecm_nss_type_check_linux_ipv4(hin4); \
+		ecm_nss_type_check_ecm_ip_addr(ipaddrt); \
 		DEBUG_ASSERT(!ipaddrt[3] && !ipaddrt[2] && (ipaddrt[1] == 0x0000ffff), "Not IPv4 address: " ECM_IP_ADDR_OCTAL_FMT "\n", ECM_IP_ADDR_TO_OCTAL(ipaddrt)); \
 		hin4 = ipaddrt[0]; \
 	}
@@ -156,6 +211,8 @@ typedef uint32_t ip_addr_t[4];
  */
 #define ECM_IP_ADDR_TO_NSS_IPV6_ADDR(nss6, ipaddrt) \
 	{ \
+		ecm_nss_type_check_nss_ipv6(nss6); \
+		ecm_nss_type_check_ecm_ip_addr(ipaddrt); \
 		nss6[0] = ipaddrt[3]; \
 		nss6[1] = ipaddrt[2]; \
 		nss6[2] = ipaddrt[1]; \
@@ -167,6 +224,8 @@ typedef uint32_t ip_addr_t[4];
  */
 #define ECM_NSS_IPV6_ADDR_TO_IP_ADDR(ipaddrt, nss6) \
 	{ \
+		ecm_nss_type_check_ecm_ip_addr(ipaddrt); \
+		ecm_nss_type_check_nss_ipv6(nss6); \
 		ipaddrt[0] = nss6[3]; \
 		ipaddrt[1] = nss6[2]; \
 		ipaddrt[2] = nss6[1]; \
