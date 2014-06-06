@@ -3369,7 +3369,7 @@ struct ecm_db_iface_instance *ecm_db_iface_find_and_ref_vlan(uint8_t *address, u
 	ecm_db_iface_hash_t hash_index;
 	struct ecm_db_iface_instance *ii;
 
-	DEBUG_TRACE("Lookup vlan iface with addr %pM, vlan tag: %x vlan tpid\n", address, vlan_tag, vlan_tpid);
+	DEBUG_TRACE("Lookup vlan iface with addr %pM, vlan tag: %x vlan tpid: %x\n", address, vlan_tag, vlan_tpid);
 
 	/*
 	 * Compute the hash chain index and prepare to walk the chain
