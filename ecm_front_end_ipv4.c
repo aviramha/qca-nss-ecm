@@ -4698,6 +4698,10 @@ static unsigned int ecm_front_end_ipv4_non_ported_process(struct net_device *out
 			return NF_ACCEPT;
 		}
 
+		if (protocol == IPPROTO_ESP) {
+			can_accel = true;
+		}
+
 		/*
 		 * Connection must have a front end instance associated with it
 		 */
