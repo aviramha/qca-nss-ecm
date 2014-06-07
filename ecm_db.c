@@ -676,6 +676,8 @@ static char *ecm_db_interface_type_names[ECM_DB_IFACE_TYPE_COUNT] = {
 	"LOOPBACK",
 	"IPSEC_TUNNEL",
 	"UNKNOWN",
+	"SIT",
+	"TUNIPIP6",
 };
 
 /*
