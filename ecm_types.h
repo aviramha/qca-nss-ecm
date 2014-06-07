@@ -114,10 +114,10 @@ typedef uint32_t ip_addr_t[4];
  */
 #define ECM_HIN6_ADDR_TO_IP_ADDR(ipaddrt, hin6) \
 	{ \
-		ipaddrt[0] = in6.in6_u.u6_addr32[0]; \
-		ipaddrt[1] = in6.in6_u.u6_addr32[1]; \
-		ipaddrt[2] = in6.in6_u.u6_addr32[2]; \
-		ipaddrt[3] = in6.in6_u.u6_addr32[3]; \
+		ipaddrt[0] = hin6.in6_u.u6_addr32[0]; \
+		ipaddrt[1] = hin6.in6_u.u6_addr32[1]; \
+		ipaddrt[2] = hin6.in6_u.u6_addr32[2]; \
+		ipaddrt[3] = hin6.in6_u.u6_addr32[3]; \
 	}
 
 /*
@@ -125,10 +125,10 @@ typedef uint32_t ip_addr_t[4];
  */
 #define ECM_IP_ADDR_TO_HIN6_ADDR(hin6, ipaddrt) \
 	{ \
-		in6.in6_u.u6_addr32[3] = ipaddrt[3]; \
-		in6.in6_u.u6_addr32[2] = ipaddrt[2]; \
-		in6.in6_u.u6_addr32[1] = ipaddrt[1]; \
-		in6.in6_u.u6_addr32[0] = ipaddrt[0]; \
+		hin6.in6_u.u6_addr32[3] = ipaddrt[3]; \
+		hin6.in6_u.u6_addr32[2] = ipaddrt[2]; \
+		hin6.in6_u.u6_addr32[1] = ipaddrt[1]; \
+		hin6.in6_u.u6_addr32[0] = ipaddrt[0]; \
 	}
 
 /*
