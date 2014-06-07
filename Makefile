@@ -55,12 +55,5 @@ ccflags-y += -DECM_BOND_NOTIFIER_DEBUG_LEVEL=1
 ccflags-y += -DECM_INTERFACE_DEBUG_LEVEL=1
 ccflags-$(ECM_CLASSIFIER_HYFI_ENABLE) += -DECM_CLASSIFIER_HYFI_ENABLE
 
-#
-# Include paths added for bridge and NSS header files
-#
-ccflags-y += -I$(TOPDIR)/qca/src/linux/net/bridge
-ccflags-y += -I$(TOPDIR)/qca/src/qca-nss-drv
-ccflags-y += -I$(TOPDIR)/qca/src/qca-hyfi-bridge/hyfi-netfilter
-
 obj ?= .
 
