@@ -18,7 +18,7 @@
 
 obj-m += ecm.o
 
-ecm-y := ecm_classifier_hyfi.o \
+ecm-y := \
 	 ecm_classifier_nl.o \
 	 ecm_tracker_udp.o \
 	 ecm_tracker_tcp.o \
@@ -33,6 +33,13 @@ ecm-y := ecm_classifier_hyfi.o \
 	 ecm_bond_notifier.o \
 	 ecm_init.o
 
+#
+# Define ECM_CLASSIFIER_HYFI_ENABLE=y in order to enable
+# the Hy-Fi classifier in ECM. Currently disabled until
+# the integration with Hy-Fi is completed.
+#
+ecm-$(ECM_CLASSIFIER_HYFI_ENABLE) += ecm_classifier_hyfi.o
+
 ccflags-y += -DECM_CLASSIFIER_HYFI_DEBUG_LEVEL=1
 ccflags-y += -DECM_CLASSIFIER_NL_DEBUG_LEVEL=1
 ccflags-y += -DECM_CLASSIFIER_DEFAULT_DEBUG_LEVEL=1
@@ -46,6 +53,7 @@ ccflags-y += -DECM_TRACKER_TCP_DEBUG_LEVEL=1
 ccflags-y += -DECM_TRACKER_UDP_DEBUG_LEVEL=1
 ccflags-y += -DECM_BOND_NOTIFIER_DEBUG_LEVEL=1
 ccflags-y += -DECM_INTERFACE_DEBUG_LEVEL=1
+ccflags-$(ECM_CLASSIFIER_HYFI_ENABLE) += -DECM_CLASSIFIER_HYFI_ENABLE
 
 #
 # Include paths added for bridge and NSS header files
