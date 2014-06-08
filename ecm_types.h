@@ -309,9 +309,9 @@ static inline bool ecm_string_to_ip_addr(ip_addr_t addr, char *ip_str)
 /*
  * Compile messages for dynamic enable/disable
  */
-#define DEBUG_WARN(s, ...) pr_debug("%s:%d:" s, __FUNCTION__, __LINE__, ##__VA_ARGS__)
-#define DEBUG_INFO(s, ...) pr_debug("%s:%d:" s, __FUNCTION__, __LINE__, ##__VA_ARGS__)
-#define DEBUG_TRACE(s, ...) pr_debug("%s:%d:" s, __FUNCTION__, __LINE__, ##__VA_ARGS__)
+#define DEBUG_WARN(s, ...) pr_debug("%s[%d]:" s, __FUNCTION__, __LINE__, ##__VA_ARGS__)
+#define DEBUG_INFO(s, ...) pr_debug("%s[%d]:" s, __FUNCTION__, __LINE__, ##__VA_ARGS__)
+#define DEBUG_TRACE(s, ...) pr_debug("%s[%d]:" s, __FUNCTION__, __LINE__, ##__VA_ARGS__)
 #else
 
 /*
@@ -320,18 +320,18 @@ static inline bool ecm_string_to_ip_addr(ip_addr_t addr, char *ip_str)
 #if (DEBUG_LEVEL < 2)
 #define DEBUG_WARN(s, ...)
 #else
-#define DEBUG_WARN(s, ...) pr_warn("%s:%d:" s, __FUNCTION__, __LINE__, ##__VA_ARGS__)
+#define DEBUG_WARN(s, ...) pr_warn("%s[%d]:" s, __FUNCTION__, __LINE__, ##__VA_ARGS__)
 #endif
 
 #if (DEBUG_LEVEL < 3)
 #define DEBUG_INFO(s, ...)
 #else
-#define DEBUG_INFO(s, ...) pr_notice("%s:%d:" s, __FUNCTION__, __LINE__, ##__VA_ARGS__)
+#define DEBUG_INFO(s, ...) pr_notice("%s[%d]:" s, __FUNCTION__, __LINE__, ##__VA_ARGS__)
 #endif
 
 #if (DEBUG_LEVEL < 4)
 #define DEBUG_TRACE(s, ...)
 #else
-#define DEBUG_TRACE(s, ...) pr_info("%s:%d:" s, __FUNCTION__, __LINE__, ##__VA_ARGS__)
+#define DEBUG_TRACE(s, ...) pr_info("%s[%d]:" s, __FUNCTION__, __LINE__, ##__VA_ARGS__)
 #endif
 #endif
