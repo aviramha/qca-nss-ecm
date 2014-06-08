@@ -5364,37 +5364,6 @@ static unsigned int ecm_front_end_ipv6_post_routing_hook(unsigned int hooknum,
 }
 
 /*
- * ecm_front_end_ipv6_input_hook()
- *	Called for IP packets that are being sent to local stack services
- */
-static unsigned int ecm_front_end_ipv6_input_hook(unsigned int hooknum,
-                                 struct sk_buff *skb,
-                                 const struct net_device *in,
-                                 const struct net_device *out,
-                                 int (*okfn)(struct sk_buff *))
-{
-	DEBUG_TRACE("%p: Input: %s\n", in, in->name);
-
-	/*
-	 * If operations have stopped then do not process packets
-	 */
-	spin_lock_bh(&ecm_front_end_ipv6_lock);
-	if (unlikely(ecm_front_end_ipv6_stopped)) {
-		spin_unlock_bh(&ecm_front_end_ipv6_lock);
-		DEBUG_TRACE("Front end stopped\n");
-		return NF_ACCEPT;
-	}
-	spin_unlock_bh(&ecm_front_end_ipv6_lock);
-
-	/*
-	 * Input packets cannot be accelerated.
-	 * The output interface will be the same on which the packet arrived.
-	 */
-	DEBUG_TRACE("%p: Name: %s, Input skb %p\n", in, in->name, skb);
-	return ecm_front_end_ipv6_ip_process((struct net_device *)in, (struct net_device *)in, NULL, NULL, false, false, skb);
-}
-
-/*
  * ecm_front_end_ipv6_bridge_post_routing_hook()
  *	Called for packets that are going out to one of the bridge physical interfaces.
  *
@@ -5767,17 +5736,6 @@ static struct nf_hook_ops ecm_front_end_ipv6_netfilter_hooks[] __read_mostly = {
 		.owner          = THIS_MODULE,
 		.pf             = PF_INET6,
 		.hooknum        = NF_INET_POST_ROUTING,
-		.priority       = NF_IP6_PRI_NAT_SRC + 1,
-	},
-
-	/*
-	 * The input hook monitors packets going to the local stack services
-	 */
-	{
-		.hook           = ecm_front_end_ipv6_input_hook,
-		.owner          = THIS_MODULE,
-		.pf             = PF_INET6,
-		.hooknum        = NF_INET_LOCAL_IN,
 		.priority       = NF_IP6_PRI_NAT_SRC + 1,
 	},
 
