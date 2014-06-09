@@ -5517,15 +5517,9 @@ static unsigned int ecm_front_end_ipv4_post_routing_hook(unsigned int hooknum,
 	in = dev_get_by_index(&init_net, skb->skb_iif);
 	if (unlikely(!in)) {
 		/*
-		 * Locally sourced packets cannot be accelerated
+		 * Locally sourced packets are not processed in ECM.
 		 */
-		can_accel = false;
-
-		/*
-		 * in becomes out!
-		 */
-		in = (struct net_device *)out;
-		dev_hold(in);
+		return NF_ACCEPT;
 	}
 
 	DEBUG_TRACE("Post routing process skb %p, out: %p, in: %p\n", skb, out, in);
@@ -5587,33 +5581,26 @@ static unsigned int ecm_front_end_ipv4_bridge_post_routing_hook(unsigned int hoo
 	in = dev_get_by_index(&init_net, skb->skb_iif);
 	if (unlikely(!in)) {
 		/*
-		 * Locally sourced packets cannot be accelerated
+		 * Locally sourced packets are not processed in ECM.
 		 */
-		DEBUG_TRACE("Locally sourced packet to bridge port\n");
-		can_accel = false;
+		return NF_ACCEPT;
+	}
 
+	/*
+	 * This is bridge post routing so "out" is a bridge port (obvious).
+	 * If the "in" device is NOT a port on this same bridge (non-bridged traffic)
+	 * then this would have been handled in normal post routing hook so we don't duplicate effort.
+	 */
+	if (!in->master || (in->master != out->master)) {
 		/*
-		 * "in" becomes "out" as replies to local services will involve the same interface path.
+		 * 'in' is either a non-slave device - so the packet has definately routed to this bridge
+		 * or 'in' is a slave BUT it's a slave of a different master, again the packet has been routed to the bridge.
 		 */
-		in = (struct net_device *)out;
-		dev_hold(in);
-	} else {
-		/*
-		 * This is bridge post routing so "out" is a bridge port (obvious).
-		 * If the "in" device is NOT a port on this same bridge (non-bridged traffic)
-		 * then this would have been handled in normal post routing hook so we don't duplicate effort.
-		 */
-		if (!in->master || (in->master != out->master)) {
-			/*
-			 * 'in' is either a non-slave device - so the packet has definately routed to this bridge
-			 * or 'in' is a slave BUT it's a slave of a different master, again the packet has been routed to the bridge.
-			 */
-			DEBUG_TRACE("Ignoring bridge post routed packet: %p, in: %p (%s), in->master: %p (%s), out: %p (%s), out->master: %p (%s)\n",
-					skb, in, in->name, in->master, (in->master)? in->master->name : "NULL",
-					out, out->name, out->master, (out->master)? out->master->name : "NULL");
-			dev_put(in);
-			return NF_ACCEPT;
-		}
+		DEBUG_TRACE("Ignoring bridge post routed packet: %p, in: %p (%s), in->master: %p (%s), out: %p (%s), out->master: %p (%s)\n",
+				skb, in, in->name, in->master, (in->master)? in->master->name : "NULL",
+				out, out->name, out->master, (out->master)? out->master->name : "NULL");
+		dev_put(in);
+		return NF_ACCEPT;
 	}
 
 	DEBUG_TRACE("%p: Name: %s Bridge process skb %p, in: %p\n", out, out->name, skb, in);
