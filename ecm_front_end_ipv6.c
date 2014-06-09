@@ -1147,10 +1147,13 @@ static void ecm_front_end_ipv6_connection_tcp_front_end_accelerate(struct ecm_fr
 	dscpcte = (ct)? nf_ct_dscpremark_ext_find(ct) : NULL;
 	if (dscpcte) {
 		create.flow_qos_tag = dscpcte->flow_priority;
-		create.flow_dscp = dscpcte->flow_dscp;
 		create.return_qos_tag = dscpcte->reply_priority;
-		create.return_dscp = dscpcte->reply_dscp;
-		create.flags = NSS_IPV6_CREATE_FLAG_DSCP_MARKING;
+		if (nf_conntrack_dscpremark_ext_get_dscp_rule_validity(ct)
+					== NF_CT_DSCPREMARK_EXT_RULE_VALID) {
+			create.flow_dscp = dscpcte->flow_dscp;
+			create.return_dscp = dscpcte->reply_dscp;
+			create.flags |= NSS_IPV6_CREATE_FLAG_DSCP_MARKING;
+		}
 	}
 	spin_unlock_bh(&ct->lock);
 
@@ -1993,10 +1996,13 @@ static void ecm_front_end_ipv6_connection_udp_front_end_accelerate(struct ecm_fr
 	dscpcte = (ct)? nf_ct_dscpremark_ext_find(ct) : NULL;
 	if (dscpcte) {
 		create.flow_qos_tag = dscpcte->flow_priority;
-		create.flow_dscp = dscpcte->flow_dscp;
 		create.return_qos_tag = dscpcte->reply_priority;
-		create.return_dscp = dscpcte->reply_dscp;
-		create.flags = NSS_IPV6_CREATE_FLAG_DSCP_MARKING;
+		if (nf_conntrack_dscpremark_ext_get_dscp_rule_validity(ct)
+					== NF_CT_DSCPREMARK_EXT_RULE_VALID) {
+			create.flow_dscp = dscpcte->flow_dscp;
+			create.return_dscp = dscpcte->reply_dscp;
+			create.flags |= NSS_IPV6_CREATE_FLAG_DSCP_MARKING;
+		}
 	}
 	spin_unlock_bh(&ct->lock);
 
