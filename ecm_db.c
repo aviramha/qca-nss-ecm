@@ -7396,7 +7396,7 @@ void ecm_db_iface_add_ipsec_tunnel(struct ecm_db_iface_instance *ii, uint32_t os
 	/*
 	 * Record general info
 	 */
-	ii->type = ECM_DB_IFACE_TYPE_LOOPBACK;
+	ii->type = ECM_DB_IFACE_TYPE_IPSEC_TUNNEL;
 	ii->xml_state_get = ecm_db_iface_ipsec_tunnel_xml_state_get;
 	ii->arg = arg;
 	ii->final = final;

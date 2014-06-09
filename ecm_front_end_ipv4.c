@@ -256,6 +256,7 @@ static struct ecm_db_node_instance *ecm_front_end_ipv4_node_establish_and_ref(st
 		case ECM_DB_IFACE_TYPE_LAG:
 		case ECM_DB_IFACE_TYPE_VLAN:
 		case ECM_DB_IFACE_TYPE_BRIDGE:
+		case ECM_DB_IFACE_TYPE_IPSEC_TUNNEL:
 			if (!ecm_interface_mac_addr_get(addr, node_addr, &on_link, gw_addr)) {
 				__be32 ipv4_addr;
 				__be32 src_ip;
@@ -4656,7 +4657,7 @@ static unsigned int ecm_front_end_ipv4_non_ported_process(struct net_device *out
 		 * NOTE: For SIT tunnels use the in_dev instead of in_dev_nat
 		 */
 		DEBUG_TRACE("%p: Create the 'from NAT' interface heirarchy list\n", nci);
-		if (protocol == IPPROTO_IPV6) {
+		if ((protocol == IPPROTO_IPV6) || (protocol == IPPROTO_ESP)) {
 			from_nat_list_first = ecm_interface_heirarchy_construct(from_nat_list, ip_dest_addr, ip_src_addr_nat, protocol, in_dev, is_routed, in_dev);
 		} else {
 			from_nat_list_first = ecm_interface_heirarchy_construct(from_nat_list, ip_dest_addr, ip_src_addr_nat, protocol, in_dev_nat, is_routed, in_dev);
@@ -4702,10 +4703,6 @@ static unsigned int ecm_front_end_ipv4_non_ported_process(struct net_device *out
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to establish dest mapping\n");
 			return NF_ACCEPT;
-		}
-
-		if (protocol == IPPROTO_ESP) {
-			can_accel = true;
 		}
 
 		/*

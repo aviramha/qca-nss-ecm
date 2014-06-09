@@ -1482,7 +1482,7 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfac
 	 */
 	if (src_dev == dest_dev) {
 		DEBUG_TRACE("Protocol is :%d source dev and dest dev are same\n", protocol);
-		if (protocol == IPPROTO_IPV6) {
+		if ((protocol == IPPROTO_IPV6) || (protocol == IPPROTO_ESP)) {
 			/*
 			 * This happens from the input hook
 			 * We do not want to create a connection entry for this
