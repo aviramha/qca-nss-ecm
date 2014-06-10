@@ -1876,6 +1876,16 @@ static void ecm_interface_list_stats_update(int iface_list_first, struct ecm_db_
 		}
 		DEBUG_TRACE("found dev: %p (%s)\n", dev, dev->name);
 
+		/*
+		 * Refresh the bridge forward table entry if the port is a bridge port
+		 * Note: A bridge port can be of different interface type, e.g VLAN, ethernet.
+		 * This check, therefore, should be performed for all interface types.
+		 */
+		if (is_valid_ether_addr(mac_addr) && ecm_front_end_is_bridge_port(dev)) {
+			DEBUG_TRACE("Update bridge fdb entry for mac: %pM\n", mac_addr);
+			br_refresh_fdb_entry(dev, mac_addr);
+		}
+
 		switch (ii_type) {
 			struct rtnl_link_stats64 stats;
 
@@ -1894,14 +1904,7 @@ static void ecm_interface_list_stats_update(int iface_list_first, struct ecm_db_
 				stats.tx_packets = tx_packets;
 				stats.tx_bytes = tx_bytes;
 				br_dev_update_stats(dev, &stats);
-
-				/*
-				 * Refresh the bridge forward table entry
-				 */
-				DEBUG_TRACE("Update bridge fdb entry for mac: %pM\n", mac_addr);
-				br_refresh_fdb_entry(dev, mac_addr);
 				break;
-
 			default:
 				/*
 				 * TODO: Extend it accordingly
