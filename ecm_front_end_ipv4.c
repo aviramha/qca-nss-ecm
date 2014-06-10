@@ -528,7 +528,6 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_accelerate(struct ecm_fr
 	int32_t to_nss_iface_id;
 	uint8_t from_nss_iface_address[ETH_ALEN];
 	uint8_t to_nss_iface_address[ETH_ALEN];
-	struct nf_ct_dscpremark_ext *dscpcte;
 	ip_addr_t addr;
 	struct nss_ipv4_create create;
 	struct ecm_classifier_instance *assignments[ECM_CLASSIFIER_TYPES];
@@ -592,19 +591,22 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_accelerate(struct ecm_fr
 	/*
 	 * Save the per-direction QoS and DSCP information
 	 */
-	spin_lock_bh(&ct->lock);
-	dscpcte = (ct)? nf_ct_dscpremark_ext_find(ct) : NULL;
-	if (dscpcte) {
-		create.flow_qos_tag = dscpcte->flow_priority;
-		create.return_qos_tag = dscpcte->reply_priority;
-		if (nf_conntrack_dscpremark_ext_get_dscp_rule_validity(ct)
-					== NF_CT_DSCPREMARK_EXT_RULE_VALID) {
-			create.flow_dscp = dscpcte->flow_dscp;
-			create.return_dscp = dscpcte->reply_dscp;
-			create.flags |= NSS_IPV4_CREATE_FLAG_DSCP_MARKING;
+	if (ct) {
+		struct nf_ct_dscpremark_ext *dscpcte;
+		spin_lock_bh(&ct->lock);
+		dscpcte = nf_ct_dscpremark_ext_find(ct);
+		if (dscpcte) {
+			create.flow_qos_tag = dscpcte->flow_priority;
+			create.return_qos_tag = dscpcte->reply_priority;
+			if (nf_conntrack_dscpremark_ext_get_dscp_rule_validity(ct)
+						== NF_CT_DSCPREMARK_EXT_RULE_VALID) {
+				create.flow_dscp = dscpcte->flow_dscp;
+				create.return_dscp = dscpcte->reply_dscp;
+				create.flags |= NSS_IPV4_CREATE_FLAG_DSCP_MARKING;
+			}
 		}
+		spin_unlock_bh(&ct->lock);
 	}
-	spin_unlock_bh(&ct->lock);
 
 	/*
 	 * Get the interface lists of the connection, we must have at least one interface in the list to continue
@@ -1432,7 +1434,6 @@ static void ecm_front_end_ipv4_connection_udp_front_end_accelerate(struct ecm_fr
 	int32_t to_nss_iface_id;
 	uint8_t from_nss_iface_address[ETH_ALEN];
 	uint8_t to_nss_iface_address[ETH_ALEN];
-	struct nf_ct_dscpremark_ext *dscpcte;
 	ip_addr_t addr;
 	struct nss_ipv4_create create;
 	struct ecm_classifier_instance *assignments[ECM_CLASSIFIER_TYPES];
@@ -1497,19 +1498,22 @@ static void ecm_front_end_ipv4_connection_udp_front_end_accelerate(struct ecm_fr
 	/*
 	 * Save the per-direction QoS and DSCP information
 	 */
-	spin_lock_bh(&ct->lock);
-	dscpcte = (ct)? nf_ct_dscpremark_ext_find(ct) : NULL;
-	if (dscpcte) {
-		create.flow_qos_tag = dscpcte->flow_priority;
-		create.return_qos_tag = dscpcte->reply_priority;
-		if (nf_conntrack_dscpremark_ext_get_dscp_rule_validity(ct)
-					== NF_CT_DSCPREMARK_EXT_RULE_VALID) {
-			create.flow_dscp = dscpcte->flow_dscp;
-			create.return_dscp = dscpcte->reply_dscp;
-			create.flags |= NSS_IPV4_CREATE_FLAG_DSCP_MARKING;
+	if (ct) {
+		struct nf_ct_dscpremark_ext *dscpcte;
+		spin_lock_bh(&ct->lock);
+		dscpcte = nf_ct_dscpremark_ext_find(ct);
+		if (dscpcte) {
+			create.flow_qos_tag = dscpcte->flow_priority;
+			create.return_qos_tag = dscpcte->reply_priority;
+			if (nf_conntrack_dscpremark_ext_get_dscp_rule_validity(ct)
+						== NF_CT_DSCPREMARK_EXT_RULE_VALID) {
+				create.flow_dscp = dscpcte->flow_dscp;
+				create.return_dscp = dscpcte->reply_dscp;
+				create.flags |= NSS_IPV4_CREATE_FLAG_DSCP_MARKING;
+			}
 		}
+		spin_unlock_bh(&ct->lock);
 	}
-	spin_unlock_bh(&ct->lock);
 
 	/*
 	 * Get the interface lists of the connection, we must have at least one interface in the list to continue
