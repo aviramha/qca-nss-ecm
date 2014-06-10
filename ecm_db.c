@@ -3309,11 +3309,7 @@ void ecm_db_iface_bridge_address_get(struct ecm_db_iface_instance *ii, uint8_t *
 }
 EXPORT_SYMBOL(ecm_db_iface_bridge_address_get);
 
-/*
- * ecm_db_iface_find_and_ref_ethernet()
- *	Lookup and return a iface reference if any
- */
-struct ecm_db_iface_instance *ecm_db_iface_find_and_ref_ethernet(uint8_t *address)
+struct ecm_db_iface_instance *ecm_db_iface_ifidx_find_and_ref_ethernet(uint8_t *address, int32_t ifidx)
 {
 	ecm_db_iface_hash_t hash_index;
 	struct ecm_db_iface_instance *ii;
@@ -3331,7 +3327,9 @@ struct ecm_db_iface_instance *ecm_db_iface_find_and_ref_ethernet(uint8_t *addres
 	spin_lock_bh(&ecm_db_lock);
 	ii = ecm_db_iface_table[hash_index];
 	while (ii) {
-		if ((ii->type != ECM_DB_IFACE_TYPE_ETHERNET) || memcmp(ii->type_info.ethernet.address, address, ETH_ALEN)) {
+		if ((ii->type != ECM_DB_IFACE_TYPE_ETHERNET)
+		    || memcmp(ii->type_info.ethernet.address, address, ETH_ALEN)
+		    || ii->interface_identifier != ifidx) {
 			ii = ii->hash_next;
 			continue;
 		}
@@ -3345,7 +3343,9 @@ struct ecm_db_iface_instance *ecm_db_iface_find_and_ref_ethernet(uint8_t *addres
 	DEBUG_TRACE("Iface not found\n");
 	return NULL;
 }
-EXPORT_SYMBOL(ecm_db_iface_find_and_ref_ethernet);
+EXPORT_SYMBOL(ecm_db_iface_ifidx_find_and_ref_ethernet);
+
+
 
 /*
  * ecm_db_iface_vlan_info_get()

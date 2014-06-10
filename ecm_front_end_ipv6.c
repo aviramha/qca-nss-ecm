@@ -281,7 +281,7 @@ void ecm_front_end_ipv6_send_neighbour_solicitation(struct net_device *dev, ip_a
  * GGG TODO Remove this in favour of the ecm_interface version - understand any refactoring needs first.
  */
 int32_t ecm_front_end_ipv6_interface_heirarchy_construct(struct ecm_db_iface_instance *interfaces[], ip_addr_t packet_src_addr, ip_addr_t packet_dest_addr, int packet_protocol,
-								struct net_device *given_dest_dev, bool is_routed, struct net_device *given_src_dev)
+								struct net_device *given_dest_dev, bool is_routed, struct net_device *given_src_dev, uint8_t *dest_node_addr, uint8_t *src_node_addr)
 {
 	int protocol;
 	ip_addr_t src_addr;
@@ -547,45 +547,56 @@ int32_t ecm_front_end_ipv6_interface_heirarchy_construct(struct ecm_db_iface_ins
 					 * Link aggregation
 					 * Figure out which slave device of the link aggregation will be used to reach the destination.
 					 */
-					bool src_on_link;
-					bool dest_on_link;
-					ip_addr_t src_gw_addr;
-					ip_addr_t dest_gw_addr;
+					bool dest_on_link = false;
+					ip_addr_t dest_gw_addr = ECM_IP_ADDR_NULL;
 					uint8_t src_mac_addr[ETH_ALEN];
 					uint8_t dest_mac_addr[ETH_ALEN];
+					struct net_device *master_dev = NULL;
 
-					if (!ecm_interface_mac_addr_get(src_addr, src_mac_addr, &src_on_link, src_gw_addr)) {
-						/*
-						 * Possible ARP does not know the address yet
-						 */
-						DEBUG_WARN("Unable to obtain MAC address for " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(src_addr));
-						ecm_front_end_ipv6_send_neighbour_solicitation(src_dev, src_addr);
-						dev_put(src_dev);
-						dev_put(dest_dev);
+					memset(src_mac_addr, 0, ETH_ALEN);
+					memset(dest_mac_addr, 0, ETH_ALEN);
 
-						/*
-						 * Release the interfaces heirarchy we constructed to this point.
-						 */
-						ecm_db_connection_interfaces_deref(interfaces, current_interface_index);
-						return ECM_DB_IFACE_HEIRARCHY_MAX;
+					if (!is_routed) {
+						memcpy(src_mac_addr, src_node_addr, ETH_ALEN);
+						memcpy(dest_mac_addr, dest_node_addr, ETH_ALEN);
+					} else {
+						if (dest_dev->master) {
+							memcpy(src_mac_addr, dest_dev->master->dev_addr, ETH_ALEN);
+						} else {
+							memcpy(src_mac_addr, dest_dev->dev_addr, ETH_ALEN);
+						}
+
+						if (!ecm_interface_mac_addr_get(dest_addr, dest_mac_addr, &dest_on_link, dest_gw_addr)) {
+							/*
+							 * Possible ARP does not know the address yet
+							 */
+							DEBUG_WARN("Unable to obtain MAC address for " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(dest_addr));
+
+							/*
+							 * find proper interfce from which to issue neighbour solicitation
+							 */
+							if (dest_dev->master) {
+								master_dev = dest_dev->master;
+							} else {
+								master_dev = dest_dev;
+							}
+
+							dev_hold(master_dev);
+
+							ecm_front_end_ipv6_send_neighbour_solicitation(master_dev, dest_addr);
+							dev_put(src_dev);
+							dev_put(dest_dev);
+							dev_put(master_dev);
+
+							/*
+							 * Release the interfaces heirarchy we constructed to this point.
+							 */
+							ecm_db_connection_interfaces_deref(interfaces, current_interface_index);
+							return ECM_DB_IFACE_HEIRARCHY_MAX;
+						}
 					}
-					if (!ecm_interface_mac_addr_get(dest_addr, dest_mac_addr, &dest_on_link, dest_gw_addr)) {
-						/*
-						 * Possible ARP does not know the address yet
-						 */
-						DEBUG_WARN("Unable to obtain MAC address for " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(dest_addr));
-						ecm_front_end_ipv6_send_neighbour_solicitation(dest_dev, dest_addr);
-						dev_put(src_dev);
-						dev_put(dest_dev);
 
-						/*
-						 * Release the interfaces heirarchy we constructed to this point.
-						 */
-						ecm_db_connection_interfaces_deref(interfaces, current_interface_index);
-						return ECM_DB_IFACE_HEIRARCHY_MAX;
-					}
-
-					next_dev = bond_get_tx_dev(NULL, src_mac_addr, dest_mac_addr, src_addr, dest_addr, (uint16_t)protocol, dest_dev);
+					next_dev = bond_get_tx_dev(NULL, src_mac_addr, dest_mac_addr, src_addr, dest_addr, htons((uint16_t)ETH_P_IPV6), dest_dev);
 					if (next_dev) {
 						dev_hold(next_dev);
 					} else {
@@ -3750,7 +3761,7 @@ static unsigned int ecm_front_end_ipv6_tcp_process(struct net_device *out_dev,
 		 * GGG TODO The empty list checks should not be needed, mapping_establish_and_ref() should fail out if there is no list anyway.
 		 */
 		DEBUG_TRACE("%p: Create the 'from' interface heirarchy list\n", nci);
-		from_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, IPPROTO_TCP, in_dev, is_routed, in_dev);
+		from_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, IPPROTO_TCP, in_dev, is_routed, in_dev, src_node_addr, dest_node_addr);
 		if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to obtain 'from' heirarchy list\n");
@@ -3768,7 +3779,7 @@ static unsigned int ecm_front_end_ipv6_tcp_process(struct net_device *out_dev,
 		}
 
 		DEBUG_TRACE("%p: Create the 'to' interface heirarchy list\n", nci);
-		to_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, IPPROTO_TCP, out_dev, is_routed, in_dev);
+		to_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, IPPROTO_TCP, out_dev, is_routed, in_dev, dest_node_addr, src_node_addr);
 		if (to_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_mapping_deref(src_mi);
 			ecm_db_connection_deref(nci);
@@ -3915,7 +3926,7 @@ static unsigned int ecm_front_end_ipv6_tcp_process(struct net_device *out_dev,
 		 * GGG Investigate the removal of the empty list checks.
 		 */
 		DEBUG_TRACE("%p: Update the 'from' interface heirarchy list\n", ci);
-		from_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, IPPROTO_TCP, in_dev, is_routed, in_dev);
+		from_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, IPPROTO_TCP, in_dev, is_routed, in_dev, src_node_addr, dest_node_addr);
 		if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(ci);
 			DEBUG_WARN("Failed to obtain 'from' heirarchy list\n");
@@ -3925,7 +3936,7 @@ static unsigned int ecm_front_end_ipv6_tcp_process(struct net_device *out_dev,
 		ecm_db_connection_interfaces_deref(from_list, from_list_first);
 
 		DEBUG_TRACE("%p: Update the 'to' interface heirarchy list\n", ci);
-		to_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, IPPROTO_TCP, out_dev, is_routed, in_dev);
+		to_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, IPPROTO_TCP, out_dev, is_routed, in_dev, dest_node_addr, src_node_addr);
 		if (to_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(ci);
 			DEBUG_WARN("Failed to obtain 'to' heirarchy list\n");
@@ -4284,7 +4295,7 @@ static unsigned int ecm_front_end_ipv6_udp_process(struct net_device *out_dev,
 		 * GGG TODO The empty list checks should not be needed, mapping_establish_and_ref() should fail out if there is no list anyway.
 		 */
 		DEBUG_TRACE("%p: Create the 'from' interface heirarchy list\n", nci);
-		from_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, IPPROTO_UDP, in_dev, is_routed, in_dev);
+		from_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, IPPROTO_UDP, in_dev, is_routed, in_dev, src_node_addr, dest_node_addr);
 		if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to obtain 'from' heirarchy list\n");
@@ -4302,7 +4313,7 @@ static unsigned int ecm_front_end_ipv6_udp_process(struct net_device *out_dev,
 		}
 
 		DEBUG_TRACE("%p: Create the 'to' interface heirarchy list\n", nci);
-		to_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, IPPROTO_UDP, out_dev, is_routed, in_dev);
+		to_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, IPPROTO_UDP, out_dev, is_routed, in_dev, dest_node_addr, src_node_addr);
 		if (to_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_mapping_deref(src_mi);
 			ecm_db_connection_deref(nci);
@@ -4449,7 +4460,7 @@ static unsigned int ecm_front_end_ipv6_udp_process(struct net_device *out_dev,
 		 * GGG Investigate the removal of the empty list checks.
 		 */
 		DEBUG_TRACE("%p: Update the 'from' interface heirarchy list\n", ci);
-		from_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, IPPROTO_UDP, in_dev, is_routed, in_dev);
+		from_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, IPPROTO_UDP, in_dev, is_routed, in_dev, src_node_addr, dest_node_addr);
 		if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(ci);
 			DEBUG_WARN("Failed to obtain 'from' heirarchy list\n");
@@ -4459,7 +4470,7 @@ static unsigned int ecm_front_end_ipv6_udp_process(struct net_device *out_dev,
 		ecm_db_connection_interfaces_deref(from_list, from_list_first);
 
 		DEBUG_TRACE("%p: Update the 'to' interface heirarchy list\n", ci);
-		to_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, IPPROTO_UDP, out_dev, is_routed, in_dev);
+		to_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, IPPROTO_UDP, out_dev, is_routed, in_dev, dest_node_addr, src_node_addr);
 		if (to_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(ci);
 			DEBUG_WARN("Failed to obtain 'to' heirarchy list\n");
@@ -4769,7 +4780,7 @@ static unsigned int ecm_front_end_ipv6_non_ported_process(struct net_device *out
 		 * GGG TODO The empty list checks should not be needed, mapping_establish_and_ref() should fail out if there is no list anyway.
 		 */
 		DEBUG_TRACE("%p: Create the 'from' interface heirarchy list\n", nci);
-		from_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, protocol, in_dev, is_routed, in_dev);
+		from_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, protocol, in_dev, is_routed, in_dev, src_node_addr, dest_node_addr);
 		if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to obtain 'from' heirarchy list\n");
@@ -4787,7 +4798,7 @@ static unsigned int ecm_front_end_ipv6_non_ported_process(struct net_device *out
 		}
 
 		DEBUG_TRACE("%p: Create the 'to' interface heirarchy list\n", nci);
-		to_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, protocol, out_dev, is_routed, in_dev);
+		to_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, protocol, out_dev, is_routed, in_dev, dest_node_addr, src_node_addr);
 		if (to_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_mapping_deref(src_mi);
 			ecm_db_connection_deref(nci);
@@ -4934,7 +4945,7 @@ static unsigned int ecm_front_end_ipv6_non_ported_process(struct net_device *out
 		 * GGG Investigate the removal of the empty list checks.
 		 */
 		DEBUG_TRACE("%p: Update the 'from' interface heirarchy list\n", ci);
-		from_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, protocol, in_dev, is_routed, in_dev);
+		from_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, protocol, in_dev, is_routed, in_dev, src_node_addr, dest_node_addr);
 		if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(ci);
 			DEBUG_WARN("Failed to obtain 'from' heirarchy list\n");
@@ -4944,7 +4955,7 @@ static unsigned int ecm_front_end_ipv6_non_ported_process(struct net_device *out
 		ecm_db_connection_interfaces_deref(from_list, from_list_first);
 
 		DEBUG_TRACE("%p: Update the 'to' interface heirarchy list\n", ci);
-		to_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, protocol, out_dev, is_routed, in_dev);
+		to_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, protocol, out_dev, is_routed, in_dev, dest_node_addr, src_node_addr);
 		if (to_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(ci);
 			DEBUG_WARN("Failed to obtain 'to' heirarchy list\n");
@@ -5416,6 +5427,12 @@ static unsigned int ecm_front_end_ipv6_bridge_post_routing_hook(unsigned int hoo
 		 * Locally sourced packets are not processed in ECM.
 		 */
 		return NF_ACCEPT;
+	}
+
+	if (netif_is_bond_slave(in)) {
+		dev_put(in);
+		in = in->master;
+		dev_hold(in);
 	}
 
 	/*

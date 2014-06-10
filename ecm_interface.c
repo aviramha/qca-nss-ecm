@@ -664,7 +664,8 @@ static struct ecm_db_iface_instance *ecm_interface_ethernet_interface_establish(
 	/*
 	 * Locate the iface
 	 */
-	ii = ecm_db_iface_find_and_ref_ethernet(type_info->address);
+	ii = ecm_db_iface_ifidx_find_and_ref_ethernet(type_info->address, dev_interface_num);
+
 	if (ii) {
 		DEBUG_TRACE("%p: iface established\n", ii);
 		return ii;
@@ -683,7 +684,7 @@ static struct ecm_db_iface_instance *ecm_interface_ethernet_interface_establish(
 	 * Add iface into the database, atomically to avoid races creating the same thing
 	 */
 	spin_lock_bh(&ecm_interface_lock);
-	ii = ecm_db_iface_find_and_ref_ethernet(type_info->address);
+	ii = ecm_db_iface_ifidx_find_and_ref_ethernet(type_info->address, dev_interface_num);
 	if (ii) {
 		spin_unlock_bh(&ecm_interface_lock);
 		ecm_db_iface_deref(nii);
@@ -1356,7 +1357,7 @@ EXPORT_SYMBOL(ecm_interface_establish_and_ref);
  * GGG TODO Make this function work for IPv6!!!!!!!!!!!!!!
  */
 int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfaces[], ip_addr_t packet_src_addr, ip_addr_t packet_dest_addr, int packet_protocol,
-						struct net_device *given_dest_dev, bool is_routed, struct net_device *given_src_dev)
+						struct net_device *given_dest_dev, bool is_routed, struct net_device *given_src_dev, uint8_t *dest_node_addr, uint8_t *src_node_addr)
 {
 	int protocol;
 	ip_addr_t src_addr;
@@ -1655,15 +1656,97 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfac
 					 * Link aggregation
 					 * Figure out which slave device of the link aggregation will be used to reach the destination.
 					 */
-					uint32_t src_addr_32;
-					uint32_t dest_addr_32;
+					bool dest_on_link = false;
+					ip_addr_t dest_gw_addr = ECM_IP_ADDR_NULL;
+					uint32_t src_addr_32 = 0;
+					uint32_t dest_addr_32 = 0;
 					uint8_t src_mac_addr[ETH_ALEN];
 					uint8_t dest_mac_addr[ETH_ALEN];
+					struct net_device *master_dev = NULL;
 
-					ECM_IP_ADDR_TO_HIN4_ADDR(src_addr_32, src_addr);
-					ECM_IP_ADDR_TO_HIN4_ADDR(dest_addr_32, dest_addr);
+					memset(src_mac_addr, 0, ETH_ALEN);
+					memset(dest_mac_addr, 0, ETH_ALEN);
 
-					next_dev = bond_get_tx_dev(NULL, src_mac_addr, dest_mac_addr, &src_addr_32, &dest_addr_32, (uint16_t)protocol, dest_dev);
+					ECM_IP_ADDR_TO_NIN4_ADDR(src_addr_32, src_addr);
+					ECM_IP_ADDR_TO_NIN4_ADDR(dest_addr_32, dest_addr);
+
+					if (!is_routed) {
+						memcpy(src_mac_addr, src_node_addr, ETH_ALEN);
+						memcpy(dest_mac_addr, dest_node_addr, ETH_ALEN);
+					} else {
+						/*
+						 * Use appropriate source MAC address for routed packets
+						 */
+						if (dest_dev->master) {
+							memcpy(src_mac_addr, dest_dev->master->dev_addr, ETH_ALEN);
+						} else {
+							memcpy(src_mac_addr, dest_dev->dev_addr, ETH_ALEN);
+						}
+
+						/*
+						 * Determine destination MAC address for this routed packet
+						 */
+						if (!ecm_interface_mac_addr_get(dest_addr, dest_mac_addr,
+									&dest_on_link, dest_gw_addr)) {
+							__be32 ipv4_addr = 0;
+							__be32 src_ip = 0;
+							DEBUG_WARN("Unable to obtain MAC address for "
+										ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(dest_addr));
+
+
+							/*
+							 * Issue an ARP request, select the src_ip from which to issue the request.
+							 */
+
+							/*
+							 * find proper interfce from which to issue ARP
+							 */
+							if (dest_dev->master) {
+								master_dev = dest_dev->master;
+							} else {
+								master_dev = dest_dev;
+							}
+
+							dev_hold(master_dev);
+
+							ECM_IP_ADDR_TO_NIN4_ADDR(ipv4_addr, dest_addr);
+							src_ip = inet_select_addr(master_dev, ipv4_addr, RT_SCOPE_LINK);
+							if (!src_ip) {
+								DEBUG_TRACE("failed to lookup IP for %pI4\n", &ipv4_addr);
+
+								dev_put(src_dev);
+								dev_put(dest_dev);
+								dev_put(master_dev);
+
+								/*
+								* Release the interfaces heirarchy we constructed to this point.
+								*/
+								ecm_db_connection_interfaces_deref(interfaces, current_interface_index);
+								return ECM_DB_IFACE_HEIRARCHY_MAX;
+							}
+
+							/*
+							 * If we have a GW for this address, then we have to send ARP request to the GW
+							 */
+							if (!dest_on_link && !ECM_IP_ADDR_IS_NULL(dest_gw_addr)) {
+								ECM_IP_ADDR_TO_NIN4_ADDR(ipv4_addr, dest_gw_addr);
+							}
+
+							DEBUG_TRACE("Send ARP for %pI4 using src_ip as %pI4\n", &ipv4_addr, &src_ip);
+							arp_send(ARPOP_REQUEST, ETH_P_ARP, ipv4_addr, master_dev, src_ip, NULL, NULL, NULL);
+
+
+							dev_put(src_dev);
+							dev_put(dest_dev);
+							dev_put(master_dev);
+							ecm_db_connection_interfaces_deref(interfaces, current_interface_index);
+							return ECM_DB_IFACE_HEIRARCHY_MAX;
+						}
+					}
+
+					next_dev = bond_get_tx_dev(NULL, src_mac_addr, dest_mac_addr,
+								   &src_addr_32, &dest_addr_32,
+								   htons((uint16_t)ETH_P_IP), dest_dev);
 					if (next_dev) {
 						dev_hold(next_dev);
 					} else {
@@ -1679,7 +1762,6 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfac
 					}
 
 					DEBUG_TRACE("Net device: %p is LAG, slave dev: %p (%s)\n", dest_dev, next_dev, next_dev->name);
-
 					break;
 				}
 
@@ -1815,6 +1897,7 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfac
 			for (i = current_interface_index; i < ECM_DB_IFACE_HEIRARCHY_MAX; ++i) {
 				DEBUG_TRACE("\tInterface @ %d: %p, type: %d, name: %s\n",
 						i, interfaces[i], ecm_db_connection_iface_type_get(interfaces[i]), ecm_db_interface_type_to_string(ecm_db_connection_iface_type_get(interfaces[i])));
+
 			}
 #endif
 

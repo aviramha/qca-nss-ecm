@@ -120,7 +120,7 @@ void ecm_db_iface_bridge_address_get(struct ecm_db_iface_instance *ii, uint8_t *
 void ecm_db_iface_pppoe_session_info_get(struct ecm_db_iface_instance *ii, struct ecm_db_interface_info_pppoe *pppoe_info);
 void ecm_db_iface_vlan_info_get(struct ecm_db_iface_instance *ii, struct ecm_db_interface_info_vlan *vlan_info);
 
-struct ecm_db_iface_instance *ecm_db_iface_find_and_ref_ethernet(uint8_t *address);
+struct ecm_db_iface_instance *ecm_db_iface_ifidx_find_and_ref_ethernet(uint8_t *address, int32_t idx);
 struct ecm_db_iface_instance *ecm_db_iface_find_and_ref_lag(uint8_t *address);
 struct ecm_db_iface_instance *ecm_db_iface_find_and_ref_vlan(uint8_t *address, uint16_t vlan_tag, uint16_t vlan_tpid);
 struct ecm_db_iface_instance *ecm_db_iface_find_and_ref_bridge(uint8_t *address);
