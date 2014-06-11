@@ -691,11 +691,33 @@ static void ecm_classifier_nl_sync_from_v4(struct ecm_classifier_instance *aci, 
  */
 static void ecm_classifier_nl_sync_to_v6(struct ecm_classifier_instance *aci, struct nss_ipv6_cb_params *params)
 {
+	struct nss_ipv6_sync *sync;
 	struct ecm_classifier_nl_instance *cnli;
 
 	cnli = (struct ecm_classifier_nl_instance *)aci;
 	DEBUG_CHECK_MAGIC(cnli, ECM_CLASSIFIER_NL_INSTANCE_MAGIC, "%p: magic failed", cnli);
 
+	DEBUG_ASSERT(params->reason == NSS_IPV6_CB_REASON_SYNC, "sync_to_v6 callback issued for non-sync reason\n");
+
+	sync = &params->params.sync;
+
+	if (!(sync->flow_tx_packet_count || sync->return_tx_packet_count)) {
+		/*
+		 * No traffic has been accelerated.
+		 * Nothing to update.  We only care about flows that are actively being accelerated.
+		 */
+		DEBUG_TRACE("%p: No traffic\n", cnli);
+		return;
+	}
+
+	/*
+	 * If this sync does NOT contain a final or evicted flag then we have seen traffic
+	 * and that acceleration is continuing - acceleration is OK
+	 */
+	if (!(sync->final_sync || sync->evicted)) {
+		DEBUG_TRACE("%p: Acceleration OK\n", cnli);
+		ecm_classifier_nl_genl_msg_ACCEL_OK(cnli);
+	}
 }
 
 /*
