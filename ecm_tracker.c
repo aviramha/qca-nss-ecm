@@ -444,6 +444,11 @@ bool ecm_tracker_ip_check_header_and_read(struct ecm_tracker_ip_header *ip_hdr, 
 		ip_hdr->fragmented = (ntohs(v4_hdr->frag_off) & 0x3fff)? true : false;
 
 		/*
+		 * DS field
+		 */
+		ip_hdr->ds = ipv4_get_dsfield(v4_hdr);
+
+		/*
 		 * Get the protocol and where the header info will be stored
 		 */
 		protocol = v4_hdr->protocol;
@@ -499,6 +504,11 @@ bool ecm_tracker_ip_check_header_and_read(struct ecm_tracker_ip_header *ip_hdr, 
 		DEBUG_WARN("%p: v6 invalid total len: %u skb len: %u\n", skb, ip_hdr->total_length, skb->len);
 		return false;
 	}
+
+	/*
+	 * DS field
+	 */
+	ip_hdr->ds = ipv6_get_dsfield(v6_hdr);
 
 	/*
 	 * Process headers until we run out of space, error, or we get the no next header marker for v6 (protocol 59).

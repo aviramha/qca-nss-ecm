@@ -19,6 +19,7 @@
 obj-m += ecm.o
 
 ecm-y := \
+	 ecm_classifier_dscp.o \
 	 ecm_classifier_nl.o \
 	 ecm_tracker_udp.o \
 	 ecm_tracker_tcp.o \
@@ -40,6 +41,7 @@ ecm-y := \
 #
 ecm-$(ECM_CLASSIFIER_HYFI_ENABLE) += ecm_classifier_hyfi.o
 
+ccflags-y += -DECM_CLASSIFIER_DSCP_DEBUG_LEVEL=1
 ccflags-y += -DECM_CLASSIFIER_HYFI_DEBUG_LEVEL=1
 ccflags-y += -DECM_CLASSIFIER_NL_DEBUG_LEVEL=1
 ccflags-y += -DECM_CLASSIFIER_DEFAULT_DEBUG_LEVEL=1

@@ -56,8 +56,6 @@
 #include <net/netfilter/ipv6/nf_defrag_ipv6.h>
 #include <linux/../../net/8021q/vlan.h>
 #include <linux/if_vlan.h>
-#include <linux/netfilter/xt_dscp.h>
-#include <net/netfilter/nf_conntrack_dscpremark_ext.h>
 
 /*
  * Debug output levels
@@ -83,6 +81,7 @@
 #include "ecm_classifier_default.h"
 #include "ecm_classifier_nl.h"
 #include "ecm_classifier_hyfi.h"
+#include "ecm_classifier_dscp.h"
 #include "ecm_interface.h"
 
 /*
@@ -1151,26 +1150,6 @@ static void ecm_front_end_ipv6_connection_tcp_front_end_accelerate(struct ecm_fr
 	create.out_vlan_tag[1] = ECM_NSS_CONNMGR_VLAN_ID_NOT_CONFIGURED;
 
 	/*
-	 * Save the per-direction QoS and DSCP information
-	 */
-	if (ct) {
-		struct nf_ct_dscpremark_ext *dscpcte;
-		spin_lock_bh(&ct->lock);
-		dscpcte = nf_ct_dscpremark_ext_find(ct);
-		if (dscpcte) {
-			create.flow_qos_tag = dscpcte->flow_priority;
-			create.return_qos_tag = dscpcte->reply_priority;
-			if (nf_conntrack_dscpremark_ext_get_dscp_rule_validity(ct)
-						== NF_CT_DSCPREMARK_EXT_RULE_VALID) {
-				create.flow_dscp = dscpcte->flow_dscp;
-				create.return_dscp = dscpcte->reply_dscp;
-				create.flags |= NSS_IPV6_CREATE_FLAG_DSCP_MARKING;
-			}
-		}
-		spin_unlock_bh(&ct->lock);
-	}
-
-	/*
 	 * Get the interface lists of the connection, we must have at least one interface in the list to continue
 	 */
 	from_ifaces_first = ecm_db_connection_from_interfaces_get_and_ref(fecti->ci, from_ifaces);
@@ -1316,7 +1295,7 @@ static void ecm_front_end_ipv6_connection_tcp_front_end_accelerate(struct ecm_fr
 			create.in_vlan_tag[interface_type_counts[ii_type]] = ((vlan_info.vlan_tpid << 16) | vlan_info.vlan_tag);
 			vlan_in_dev = dev_get_by_index(&init_net, ecm_db_iface_interface_identifier_get(ii));
 			if (vlan_in_dev) {
-				vlan_prio = vlan_dev_get_egress_prio(vlan_in_dev, create.return_qos_tag);
+				vlan_prio = vlan_dev_get_egress_prio(vlan_in_dev, pr->return_qos_tag);
 				create.in_vlan_tag[interface_type_counts[ii_type]] |= vlan_prio;
 				dev_put(vlan_in_dev);
 				vlan_in_dev = NULL;
@@ -1451,7 +1430,7 @@ static void ecm_front_end_ipv6_connection_tcp_front_end_accelerate(struct ecm_fr
 			create.out_vlan_tag[interface_type_counts[ii_type]] = ((vlan_info.vlan_tpid << 16) | vlan_info.vlan_tag);
 			vlan_out_dev = dev_get_by_index(&init_net, ecm_db_iface_interface_identifier_get(ii));
 			if (vlan_out_dev) {
-				vlan_prio = vlan_dev_get_egress_prio(vlan_out_dev, create.flow_qos_tag);
+				vlan_prio = vlan_dev_get_egress_prio(vlan_out_dev, pr->flow_qos_tag);
 				create.out_vlan_tag[interface_type_counts[ii_type]] |= vlan_prio;
 				dev_put(vlan_out_dev);
 				vlan_out_dev = NULL;
@@ -1937,8 +1916,7 @@ static struct ecm_front_end_ipv6_connection_tcp_instance *ecm_front_end_ipv6_con
  * can all use and reduce the amount of code!
  */
 static void ecm_front_end_ipv6_connection_udp_front_end_accelerate(struct ecm_front_end_connection_instance *feci,
-									struct ecm_classifier_process_response *pr,
-									struct nf_conn *ct)
+									struct ecm_classifier_process_response *pr)
 {
 	struct ecm_front_end_ipv6_connection_udp_instance *fecui = (struct ecm_front_end_ipv6_connection_udp_instance *)feci;
 	int32_t from_ifaces_first;
@@ -2012,26 +1990,6 @@ static void ecm_front_end_ipv6_connection_udp_front_end_accelerate(struct ecm_fr
 	create.out_vlan_tag[0] = ECM_NSS_CONNMGR_VLAN_ID_NOT_CONFIGURED;
 	create.in_vlan_tag[1] = ECM_NSS_CONNMGR_VLAN_ID_NOT_CONFIGURED;
 	create.out_vlan_tag[1] = ECM_NSS_CONNMGR_VLAN_ID_NOT_CONFIGURED;
-
-	/*
-	 * Save the per-direction QoS and DSCP information
-	 */
-	if (ct) {
-		struct nf_ct_dscpremark_ext *dscpcte;
-		spin_lock_bh(&ct->lock);
-		dscpcte = nf_ct_dscpremark_ext_find(ct);
-		if (dscpcte) {
-			create.flow_qos_tag = dscpcte->flow_priority;
-			create.return_qos_tag = dscpcte->reply_priority;
-			if (nf_conntrack_dscpremark_ext_get_dscp_rule_validity(ct)
-						== NF_CT_DSCPREMARK_EXT_RULE_VALID) {
-				create.flow_dscp = dscpcte->flow_dscp;
-				create.return_dscp = dscpcte->reply_dscp;
-				create.flags |= NSS_IPV6_CREATE_FLAG_DSCP_MARKING;
-			}
-		}
-		spin_unlock_bh(&ct->lock);
-	}
 
 	/*
 	 * Get the interface lists of the connection, we must have at least one interface in the list to continue
@@ -2179,7 +2137,7 @@ static void ecm_front_end_ipv6_connection_udp_front_end_accelerate(struct ecm_fr
 			create.in_vlan_tag[interface_type_counts[ii_type]] = ((vlan_info.vlan_tpid << 16) | vlan_info.vlan_tag);
 			vlan_in_dev = dev_get_by_index(&init_net, ecm_db_iface_interface_identifier_get(ii));
 			if (vlan_in_dev) {
-				vlan_prio = vlan_dev_get_egress_prio(vlan_in_dev, create.return_qos_tag);
+				vlan_prio = vlan_dev_get_egress_prio(vlan_in_dev, pr->return_qos_tag);
 				create.in_vlan_tag[interface_type_counts[ii_type]] |= vlan_prio;
 				dev_put(vlan_in_dev);
 				vlan_in_dev = NULL;
@@ -2314,7 +2272,7 @@ static void ecm_front_end_ipv6_connection_udp_front_end_accelerate(struct ecm_fr
 			create.out_vlan_tag[interface_type_counts[ii_type]] = ((vlan_info.vlan_tpid << 16) | vlan_info.vlan_tag);
 			vlan_out_dev = dev_get_by_index(&init_net, ecm_db_iface_interface_identifier_get(ii));
 			if (vlan_out_dev) {
-				vlan_prio = vlan_dev_get_egress_prio(vlan_out_dev, create.flow_qos_tag);
+				vlan_prio = vlan_dev_get_egress_prio(vlan_out_dev, pr->flow_qos_tag);
 				create.out_vlan_tag[interface_type_counts[ii_type]] |= vlan_prio;
 				dev_put(vlan_out_dev);
 				vlan_out_dev = NULL;
@@ -3576,6 +3534,18 @@ static struct ecm_classifier_instance *ecm_front_end_ipv6_assign_classifier(stru
 		return (struct ecm_classifier_instance *)cnli;
 	}
 
+	if (type == ECM_CLASSIFIER_TYPE_DSCP) {
+		struct ecm_classifier_dscp_instance *cdscpi;
+		cdscpi = ecm_classifier_dscp_instance_alloc(ci);
+		if (!cdscpi) {
+			DEBUG_TRACE("%p: Failed to create DSCP classifier\n", ci);
+			return NULL;
+		}
+		DEBUG_TRACE("%p: Created DSCP classifier: %p\n", ci, cdscpi);
+		ecm_db_connection_classifier_assign(ci, (struct ecm_classifier_instance *)cdscpi);
+		return (struct ecm_classifier_instance *)cdscpi;
+	}
+
 #ifdef ECM_CLASSIFIER_HYFI_ENABLE
 	if (type == ECM_CLASSIFIER_TYPE_HYFI) {
 		struct ecm_classifier_hyfi_instance *chfi;
@@ -4184,24 +4154,6 @@ static unsigned int ecm_front_end_ipv6_tcp_process(struct net_device *out_dev,
 	skb->priority = prevalent_pr.flow_qos_tag;
 	DEBUG_TRACE("%p: skb priority: %u\n", ci, skb->priority);
 
-	if (ct) {
-		struct nf_ct_dscpremark_ext *dscpcte = nf_ct_dscpremark_ext_find(ct);
-		if (dscpcte) {
-			/*
-			 * Extract the priority and DSCP information from skb and store into ct extention
-			 */
-			if (ct_dir == IP_CT_DIR_ORIGINAL) {
-				dscpcte->flow_priority = skb->priority;
-				dscpcte->flow_dscp = ipv6_get_dsfield(ipv6_hdr(skb)) >> XT_DSCP_SHIFT;
-				DEBUG_TRACE("Flow DSCP: %x Flow priority: %d\n", dscpcte->flow_dscp, dscpcte->flow_priority);
-			} else {
-				dscpcte->reply_priority = skb->priority;
-				dscpcte->reply_dscp = ipv6_get_dsfield(ipv6_hdr(skb)) >> XT_DSCP_SHIFT;
-				DEBUG_TRACE("Return DSCP: %x Return priority: %d\n", dscpcte->reply_dscp, dscpcte->reply_priority);
-			}
-		}
-	}
-
 	/*
 	 * Accelerate?
 	 */
@@ -4747,24 +4699,6 @@ static unsigned int ecm_front_end_ipv6_udp_process(struct net_device *out_dev,
 	skb->priority = prevalent_pr.flow_qos_tag;
 	DEBUG_TRACE("%p: skb priority: %u\n", ci, skb->priority);
 
-	if (ct) {
-		struct nf_ct_dscpremark_ext *dscpcte = nf_ct_dscpremark_ext_find(ct);
-		if (dscpcte) {
-			/*
-			 * Extract the priority and DSCP information from skb and store into ct extention
-			 */
-			if (ct_dir == IP_CT_DIR_ORIGINAL) {
-				dscpcte->flow_priority = skb->priority;
-				dscpcte->flow_dscp = ipv6_get_dsfield(ipv6_hdr(skb)) >> XT_DSCP_SHIFT;
-				DEBUG_TRACE("Flow DSCP: %x Flow priority: %d\n", dscpcte->flow_dscp, dscpcte->flow_priority);
-			} else {
-				dscpcte->reply_priority = skb->priority;
-				dscpcte->reply_dscp = ipv6_get_dsfield(ipv6_hdr(skb)) >> XT_DSCP_SHIFT;
-				DEBUG_TRACE("Return DSCP: %x Return priority: %d\n", dscpcte->reply_dscp, dscpcte->reply_priority);
-			}
-		}
-	}
-
 	/*
 	 * Accelerate?
 	 */
@@ -4772,7 +4706,7 @@ static unsigned int ecm_front_end_ipv6_udp_process(struct net_device *out_dev,
 		struct ecm_front_end_connection_instance *feci;
 		DEBUG_TRACE("%p: accel\n", ci);
 		feci = ecm_db_connection_front_end_get_and_ref(ci);
-		ecm_front_end_ipv6_connection_udp_front_end_accelerate(feci, &prevalent_pr, ct);
+		ecm_front_end_ipv6_connection_udp_front_end_accelerate(feci, &prevalent_pr);
 		feci->deref(feci);
 	}
 	ecm_db_connection_deref(ci);
