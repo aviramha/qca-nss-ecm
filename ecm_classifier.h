@@ -62,6 +62,8 @@ typedef enum ecm_classifier_acceleration_modes ecm_classifier_acceleration_mode_
 #define ECM_CLASSIFIER_PROCESS_ACTION_QOS_TAG 0x00000002	/* Contains flow & return qos tags */
 #define ECM_CLASSIFIER_PROCESS_ACTION_ACCEL_MODE 0x00000004	/* Contains an accel mode */
 #define ECM_CLASSIFIER_PROCESS_ACTION_TIMER_GROUP 0x00000008	/* Contains a timer group change */
+#define ECM_CLASSIFIER_PROCESS_ACTION_DSCP 0x00000010		/* Contains DSCP marking information */
+#define ECM_CLASSIFIER_PROCESS_ACTION_DSCP_DENY 0x00000020	/* Denies any DSCP changes */
 
 /*
  * struct ecm_classifier_process_response
@@ -79,6 +81,8 @@ struct ecm_classifier_process_response {
 	bool drop;					/* Drop packet at hand */
 	uint32_t flow_qos_tag;				/* QoS tag to use for the packet */
 	uint32_t return_qos_tag;			/* QoS tag to use for the packet */
+	uint8_t flow_dscp;				/* DSCP mark for flow */
+	uint8_t return_dscp;				/* DSCP mark for return */
 	ecm_classifier_acceleration_mode_t accel_mode;	/* Acceleration needed for this connection */
 	ecm_db_timer_group_t timer_group;		/* Timer group the connection should be in */
 };
@@ -154,6 +158,7 @@ static inline int ecm_classifier_process_response_xml_state_get(char *buf, int b
 	char *accel_mode_str = "";
 	char timer_group_str[50] = "";
 	char qos_tag_str[50] = "";
+	char dscp_str[50] = "";
 	char *relevance_str = "";
 
 	if (pr->relevance == ECM_CLASSIFIER_RELEVANCE_NO) {
@@ -183,6 +188,11 @@ static inline int ecm_classifier_process_response_xml_state_get(char *buf, int b
 				pr->flow_qos_tag, pr->return_qos_tag);
 	}
 
+	if (pr->process_actions & ECM_CLASSIFIER_PROCESS_ACTION_DSCP) {
+		snprintf(dscp_str, sizeof(dscp_str), " flow_dscp=\"%u\" return_dscp=\"%u\"",
+				pr->flow_dscp, pr->return_dscp);
+	}
+
 	if (pr->process_actions & ECM_CLASSIFIER_PROCESS_ACTION_TIMER_GROUP) {
 		snprintf(timer_group_str, sizeof(timer_group_str), " timer_group=\"%d\"", pr->timer_group);
 	}
@@ -194,13 +204,14 @@ static inline int ecm_classifier_process_response_xml_state_get(char *buf, int b
 		relevance_str = " relevant=\"yes\"";
 	}
 
-	return snprintf(buf, buf_sz, "<pr %s became_relevant=\"%u\"%s%s%s%s/>\n",
+	return snprintf(buf, buf_sz, "<pr %s became_relevant=\"%u\"%s%s%s%s%s/>\n",
 			relevance_str,
 			pr->became_relevant,
 			drop_str,
 			qos_tag_str,
 			timer_group_str,
-			accel_mode_str);
+			accel_mode_str,
+			dscp_str);
 }
 
 

@@ -1516,6 +1516,15 @@ static void ecm_front_end_ipv6_connection_tcp_front_end_accelerate(struct ecm_fr
 	create.return_qos_tag = (uint32_t)pr->return_qos_tag;
 
 	/*
+	 * DSCP information?
+	 */
+	if (pr->process_actions & ECM_CLASSIFIER_PROCESS_ACTION_DSCP) {
+		create.flow_dscp = pr->flow_dscp;
+		create.return_dscp = pr->return_dscp;
+		create.flags |= NSS_IPV6_CREATE_FLAG_DSCP_MARKING;
+	}
+
+	/*
 	 * Set protocol
 	 */
 	create.protocol = (int32_t)IPPROTO_TCP;
@@ -2370,6 +2379,15 @@ static void ecm_front_end_ipv6_connection_udp_front_end_accelerate(struct ecm_fr
 	create.return_qos_tag = (uint32_t)pr->return_qos_tag;
 
 	/*
+	 * DSCP information?
+	 */
+	if (pr->process_actions & ECM_CLASSIFIER_PROCESS_ACTION_DSCP) {
+		create.flow_dscp = pr->flow_dscp;
+		create.return_dscp = pr->return_dscp;
+		create.flags |= NSS_IPV6_CREATE_FLAG_DSCP_MARKING;
+	}
+
+	/*
 	 * Set protocol
 	 */
 	create.protocol = (int32_t)IPPROTO_UDP;
@@ -3157,6 +3175,15 @@ static void ecm_front_end_ipv6_connection_non_ported_front_end_accelerate(struct
 	 */
 	create.flow_qos_tag = (uint32_t)pr->flow_qos_tag;
 	create.return_qos_tag = (uint32_t)pr->return_qos_tag;
+
+	/*
+	 * DSCP information?
+	 */
+	if (pr->process_actions & ECM_CLASSIFIER_PROCESS_ACTION_DSCP) {
+		create.flow_dscp = pr->flow_dscp;
+		create.return_dscp = pr->return_dscp;
+		create.flags |= NSS_IPV6_CREATE_FLAG_DSCP_MARKING;
+	}
 
 	/*
 	 * Set protocol
@@ -4105,6 +4132,29 @@ static unsigned int ecm_front_end_ipv6_tcp_process(struct net_device *out_dev,
 			prevalent_pr.flow_qos_tag = aci_pr.flow_qos_tag;
 			prevalent_pr.return_qos_tag = aci_pr.return_qos_tag;
 		}
+
+		/*
+		 * If any classifier denied DSCP remarking then that overrides every classifier
+		 */
+		if (aci_pr.process_actions & ECM_CLASSIFIER_PROCESS_ACTION_DSCP_DENY) {
+			DEBUG_TRACE("%p: aci: %p, type: %d, DSCP remark denied\n",
+					ci, aci, aci->type_get(aci));
+			prevalent_pr.process_actions |= ECM_CLASSIFIER_PROCESS_ACTION_DSCP_DENY;
+			prevalent_pr.process_actions &= ~ECM_CLASSIFIER_PROCESS_ACTION_DSCP;
+		}
+
+		/*
+		 * DSCP remark action, but only if it has not been denied by any classifier
+		 */
+		if (aci_pr.process_actions & ECM_CLASSIFIER_PROCESS_ACTION_DSCP) {
+			if (!(prevalent_pr.process_actions & ECM_CLASSIFIER_PROCESS_ACTION_DSCP_DENY)) {
+				DEBUG_TRACE("%p: aci: %p, type: %d, DSCP remark wanted, flow_dscp: %u, return dscp: %u\n",
+						ci, aci, aci->type_get(aci), aci_pr.flow_dscp, aci_pr.return_dscp);
+				prevalent_pr.process_actions |= ECM_CLASSIFIER_PROCESS_ACTION_DSCP;
+				prevalent_pr.flow_dscp = aci_pr.flow_dscp;
+				prevalent_pr.return_dscp = aci_pr.return_dscp;
+			}
+		}
 	}
 	ecm_db_connection_assignments_release(assignment_count, assignments);
 
@@ -4645,6 +4695,29 @@ static unsigned int ecm_front_end_ipv6_udp_process(struct net_device *out_dev,
 			prevalent_pr.flow_qos_tag = aci_pr.flow_qos_tag;
 			prevalent_pr.return_qos_tag = aci_pr.return_qos_tag;
 		}
+
+		/*
+		 * If any classifier denied DSCP remarking then that overrides every classifier
+		 */
+		if (aci_pr.process_actions & ECM_CLASSIFIER_PROCESS_ACTION_DSCP_DENY) {
+			DEBUG_TRACE("%p: aci: %p, type: %d, DSCP remark denied\n",
+					ci, aci, aci->type_get(aci));
+			prevalent_pr.process_actions |= ECM_CLASSIFIER_PROCESS_ACTION_DSCP_DENY;
+			prevalent_pr.process_actions &= ~ECM_CLASSIFIER_PROCESS_ACTION_DSCP;
+		}
+
+		/*
+		 * DSCP remark action, but only if it has not been denied by any classifier
+		 */
+		if (aci_pr.process_actions & ECM_CLASSIFIER_PROCESS_ACTION_DSCP) {
+			if (!(prevalent_pr.process_actions & ECM_CLASSIFIER_PROCESS_ACTION_DSCP_DENY)) {
+				DEBUG_TRACE("%p: aci: %p, type: %d, DSCP remark wanted, flow_dscp: %u, return dscp: %u\n",
+						ci, aci, aci->type_get(aci), aci_pr.flow_dscp, aci_pr.return_dscp);
+				prevalent_pr.process_actions |= ECM_CLASSIFIER_PROCESS_ACTION_DSCP;
+				prevalent_pr.flow_dscp = aci_pr.flow_dscp;
+				prevalent_pr.return_dscp = aci_pr.return_dscp;
+			}
+		}
 	}
 	ecm_db_connection_assignments_release(assignment_count, assignments);
 
@@ -5135,6 +5208,29 @@ static unsigned int ecm_front_end_ipv6_non_ported_process(struct net_device *out
 					ci, aci, aci->type_get(aci), aci_pr.flow_qos_tag, aci_pr.return_qos_tag);
 			prevalent_pr.flow_qos_tag = aci_pr.flow_qos_tag;
 			prevalent_pr.return_qos_tag = aci_pr.return_qos_tag;
+		}
+
+		/*
+		 * If any classifier denied DSCP remarking then that overrides every classifier
+		 */
+		if (aci_pr.process_actions & ECM_CLASSIFIER_PROCESS_ACTION_DSCP_DENY) {
+			DEBUG_TRACE("%p: aci: %p, type: %d, DSCP remark denied\n",
+					ci, aci, aci->type_get(aci));
+			prevalent_pr.process_actions |= ECM_CLASSIFIER_PROCESS_ACTION_DSCP_DENY;
+			prevalent_pr.process_actions &= ~ECM_CLASSIFIER_PROCESS_ACTION_DSCP;
+		}
+
+		/*
+		 * DSCP remark action, but only if it has not been denied by any classifier
+		 */
+		if (aci_pr.process_actions & ECM_CLASSIFIER_PROCESS_ACTION_DSCP) {
+			if (!(prevalent_pr.process_actions & ECM_CLASSIFIER_PROCESS_ACTION_DSCP_DENY)) {
+				DEBUG_TRACE("%p: aci: %p, type: %d, DSCP remark wanted, flow_dscp: %u, return dscp: %u\n",
+						ci, aci, aci->type_get(aci), aci_pr.flow_dscp, aci_pr.return_dscp);
+				prevalent_pr.process_actions |= ECM_CLASSIFIER_PROCESS_ACTION_DSCP;
+				prevalent_pr.flow_dscp = aci_pr.flow_dscp;
+				prevalent_pr.return_dscp = aci_pr.return_dscp;
+			}
 		}
 	}
 	ecm_db_connection_assignments_release(assignment_count, assignments);
