@@ -1510,9 +1510,10 @@ static void ecm_front_end_ipv6_connection_tcp_front_end_accelerate(struct ecm_fr
 	}
 
 	/*
-	 * Store the skb->priority as the qos tag
+	 * Set up the flow and return qos tags
 	 */
-	create.qos_tag = (uint32_t)pr->qos_tag;
+	create.flow_qos_tag = (uint32_t)pr->flow_qos_tag;
+	create.return_qos_tag = (uint32_t)pr->return_qos_tag;
 
 	/*
 	 * Set protocol
@@ -1644,7 +1645,8 @@ static void ecm_front_end_ipv6_connection_tcp_front_end_accelerate(struct ecm_fr
 			"return_pppoe_remote_mac: %pM\n"
 			"flow_pppoe_session_id: %u\n"
 			"flow_pppoe_remote_mac: %pM\n"
-			"qos_tag: %x (%u)\n",
+			"flow_qos_tag: %x (%u)\n",
+			"return_qos_tag: %x (%u)\n",
 			fecti,
 			fecti->ci,
 			create.protocol,
@@ -1681,7 +1683,8 @@ static void ecm_front_end_ipv6_connection_tcp_front_end_accelerate(struct ecm_fr
 			create.return_pppoe_remote_mac,
 			create.flow_pppoe_session_id,
 			create.flow_pppoe_remote_mac,
-			create.qos_tag, create.qos_tag);
+			create.flow_qos_tag, create.flow_qos_tag,
+			create.return_qos_tag, create.return_qos_tag);
 
 	/*
 	 * Call the rule create function
@@ -2361,9 +2364,10 @@ static void ecm_front_end_ipv6_connection_udp_front_end_accelerate(struct ecm_fr
 	}
 
 	/*
-	 * Store the skb->priority as the qos tag
+	 * Set up the flow and return qos tags
 	 */
-	create.qos_tag = (uint32_t)pr->qos_tag;
+	create.flow_qos_tag = (uint32_t)pr->flow_qos_tag;
+	create.return_qos_tag = (uint32_t)pr->return_qos_tag;
 
 	/*
 	 * Set protocol
@@ -2457,7 +2461,8 @@ static void ecm_front_end_ipv6_connection_udp_front_end_accelerate(struct ecm_fr
 			"return_pppoe_remote_mac: %pM\n"
 			"flow_pppoe_session_id: %u\n"
 			"flow_pppoe_remote_mac: %pM\n"
-			"qos_tag: %x (%u)\n",
+			"flow_qos_tag: %x (%u)\n",
+			"return_qos_tag: %x (%u)\n",
 			fecui,
 			fecui->ci,
 			create.protocol,
@@ -2486,7 +2491,8 @@ static void ecm_front_end_ipv6_connection_udp_front_end_accelerate(struct ecm_fr
 			create.return_pppoe_remote_mac,
 			create.flow_pppoe_session_id,
 			create.flow_pppoe_remote_mac,
-			create.qos_tag, create.qos_tag);
+			create.flow_qos_tag, create.flow_qos_tag,
+			create.return_qos_tag, create.return_qos_tag);
 
 	/*
 	 * Call the rule create function
@@ -3147,9 +3153,10 @@ static void ecm_front_end_ipv6_connection_non_ported_front_end_accelerate(struct
 	}
 
 	/*
-	 * Store the skb->priority as the qos tag
+	 * Set up the flow and return qos tags
 	 */
-	create.qos_tag = (uint32_t)pr->qos_tag;
+	create.flow_qos_tag = (uint32_t)pr->flow_qos_tag;
+	create.return_qos_tag = (uint32_t)pr->return_qos_tag;
 
 	/*
 	 * Set protocol
@@ -3241,7 +3248,8 @@ static void ecm_front_end_ipv6_connection_non_ported_front_end_accelerate(struct
 			"return_pppoe_remote_mac: %pM\n"
 			"flow_pppoe_session_id: %u\n"
 			"flow_pppoe_remote_mac: %pM\n"
-			"qos_tag: %x (%u)\n",
+			"flow_qos_tag: %x (%u)\n",
+			"return_qos_tag: %x (%u)\n",
 			fecnpi,
 			fecnpi->ci,
 			create.protocol,
@@ -3270,7 +3278,8 @@ static void ecm_front_end_ipv6_connection_non_ported_front_end_accelerate(struct
 			create.return_pppoe_remote_mac,
 			create.flow_pppoe_session_id,
 			create.flow_pppoe_remote_mac,
-			create.qos_tag, create.qos_tag);
+			create.flow_qos_tag, create.flow_qos_tag,
+			create.return_qos_tag, create.return_qos_tag);
 
 	/*
 	 * Call the rule create function
@@ -4015,7 +4024,8 @@ static unsigned int ecm_front_end_ipv6_tcp_process(struct net_device *out_dev,
 	 */
 	DEBUG_TRACE("%p: process begin, skb: %p\n", ci, skb);
 	prevalent_pr.drop = false;
-	prevalent_pr.qos_tag = skb->priority;
+	prevalent_pr.flow_qos_tag = skb->priority;
+	prevalent_pr.return_qos_tag = skb->priority;
 	prevalent_pr.accel_mode = ECM_CLASSIFIER_ACCELERATION_MODE_ACCEL;
 	prevalent_pr.timer_group = ci_orig_timer_group = ecm_db_connection_timer_group_get(ci);
 
@@ -4027,8 +4037,10 @@ static unsigned int ecm_front_end_ipv6_tcp_process(struct net_device *out_dev,
 		aci = assignments[aci_index];
 		DEBUG_TRACE("%p: process: %p, type: %d\n", ci, aci, aci->type_get(aci));
 		aci->process(aci, sender, iph, skb, &aci_pr);
-		DEBUG_TRACE("%p: aci_pr: process actions: %x, became relevant: %u, relevance: %d, drop: %d, qos_tag: %u, accel_mode: %x, timer_group: %d\n",
-				ci, aci_pr.process_actions, aci_pr.became_relevant, aci_pr.relevance, aci_pr.drop, aci_pr.qos_tag, aci_pr.accel_mode, aci_pr.timer_group);
+		DEBUG_TRACE("%p: aci_pr: process actions: %x, became relevant: %u, relevance: %d, drop: %d, "
+				"flow_qos_tag: %u, return_qos_tag: %u, accel_mode: %x, timer_group: %d\n",
+				ci, aci_pr.process_actions, aci_pr.became_relevant, aci_pr.relevance, aci_pr.drop,
+				aci_pr.flow_qos_tag, aci_pr.return_qos_tag, aci_pr.accel_mode, aci_pr.timer_group);
 
 		if (aci_pr.relevance == ECM_CLASSIFIER_RELEVANCE_NO) {
 			ecm_classifier_type_t aci_type;
@@ -4088,8 +4100,10 @@ static unsigned int ecm_front_end_ipv6_tcp_process(struct net_device *out_dev,
 		 * Qos tag (the last classifier i.e. the highest priority one) will 'win'
 		 */
 		if (aci_pr.process_actions & ECM_CLASSIFIER_PROCESS_ACTION_QOS_TAG) {
-			DEBUG_TRACE("%p: qos_tag: %p, type: %d, qos tag: %u\n", ci, aci, aci->type_get(aci), aci_pr.qos_tag);
-			prevalent_pr.qos_tag = aci_pr.qos_tag;
+			DEBUG_TRACE("%p: aci: %p, type: %d, flow qos tag: %u, return qos tag: %u\n",
+					ci, aci, aci->type_get(aci), aci_pr.flow_qos_tag, aci_pr.return_qos_tag);
+			prevalent_pr.flow_qos_tag = aci_pr.flow_qos_tag;
+			prevalent_pr.return_qos_tag = aci_pr.return_qos_tag;
 		}
 	}
 	ecm_db_connection_assignments_release(assignment_count, assignments);
@@ -4115,8 +4129,9 @@ static unsigned int ecm_front_end_ipv6_tcp_process(struct net_device *out_dev,
 
 	/*
 	 * Assign qos tag
+	 * GGG TODO Should we use sender to identify whether to use flow or return qos tag?
 	 */
-	skb->priority = prevalent_pr.qos_tag;
+	skb->priority = prevalent_pr.flow_qos_tag;
 	DEBUG_TRACE("%p: skb priority: %u\n", ci, skb->priority);
 
 	if (ct) {
@@ -4549,7 +4564,8 @@ static unsigned int ecm_front_end_ipv6_udp_process(struct net_device *out_dev,
 	 */
 	DEBUG_TRACE("%p: process begin, skb: %p\n", ci, skb);
 	prevalent_pr.drop = false;
-	prevalent_pr.qos_tag = skb->priority;
+	prevalent_pr.flow_qos_tag = skb->priority;
+	prevalent_pr.return_qos_tag = skb->priority;
 	prevalent_pr.accel_mode = ECM_CLASSIFIER_ACCELERATION_MODE_ACCEL;
 	prevalent_pr.timer_group = ci_orig_timer_group = ecm_db_connection_timer_group_get(ci);
 
@@ -4561,8 +4577,10 @@ static unsigned int ecm_front_end_ipv6_udp_process(struct net_device *out_dev,
 		aci = assignments[aci_index];
 		DEBUG_TRACE("%p: process: %p, type: %d\n", ci, aci, aci->type_get(aci));
 		aci->process(aci, sender, iph, skb, &aci_pr);
-		DEBUG_TRACE("%p: aci_pr: process actions: %x, became relevant: %u, relevance: %d, drop: %d, qos_tag: %u, accel_mode: %x, timer_group: %d\n",
-				ci, aci_pr.process_actions, aci_pr.became_relevant, aci_pr.relevance, aci_pr.drop, aci_pr.qos_tag, aci_pr.accel_mode, aci_pr.timer_group);
+		DEBUG_TRACE("%p: aci_pr: process actions: %x, became relevant: %u, relevance: %d, drop: %d, "
+				"flow_qos_tag: %u, return_qos_tag: %u, accel_mode: %x, timer_group: %d\n",
+				ci, aci_pr.process_actions, aci_pr.became_relevant, aci_pr.relevance, aci_pr.drop,
+				aci_pr.flow_qos_tag, aci_pr.return_qos_tag, aci_pr.accel_mode, aci_pr.timer_group);
 
 		if (aci_pr.relevance == ECM_CLASSIFIER_RELEVANCE_NO) {
 			ecm_classifier_type_t aci_type;
@@ -4622,8 +4640,10 @@ static unsigned int ecm_front_end_ipv6_udp_process(struct net_device *out_dev,
 		 * Qos tag (the last classifier i.e. the highest priority one) will 'win'
 		 */
 		if (aci_pr.process_actions & ECM_CLASSIFIER_PROCESS_ACTION_QOS_TAG) {
-			DEBUG_TRACE("%p: qos_tag: %p, type: %d, qos tag: %u\n", ci, aci, aci->type_get(aci), aci_pr.qos_tag);
-			prevalent_pr.qos_tag = aci_pr.qos_tag;
+			DEBUG_TRACE("%p: aci: %p, type: %d, flow qos tag: %u, return qos tag: %u\n",
+					ci, aci, aci->type_get(aci), aci_pr.flow_qos_tag, aci_pr.return_qos_tag);
+			prevalent_pr.flow_qos_tag = aci_pr.flow_qos_tag;
+			prevalent_pr.return_qos_tag = aci_pr.return_qos_tag;
 		}
 	}
 	ecm_db_connection_assignments_release(assignment_count, assignments);
@@ -4649,8 +4669,9 @@ static unsigned int ecm_front_end_ipv6_udp_process(struct net_device *out_dev,
 
 	/*
 	 * Assign qos tag
+	 * GGG TODO Should we use sender to identify whether to use flow or return qos tag?
 	 */
-	skb->priority = prevalent_pr.qos_tag;
+	skb->priority = prevalent_pr.flow_qos_tag;
 	DEBUG_TRACE("%p: skb priority: %u\n", ci, skb->priority);
 
 	if (ct) {
@@ -5034,7 +5055,8 @@ static unsigned int ecm_front_end_ipv6_non_ported_process(struct net_device *out
 	 */
 	DEBUG_TRACE("%p: process begin, skb: %p\n", ci, skb);
 	prevalent_pr.drop = false;
-	prevalent_pr.qos_tag = skb->priority;
+	prevalent_pr.flow_qos_tag = skb->priority;
+	prevalent_pr.return_qos_tag = skb->priority;
 	prevalent_pr.accel_mode = ECM_CLASSIFIER_ACCELERATION_MODE_ACCEL;
 	prevalent_pr.timer_group = ci_orig_timer_group = ecm_db_connection_timer_group_get(ci);
 
@@ -5046,8 +5068,10 @@ static unsigned int ecm_front_end_ipv6_non_ported_process(struct net_device *out
 		aci = assignments[aci_index];
 		DEBUG_TRACE("%p: process: %p, type: %d\n", ci, aci, aci->type_get(aci));
 		aci->process(aci, sender, ip_hdr, skb, &aci_pr);
-		DEBUG_TRACE("%p: aci_pr: process actions: %x, became relevant: %u, relevance: %d, drop: %d, qos_tag: %u, accel_mode: %x, timer_group: %d\n",
-				ci, aci_pr.process_actions, aci_pr.became_relevant, aci_pr.relevance, aci_pr.drop, aci_pr.qos_tag, aci_pr.accel_mode, aci_pr.timer_group);
+		DEBUG_TRACE("%p: aci_pr: process actions: %x, became relevant: %u, relevance: %d, drop: %d, "
+				"flow_qos_tag: %u, return_qos_tag: %u, accel_mode: %x, timer_group: %d\n",
+				ci, aci_pr.process_actions, aci_pr.became_relevant, aci_pr.relevance, aci_pr.drop,
+				aci_pr.flow_qos_tag, aci_pr.return_qos_tag, aci_pr.accel_mode, aci_pr.timer_group);
 
 		if (aci_pr.relevance == ECM_CLASSIFIER_RELEVANCE_NO) {
 			ecm_classifier_type_t aci_type;
@@ -5107,8 +5131,10 @@ static unsigned int ecm_front_end_ipv6_non_ported_process(struct net_device *out
 		 * Qos tag (the last classifier i.e. the highest priority one) will 'win'
 		 */
 		if (aci_pr.process_actions & ECM_CLASSIFIER_PROCESS_ACTION_QOS_TAG) {
-			DEBUG_TRACE("%p: qos_tag: %p, type: %d, qos tag: %u\n", ci, aci, aci->type_get(aci), aci_pr.qos_tag);
-			prevalent_pr.qos_tag = aci_pr.qos_tag;
+			DEBUG_TRACE("%p: aci: %p, type: %d, flow qos tag: %u, return qos tag: %u\n",
+					ci, aci, aci->type_get(aci), aci_pr.flow_qos_tag, aci_pr.return_qos_tag);
+			prevalent_pr.flow_qos_tag = aci_pr.flow_qos_tag;
+			prevalent_pr.return_qos_tag = aci_pr.return_qos_tag;
 		}
 	}
 	ecm_db_connection_assignments_release(assignment_count, assignments);
@@ -5134,8 +5160,9 @@ static unsigned int ecm_front_end_ipv6_non_ported_process(struct net_device *out
 
 	/*
 	 * Assign qos tag
+	 * GGG TODO Should we use sender to identify whether to use flow or return qos tag?
 	 */
-	skb->priority = prevalent_pr.qos_tag;
+	skb->priority = prevalent_pr.flow_qos_tag;
 	DEBUG_TRACE("%p: skb priority: %u\n", ci, skb->priority);
 
 	/*

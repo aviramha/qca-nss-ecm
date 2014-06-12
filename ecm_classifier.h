@@ -58,8 +58,8 @@ typedef enum ecm_classifier_acceleration_modes ecm_classifier_acceleration_mode_
  * Due to the parallel processing nature of classifiers, *usually* the action(s) of the highest priority
  * classifier will override any lower priority actions.  This is up to front end discretion, of course.
  */
-#define ECM_CLASSIFIER_PROCESS_ACTION_DROP 0x00000001		/* Examine drop */
-#define ECM_CLASSIFIER_PROCESS_ACTION_QOS_TAG 0x00000002	/* Contains a qos tag */
+#define ECM_CLASSIFIER_PROCESS_ACTION_DROP 0x00000001		/* Drop */
+#define ECM_CLASSIFIER_PROCESS_ACTION_QOS_TAG 0x00000002	/* Contains flow & return qos tags */
 #define ECM_CLASSIFIER_PROCESS_ACTION_ACCEL_MODE 0x00000004	/* Contains an accel mode */
 #define ECM_CLASSIFIER_PROCESS_ACTION_TIMER_GROUP 0x00000008	/* Contains a timer group change */
 
@@ -77,7 +77,8 @@ struct ecm_classifier_process_response {
 	 * The following fields are only to be inspected if this response is relevant AND the process_actions indicates so
 	 */
 	bool drop;					/* Drop packet at hand */
-	uint32_t qos_tag;				/* QoS tag to use for the packet */
+	uint32_t flow_qos_tag;				/* QoS tag to use for the packet */
+	uint32_t return_qos_tag;			/* QoS tag to use for the packet */
 	ecm_classifier_acceleration_mode_t accel_mode;	/* Acceleration needed for this connection */
 	ecm_db_timer_group_t timer_group;		/* Timer group the connection should be in */
 };
@@ -178,7 +179,8 @@ static inline int ecm_classifier_process_response_xml_state_get(char *buf, int b
 	}
 
 	if (pr->process_actions & ECM_CLASSIFIER_PROCESS_ACTION_QOS_TAG) {
-		snprintf(qos_tag_str, sizeof(qos_tag_str), " qos_tag=\"%u\"", pr->qos_tag);
+		snprintf(qos_tag_str, sizeof(qos_tag_str), " flow_qos_tag=\"%u\" return_qos_tag=\"%u\"",
+				pr->flow_qos_tag, pr->return_qos_tag);
 	}
 
 	if (pr->process_actions & ECM_CLASSIFIER_PROCESS_ACTION_TIMER_GROUP) {

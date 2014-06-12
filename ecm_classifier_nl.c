@@ -521,8 +521,14 @@ ecm_classifier_nl_process_mark(struct ecm_classifier_nl_instance *cnli,
 	updated = false;
 
 	spin_lock_bh(&ecm_classifier_nl_lock);
-	if (mark != cnli->process_response.qos_tag) {
-		cnli->process_response.qos_tag = mark;
+
+	/*
+	 * If the mark is different to either of the current flow or return qos tags then we override them.
+	 * NOTE: This will force a change of the skb priority and also drive through these qos tags in any acceleration rule.
+	 */
+	if ((mark != cnli->process_response.flow_qos_tag) || (mark != cnli->process_response.return_qos_tag)) {
+		cnli->process_response.flow_qos_tag = mark;
+		cnli->process_response.return_qos_tag = mark;
 		cnli->process_response.process_actions |=
 			ECM_CLASSIFIER_PROCESS_ACTION_QOS_TAG;
 		updated = true;
@@ -869,7 +875,8 @@ struct ecm_classifier_nl_instance *ecm_classifier_nl_instance_alloc(struct ecm_d
 	/*
 	 * Classifier initially denies acceleration.
 	 */
-	cnli->process_response.qos_tag = 0;
+	cnli->process_response.flow_qos_tag = 0;
+	cnli->process_response.return_qos_tag = 0;
 	cnli->process_response.relevance = ECM_CLASSIFIER_RELEVANCE_MAYBE;
 	cnli->process_response.process_actions =
 		ECM_CLASSIFIER_PROCESS_ACTION_ACCEL_MODE;
