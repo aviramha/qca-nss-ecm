@@ -5590,6 +5590,8 @@ static void ecm_front_end_ipv6_ipv6_net_dev_callback(struct nss_ipv6_cb_params *
 		ci = ecm_db_connection_find_and_ref(src_ip, dest_ip, IPPROTO_TCP, (int)sync->src_port, (int)sync->dest_port);
 	} else if (likely(sync->protocol == IPPROTO_UDP)) {
 		ci = ecm_db_connection_find_and_ref(src_ip, dest_ip, IPPROTO_UDP, (int)sync->src_port, (int)sync->dest_port);
+	} else if (likely(sync->protocol == IPPROTO_IPIP)) {
+		ci = ecm_db_connection_find_and_ref(src_ip, dest_ip, IPPROTO_IPIP, (int)sync->src_port, (int)sync->dest_port);
 	} else {
 		DEBUG_TRACE("%p: sync ignored for protocol %d\n", sync, sync->protocol);
 		return;

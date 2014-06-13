@@ -5751,6 +5751,8 @@ static void ecm_front_end_ipv4_net_dev_callback(struct nss_ipv4_cb_params *nicb)
 		ci = ecm_db_connection_find_and_ref(src_ip, dest_ip_xlate, IPPROTO_TCP, (int)sync->src_port, (int)sync->dest_port_xlate);
 	} else if (likely(sync->protocol == IPPROTO_UDP)) {
 		ci = ecm_db_connection_find_and_ref(src_ip, dest_ip_xlate, IPPROTO_UDP, (int)sync->src_port, (int)sync->dest_port_xlate);
+	} else if (likely(sync->protocol == IPPROTO_IPV6)) {
+		ci = ecm_db_connection_find_and_ref(src_ip, dest_ip_xlate, IPPROTO_IPV6, (int)sync->src_port, (int)sync->dest_port_xlate);
 	} else {
 		DEBUG_TRACE("%p: sync ignored for protocol %d\n", sync, sync->protocol);
 		return;
