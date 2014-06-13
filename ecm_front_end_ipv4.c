@@ -1122,7 +1122,7 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_accelerate(struct ecm_fr
 			"return_pppoe_remote_mac: %pM\n"
 			"flow_pppoe_session_id: %u\n"
 			"flow_pppoe_remote_mac: %pM\n"
-			"flow_qos_tag: %x (%u)\n",
+			"flow_qos_tag: %x (%u)\n"
 			"return_qos_tag: %x (%u)\n",
 			fecti,
 			fecti->ci,
@@ -1984,7 +1984,7 @@ static void ecm_front_end_ipv4_connection_udp_front_end_accelerate(struct ecm_fr
 			"return_pppoe_remote_mac: %pM\n"
 			"flow_pppoe_session_id: %u\n"
 			"flow_pppoe_remote_mac: %pM\n"
-			"flow_qos_tag: %x (%u)\n",
+			"flow_qos_tag: %x (%u)\n"
 			"return_qos_tag: %x (%u)\n",
 			fecui,
 			fecui->ci,
@@ -2830,7 +2830,7 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_accelerate(struct
 			"return_pppoe_remote_mac: %pM\n"
 			"flow_pppoe_session_id: %u\n"
 			"flow_pppoe_remote_mac: %pM\n"
-			"flow_qos_tag: %x (%u)\n",
+			"flow_qos_tag: %x (%u)\n"
 			"return_qos_tag: %x (%u)\n",
 			fecnpi,
 			fecnpi->ci,
