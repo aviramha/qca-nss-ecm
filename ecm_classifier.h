@@ -158,7 +158,7 @@ static inline int ecm_classifier_process_response_xml_state_get(char *buf, int b
 	char *drop_str = "";
 	char *accel_mode_str = "";
 	char timer_group_str[50] = "";
-	char qos_tag_str[50] = "";
+	char qos_tag_str[60] = "";
 	char dscp_str[50] = "";
 	char *relevance_str = "";
 
