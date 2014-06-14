@@ -3733,6 +3733,7 @@ static unsigned int ecm_front_end_ipv4_tcp_process(struct net_device *out_dev, s
 	 * 5. Only the highest priority classifier, that actions it, will have its timer group honoured.
 	 */
 	DEBUG_TRACE("%p: process begin, skb: %p\n", ci, skb);
+	prevalent_pr.process_actions = 0;
 	prevalent_pr.drop = false;
 	prevalent_pr.flow_qos_tag = skb->priority;
 	prevalent_pr.return_qos_tag = skb->priority;
@@ -4387,6 +4388,7 @@ static unsigned int ecm_front_end_ipv4_udp_process(struct net_device *out_dev, s
 	 * 5. Only the highest priority classifier, that actions it, will have its timer group honoured.
 	 */
 	DEBUG_TRACE("%p: process begin, skb: %p\n", ci, skb);
+	prevalent_pr.process_actions = 0;
 	prevalent_pr.drop = false;
 	prevalent_pr.flow_qos_tag = skb->priority;
 	prevalent_pr.return_qos_tag = skb->priority;
@@ -4987,6 +4989,7 @@ static unsigned int ecm_front_end_ipv4_non_ported_process(struct net_device *out
 	 * 5. Only the highest priority classifier, that actions it, will have its timer group honoured.
 	 */
 	DEBUG_TRACE("%p: process begin, skb: %p\n", ci, skb);
+	prevalent_pr.process_actions = 0;
 	prevalent_pr.drop = false;
 	prevalent_pr.flow_qos_tag = skb->priority;
 	prevalent_pr.return_qos_tag = skb->priority;
