@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2014, The Linux Foundation.  All rights reserved.
+ * Copyright (c) 2014,2015 The Linux Foundation.  All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -231,14 +231,12 @@ struct ecm_tracker_tcp_reader_instance {
  * Using these timeouts ensures efficient resource uses and avoids connections hanging around when it is unnecessary.
  */
 static ecm_db_timer_group_t ecm_tracker_tcp_timer_group_from_state[] = {
-							ECM_DB_TIMER_GROUPS_CONNECTION_TCP_SHORT_TIMEOUT,	/* Unknown */
-							ECM_DB_TIMER_GROUPS_CONNECTION_TCP_SHORT_TIMEOUT,	/* Establishing */
-							ECM_DB_TIMER_GROUPS_CONNECTION_TCP_LONG_TIMEOUT,	/* Established */
-							ECM_DB_TIMER_GROUPS_CONNECTION_TCP_SHORT_TIMEOUT,	/* Closing */
-							ECM_DB_TIMER_GROUPS_CONNECTION_TCP_SHORT_TIMEOUT,	/* Closed */
-							ECM_DB_TIMER_GROUPS_CONNECTION_TCP_RESET_TIMEOUT,	/* Fault */
+							ECM_DB_TIMER_GROUPS_CONNECTION_TCP_SHORT_TIMEOUT,	/* ECM_TRACKER_CONNECTION_STATE_ESTABLISHING */
+							ECM_DB_TIMER_GROUPS_CONNECTION_TCP_LONG_TIMEOUT,	/* ECM_TRACKER_CONNECTION_STATE_ESTABLISHED */
+							ECM_DB_TIMER_GROUPS_CONNECTION_TCP_SHORT_TIMEOUT,	/* ECM_TRACKER_CONNECTION_STATE_CLOSING */
+							ECM_DB_TIMER_GROUPS_CONNECTION_TCP_SHORT_TIMEOUT,	/* ECM_TRACKER_CONNECTION_STATE_CLOSED */
+							ECM_DB_TIMER_GROUPS_CONNECTION_TCP_RESET_TIMEOUT,	/* ECM_TRACKER_CONNECTION_STATE_FAULT */
 							};
-
 int ecm_tracker_tcp_count = 0;		/* Counts the number of TCP data trackers right now */
 int ecm_tracker_tcp_reader_count = 0;	/* Counts the number of TCP readers right now */
 spinlock_t ecm_tracker_tcp_lock;	/* Global lock for the tracker globals */
