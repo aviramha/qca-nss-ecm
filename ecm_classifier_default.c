@@ -84,8 +84,7 @@
 struct ecm_classifier_default_internal_instance {
 	struct ecm_classifier_default_instance base;		/* Base type */
 
-	struct ecm_db_connection_instance *ci;			/* RO: Connection pointer, note that this is a copy of the connection pointer not a ref to it as this instance is ref'd by the connection itself. */
-	uint32_t serial;					/* RO: Linkage to the connection the cdii is associated with. */
+	uint32_t ci_serial;					/* RO: Serial of the connection */
 
 	struct ecm_classifier_process_response process_response;
 								/* Last process response computed */
@@ -224,7 +223,28 @@ static void ecm_classifier_default_process(struct ecm_classifier_instance *aci, 
 	struct ecm_classifier_default_internal_instance *cdii = (struct ecm_classifier_default_internal_instance *)aci;
 	struct nf_conn *ct;
 	enum ip_conntrack_info ctinfo;
+	struct ecm_db_connection_instance *ci;
+	int protocol;
 	DEBUG_CHECK_MAGIC(cdii, ECM_CLASSIFIER_DEFAULT_INTERNAL_INSTANCE_MAGIC, "%p: invalid state magic\n", cdii);
+
+	/*
+	 * Lookup the associated connection to identify its protocol type.
+	 */
+	ci = ecm_db_connection_serial_find_and_ref(cdii->ci_serial);
+	if (!ci) {
+		DEBUG_TRACE("%p: No ci found for %u\n", cdii, cdii->ci_serial);
+
+		/*
+		 * Still relevant but have no actions that need processing
+		 */
+		spin_lock_bh(&ecm_classifier_default_lock);
+		cdii->process_response.process_actions = 0;
+		*process_response = cdii->process_response;
+		spin_unlock_bh(&ecm_classifier_default_lock);
+		return;
+	}
+	protocol = ecm_db_connection_protocol_get(ci);
+	ecm_db_connection_deref(ci);
 
 	spin_lock_bh(&ecm_classifier_default_lock);
 
@@ -251,15 +271,16 @@ static void ecm_classifier_default_process(struct ecm_classifier_instance *aci, 
 	} else {
 		cdii->process_response.process_actions &= ~ECM_CLASSIFIER_PROCESS_ACTION_ACCEL_MODE;
 	}
+	spin_unlock_bh(&ecm_classifier_default_lock);
 
 	/*
+	 * Update connection state
 	 * Compute the timer group this connection should be in.
 	 * For this we need the tracker and the state to be updated.
 	 * NOTE: Tracker does not need to be ref'd it will exist for as long as this default classifier instance does
 	 * which is at least for the duration of this call.
 	 */
 	ti = cdii->ti;
-	spin_unlock_bh(&ecm_classifier_default_lock);
 	ti->state_update(ti, sender, ip_hdr, skb);
 	ti->state_get(ti, &from_state, &to_state, &prevailing_state, &tg);
 	spin_lock_bh(&ecm_classifier_default_lock);
@@ -280,7 +301,7 @@ static void ecm_classifier_default_process(struct ecm_classifier_instance *aci, 
 	/*
 	 * Handle non-TCP case
 	 */
-	if (ecm_db_connection_protocol_get(cdii->ci) != IPPROTO_TCP) {
+	if (protocol != IPPROTO_TCP) {
 		if (unlikely(prevailing_state != ECM_TRACKER_CONNECTION_STATE_ESTABLISHED)) {
 			cdii->process_response.accel_mode = ECM_CLASSIFIER_ACCELERATION_MODE_NO;
 		}
@@ -607,8 +628,7 @@ struct ecm_classifier_default_instance *ecm_classifier_default_instance_alloc(st
 
 	DEBUG_SET_MAGIC(cdii, ECM_CLASSIFIER_DEFAULT_INTERNAL_INSTANCE_MAGIC);
 	cdii->refs = 1;
-	cdii->ci = ci;
-	cdii->serial = ecm_db_connection_serial_get(ci);
+	cdii->ci_serial = ecm_db_connection_serial_get(ci);
 
 	/*
 	 * We are always relevant to the connection

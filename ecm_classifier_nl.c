@@ -90,7 +90,7 @@ struct ecm_classifier_nl_instance {
 	struct ecm_classifier_nl_instance *next;		/* Next classifier state instance (for accouting and reporting purposes) */
 	struct ecm_classifier_nl_instance *prev;		/* Next classifier state instance (for accouting and reporting purposes) */
 
-	struct ecm_db_connection_instance *ci;			/* Connection pointer, note that this is a copy of the connection pointer not a ref to it as this instance is ref'd by the connection itself. */
+	uint32_t ci_serial;					/* RO: Serial of the connection */
 	struct ecm_classifier_process_response process_response;/* Last process response computed */
 	int refs;						/* Integer to trap we never go negative */
 	unsigned int flags;					/* See ECM_CLASSIFIER_NL_F_* */
@@ -241,6 +241,7 @@ ecm_cl_nl_genl_attr_tuple_decode(struct ecm_cl_nl_genl_attr_tuple *tuple,
 static void
 ecm_classifier_nl_genl_msg_ACCEL_OK(struct ecm_classifier_nl_instance *cnli)
 {
+	struct ecm_db_connection_instance *ci;
 	int ret;
 	int proto;
 	int src_port;
@@ -249,24 +250,35 @@ ecm_classifier_nl_genl_msg_ACCEL_OK(struct ecm_classifier_nl_instance *cnli)
 	ip_addr_t dst_ip;
 	struct ecm_cl_nl_genl_attr_tuple tuple;
 
+	/*
+	 * Lookup the associated connection
+	 */
+	ci = ecm_db_connection_serial_find_and_ref(cnli->ci_serial);
+	if (!ci) {
+		DEBUG_TRACE("%p: No ci found for %u\n", cnli, cnli->ci_serial);
+		return;
+	}
+
 	spin_lock_bh(&ecm_classifier_nl_lock);
 
 	/* if we've already issued an ACCEL_OK on this connection,
 	   do not send it again */
 	if (cnli->flags & ECM_CLASSIFIER_NL_F_ACCEL_OK) {
 		spin_unlock_bh(&ecm_classifier_nl_lock);
+		ecm_db_connection_deref(ci);
 		return;
 	}
 
 	cnli->flags |= ECM_CLASSIFIER_NL_F_ACCEL_OK;
 
-	proto = ecm_db_connection_protocol_get(cnli->ci);
-	ecm_db_connection_from_address_get(cnli->ci, src_ip);
-	src_port = (uint16_t)ecm_db_connection_from_port_get(cnli->ci);
-	ecm_db_connection_to_address_get(cnli->ci, dst_ip);
-	dst_port = ecm_db_connection_to_port_get(cnli->ci);
+	proto = ecm_db_connection_protocol_get(ci);
+	ecm_db_connection_from_address_get(ci, src_ip);
+	src_port = (uint16_t)ecm_db_connection_from_port_get(ci);
+	ecm_db_connection_to_address_get(ci, dst_ip);
+	dst_port = ecm_db_connection_to_port_get(ci);
 
 	spin_unlock_bh(&ecm_classifier_nl_lock);
+	ecm_db_connection_deref(ci);
 
 	ret = ecm_cl_nl_genl_attr_tuple_encode(&tuple,
 					       proto,
@@ -286,6 +298,7 @@ ecm_classifier_nl_genl_msg_ACCEL_OK(struct ecm_classifier_nl_instance *cnli)
 static void
 ecm_classifier_nl_genl_msg_CLOSED(struct ecm_classifier_nl_instance *cnli)
 {
+	struct ecm_db_connection_instance *ci;
 	int ret;
 	int proto;
 	int src_port;
@@ -294,24 +307,35 @@ ecm_classifier_nl_genl_msg_CLOSED(struct ecm_classifier_nl_instance *cnli)
 	ip_addr_t dst_ip;
 	struct ecm_cl_nl_genl_attr_tuple tuple;
 
+	/*
+	 * Lookup the associated connection
+	 */
+	ci = ecm_db_connection_serial_find_and_ref(cnli->ci_serial);
+	if (!ci) {
+		DEBUG_TRACE("%p: No ci found for %u\n", cnli, cnli->ci_serial);
+		return;
+	}
+
 	spin_lock_bh(&ecm_classifier_nl_lock);
 
 	/* if we haven't issued an ACCEL_OK on this connection,
 	   we do not need to send a CLOSED event */
 	if (!(cnli->flags & ECM_CLASSIFIER_NL_F_ACCEL_OK)) {
 		spin_unlock_bh(&ecm_classifier_nl_lock);
+		ecm_db_connection_deref(ci);
 		return;
 	}
 
 	cnli->flags |= ECM_CLASSIFIER_NL_F_CLOSED;
 
-	proto = ecm_db_connection_protocol_get(cnli->ci);
-	ecm_db_connection_from_address_get(cnli->ci, src_ip);
-	src_port = (uint16_t)ecm_db_connection_from_port_get(cnli->ci);
-	ecm_db_connection_to_address_get(cnli->ci, dst_ip);
-	dst_port = ecm_db_connection_to_port_get(cnli->ci);
+	proto = ecm_db_connection_protocol_get(ci);
+	ecm_db_connection_from_address_get(ci, src_ip);
+	src_port = (uint16_t)ecm_db_connection_from_port_get(ci);
+	ecm_db_connection_to_address_get(ci, dst_ip);
+	dst_port = ecm_db_connection_to_port_get(ci);
 
 	spin_unlock_bh(&ecm_classifier_nl_lock);
+	ecm_db_connection_deref(ci);
 
 	ret = ecm_cl_nl_genl_attr_tuple_encode(&tuple,
 					       proto,
@@ -449,6 +473,7 @@ static void ecm_classifier_nl_ref(struct ecm_classifier_instance *ci)
 static int ecm_classifier_nl_deref(struct ecm_classifier_instance *ci)
 {
 	struct ecm_classifier_nl_instance *cnli;
+	bool accel_ok;
 
 	cnli = (struct ecm_classifier_nl_instance *)ci;
 
@@ -463,16 +488,6 @@ static int ecm_classifier_nl_deref(struct ecm_classifier_instance *ci)
 		int refs = cnli->refs;
 		spin_unlock_bh(&ecm_classifier_nl_lock);
 		return refs;
-	}
-
-	/*
-	 * send a closed event to multicast if we previously issued
-	 * an accelerated-ok event.
-	 */
-	if (cnli->flags & ECM_CLASSIFIER_NL_F_ACCEL_OK) {
-		spin_unlock_bh(&ecm_classifier_nl_lock);
-		ecm_classifier_nl_genl_msg_CLOSED(cnli);
-		spin_lock_bh(&ecm_classifier_nl_lock);
 	}
 
 	/*
@@ -496,7 +511,15 @@ static int ecm_classifier_nl_deref(struct ecm_classifier_instance *ci)
 	cnli->next = NULL;
 	cnli->prev = NULL;
 
+	/*
+	 * send a closed event to multicast if we previously issued
+	 * an accelerated-ok event.
+	 */
+	accel_ok = (cnli->flags & ECM_CLASSIFIER_NL_F_ACCEL_OK)? true : false;
 	spin_unlock_bh(&ecm_classifier_nl_lock);
+	if (accel_ok) {
+		ecm_classifier_nl_genl_msg_CLOSED(cnli);
+	}
 
 	/*
 	 * Final
@@ -516,6 +539,7 @@ ecm_classifier_nl_process_mark(struct ecm_classifier_nl_instance *cnli,
 	bool updated;
 	bool can_accel;
 	ecm_classifier_acceleration_mode_t accel_mode;
+	struct ecm_db_connection_instance *ci;
 	struct ecm_front_end_connection_instance *feci;
 
 	updated = false;
@@ -535,31 +559,43 @@ ecm_classifier_nl_process_mark(struct ecm_classifier_nl_instance *cnli,
 	}
 	spin_unlock_bh(&ecm_classifier_nl_lock);
 
-	if (updated) {
-		/*
-		 * we need to make sure to propagate the new mark to the
-		 * NSS if the connection has been accelerated.  to do that,
-		 * since there's no way to directly update an offload rule,
-		 * we simply decelerate the connection which should result
-		 * in a re-acceleration when the next packet is processed
-		 * by the front end, thereby applying the new mark.
-		 */
-		feci = ecm_db_connection_front_end_get_and_ref(cnli->ci);
-		feci->accel_state_get(feci,
-				      &accel_mode,
-				      &count,
-				      &limit,
-				      &can_accel);
-		if (accel_mode == ECM_CLASSIFIER_ACCELERATION_MODE_ACCEL) {
-			DEBUG_TRACE("%p: mark changed on offloaded connection, decelerate. new mark: 0x%08x\n",
-				    cnli, mark);
-			feci->decelerate(feci);
-		} else {
-			DEBUG_TRACE("%p: mark changed on non-offloaded connection. new mark: 0x%08x\n",
-				    cnli, mark);
-		}
-		feci->deref(feci);
+	if (!updated) {
+		return;
 	}
+
+	/*
+	 * we need to make sure to propagate the new mark to the
+	 * NSS if the connection has been accelerated.  to do that,
+	 * since there's no way to directly update an offload rule,
+	 * we simply decelerate the connection which should result
+	 * in a re-acceleration when the next packet is processed
+	 * by the front end, thereby applying the new mark.
+	 */
+
+	/*
+	 * Lookup the associated connection
+	 */
+	ci = ecm_db_connection_serial_find_and_ref(cnli->ci_serial);
+	if (!ci) {
+		DEBUG_TRACE("%p: No ci found for %u\n", cnli, cnli->ci_serial);
+		return;
+	}
+	feci = ecm_db_connection_front_end_get_and_ref(ci);
+	feci->accel_state_get(feci,
+			      &accel_mode,
+			      &count,
+			      &limit,
+			      &can_accel);
+	if (accel_mode == ECM_CLASSIFIER_ACCELERATION_MODE_ACCEL) {
+		DEBUG_TRACE("%p: mark changed on offloaded connection, decelerate. new mark: 0x%08x\n",
+			    cnli, mark);
+		feci->decelerate(feci);
+	} else {
+		DEBUG_TRACE("%p: mark changed on non-offloaded connection. new mark: 0x%08x\n",
+			    cnli, mark);
+	}
+	feci->deref(feci);
+	ecm_db_connection_deref(ci);
 }
 EXPORT_SYMBOL(ecm_classifier_nl_process_mark);
 
@@ -574,7 +610,7 @@ static void ecm_classifier_nl_process(struct ecm_classifier_instance *aci, ecm_t
 	struct ecm_classifier_nl_instance *cnli;
 	ecm_classifier_relevence_t relevance;
 	bool enabled;
-	struct ecm_front_end_connection_instance *feci;
+	struct ecm_db_connection_instance *ci;
 	ecm_classifier_acceleration_mode_t accel_mode;
 	int count;
 	int limit;
@@ -606,12 +642,17 @@ static void ecm_classifier_nl_process(struct ecm_classifier_instance *aci, ecm_t
 	 * Any other condition and we are not and will stop analysing this connection.
 	 */
 	relevance = ECM_CLASSIFIER_RELEVANCE_NO;
-	feci = ecm_db_connection_front_end_get_and_ref(cnli->ci);
-	feci->accel_state_get(feci, &accel_mode, &count, &limit, &can_accel);
-	feci->deref(feci);
-	if (enabled && can_accel && ecm_db_connection_is_routed_get(cnli->ci)) {
-		relevance = ECM_CLASSIFIER_RELEVANCE_YES;
-		became_relevant = ecm_db_time_get();
+	ci = ecm_db_connection_serial_find_and_ref(cnli->ci_serial);
+	if (ci) {
+		struct ecm_front_end_connection_instance *feci;
+		feci = ecm_db_connection_front_end_get_and_ref(ci);
+		feci->accel_state_get(feci, &accel_mode, &count, &limit, &can_accel);
+		feci->deref(feci);
+		if (enabled && can_accel && ecm_db_connection_is_routed_get(ci)) {
+			relevance = ECM_CLASSIFIER_RELEVANCE_YES;
+			became_relevant = ecm_db_time_get();
+		}
+		ecm_db_connection_deref(ci);
 	}
 
 	/*
@@ -870,7 +911,7 @@ struct ecm_classifier_nl_instance *ecm_classifier_nl_instance_alloc(struct ecm_d
 	cnli->base.xml_state_get = ecm_classifier_nl_xml_state_get;
 	cnli->base.ref = ecm_classifier_nl_ref;
 	cnli->base.deref = ecm_classifier_nl_deref;
-	cnli->ci = ci;
+	cnli->ci_serial = ecm_db_connection_serial_get(ci);
 
 	/*
 	 * Classifier initially denies acceleration.

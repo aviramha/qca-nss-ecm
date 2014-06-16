@@ -94,7 +94,7 @@ struct ecm_classifier_hyfi_instance {
 	struct ecm_classifier_hyfi_instance *next;		/* Next classifier state instance (for accouting and reporting purposes) */
 	struct ecm_classifier_hyfi_instance *prev;		/* Next classifier state instance (for accouting and reporting purposes) */
 
-	struct ecm_db_connection_instance *ci;			/* Connection pointer, note that this is a copy of the connection pointer not a ref to it as this instance is ref'd by the connection itself. */
+	uint32_t ci_serial;					/* RO: Serial of the connection */
 	struct ecm_classifier_process_response process_response;/* Last process response computed */
 
 	uint32_t hyfi_state;
@@ -218,6 +218,7 @@ static void ecm_classifier_hyfi_process(struct ecm_classifier_instance *aci, ecm
 	struct ecm_classifier_hyfi_instance *chfi;
 	ecm_classifier_relevence_t relevance;
 	bool enabled;
+	struct ecm_db_connection_instance *ci;
 	struct ecm_front_end_connection_instance *feci;
 	ecm_classifier_acceleration_mode_t accel_mode;
 	int count;
@@ -251,9 +252,16 @@ static void ecm_classifier_hyfi_process(struct ecm_classifier_instance *aci, ecm
 	 * Any other condition and we are not and will stop analysing this connection.
 	 */
 	relevance = ECM_CLASSIFIER_RELEVANCE_NO;
-	feci = ecm_db_connection_front_end_get_and_ref(chfi->ci);
-	feci->accel_state_get(feci, &accel_mode, &count, &limit, &can_accel);
-	feci->deref(feci);
+	ci = ecm_db_connection_serial_find_and_ref(chfi->ci_serial);
+	if (!ci) {
+		DEBUG_TRACE("%p: No ci found for %u\n", chfi, chfi->ci_serial);
+		can_accel = false;
+	} else {
+		feci = ecm_db_connection_front_end_get_and_ref(ci);
+		feci->accel_state_get(feci, &accel_mode, &count, &limit, &can_accel);
+		feci->deref(feci);
+		ecm_db_connection_deref(ci);
+	}
 	if (enabled && can_accel) {
 		relevance = ECM_CLASSIFIER_RELEVANCE_YES;
 		became_relevant = ecm_db_time_get();
@@ -281,12 +289,10 @@ hyfi_classifier_out:
 		goto hyfi_classifier_done;
 	}
 
-	ecm_serial = ecm_db_connection_serial_get(chfi->ci);
-
 	/*
 	 * Call Hy-Fi bridge and initialize the classifier
 	 */
-	if (hyfi_ecm_new_connection(skb, ecm_serial, &chfi->hyfi_hash) < 0) {
+	if (hyfi_ecm_new_connection(skb, chfi->ci_serial, &chfi->hyfi_hash) < 0) {
 		chfi->hyfi_state = ECM_CLASSIFIER_HYFI_STATE_IGNORE;
 		goto hyfi_classifier_done;
 	}
@@ -311,6 +317,7 @@ hyfi_classifier_done:
 static void ecm_classifier_hyfi_sync_to_v4(struct ecm_classifier_instance *aci, struct nss_ipv4_cb_params *params)
 {
 	struct ecm_classifier_hyfi_instance *chfi;
+	struct ecm_db_connection_instance *ci;
 	uint64_t num_packets = 0;
 	uint64_t num_bytes = 0;
 
@@ -322,16 +329,22 @@ static void ecm_classifier_hyfi_sync_to_v4(struct ecm_classifier_instance *aci, 
 		return;
 	}
 
+	ci = ecm_db_connection_serial_find_and_ref(chfi->ci_serial);
+	if (!ci) {
+		DEBUG_TRACE("%p: No ci found for %u\n", chfi, chfi->ci_serial);
+		return;
+	}
+
 	/*
 	 * Update the stats on Hy-Fi side
 	 */
-	ecm_db_connection_data_stats_get(chfi->ci, NULL, &num_bytes,
+	ecm_db_connection_data_stats_get(ci, NULL, &num_bytes,
 			NULL, &num_packets,
 			NULL, NULL,
 			NULL, NULL );
+	ecm_db_connection_deref(ci);
 
-	if (hyfi_ecm_update_stats(chfi->hyfi_hash, ecm_db_connection_serial_get(chfi->ci),
-			num_bytes, num_packets) < 0) {
+	if (hyfi_ecm_update_stats(chfi->hyfi_hash, chfi->ci_serial, num_bytes, num_packets) < 0) {
 		/* If update fails, move the state to init state */
 		chfi->hyfi_state = ECM_CLASSIFIER_HYFI_STATE_INIT;
 	}
@@ -356,6 +369,7 @@ static void ecm_classifier_hyfi_sync_from_v4(struct ecm_classifier_instance *aci
 static void ecm_classifier_hyfi_sync_to_v6(struct ecm_classifier_instance *aci, struct nss_ipv6_cb_params *params)
 {
 	struct ecm_classifier_hyfi_instance *chfi;
+	struct ecm_db_connection_instance *ci;
 	uint64_t num_packets = 0;
 	uint64_t num_bytes = 0;
 
@@ -367,16 +381,22 @@ static void ecm_classifier_hyfi_sync_to_v6(struct ecm_classifier_instance *aci, 
 		return;
 	}
 
+	ci = ecm_db_connection_serial_find_and_ref(chfi->ci_serial);
+	if (!ci) {
+		DEBUG_TRACE("%p: No ci found for %u\n", chfi, chfi->ci_serial);
+		return;
+	}
+
 	/*
 	 * Update the stats on Hy-Fi side
 	 */
-	ecm_db_connection_data_stats_get(chfi->ci, NULL, &num_bytes,
+	ecm_db_connection_data_stats_get(ci, NULL, &num_bytes,
 			NULL, &num_packets,
 			NULL, NULL,
 			NULL, NULL );
+	ecm_db_connection_deref(ci);
 
-	hyfi_ecm_update_stats(chfi->hyfi_hash, ecm_db_connection_serial_get(chfi->ci),
-			num_bytes, num_packets);
+	hyfi_ecm_update_stats(chfi->hyfi_hash, chfi->ci_serial,	num_bytes, num_packets);
 }
 
 /*
@@ -523,7 +543,7 @@ struct ecm_classifier_hyfi_instance *ecm_classifier_hyfi_instance_alloc(struct e
 	chfi->base.xml_state_get = ecm_classifier_hyfi_xml_state_get;
 	chfi->base.ref = ecm_classifier_hyfi_ref;
 	chfi->base.deref = ecm_classifier_hyfi_deref;
-	chfi->ci = ci;
+	chfi->ci_serial = ecm_db_connection_serial_get(ci);
 	chfi->process_response.process_actions = 0;
 	chfi->process_response.relevance = ECM_CLASSIFIER_RELEVANCE_MAYBE;
 

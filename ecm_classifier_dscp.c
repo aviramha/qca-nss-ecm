@@ -86,7 +86,7 @@ struct ecm_classifier_dscp_instance {
 	struct ecm_classifier_dscp_instance *next;		/* Next classifier state instance (for accouting and reporting purposes) */
 	struct ecm_classifier_dscp_instance *prev;		/* Next classifier state instance (for accouting and reporting purposes) */
 
-	struct ecm_db_connection_instance *ci;			/* Connection pointer, note that this is a copy of the connection pointer not a ref to it as this instance is ref'd by the connection itself. */
+	uint32_t ci_serial;					/* RO: Serial of the connection */
 	struct ecm_classifier_process_response process_response;/* Last process response computed */
 
 	int refs;						/* Integer to trap we never go negative */
@@ -199,6 +199,7 @@ static void ecm_classifier_dscp_process(struct ecm_classifier_instance *aci, ecm
 {
 	struct ecm_classifier_dscp_instance *cdscpi;
 	ecm_classifier_relevence_t relevance;
+	struct ecm_db_connection_instance *ci = NULL;
 	struct ecm_front_end_connection_instance *feci;
 	ecm_classifier_acceleration_mode_t accel_mode;
 	int count;
@@ -256,7 +257,14 @@ static void ecm_classifier_dscp_process(struct ecm_classifier_instance *aci, ecm
 	/*
 	 * Can we accelerate?
 	 */
-	feci = ecm_db_connection_front_end_get_and_ref(cdscpi->ci);
+	ci = ecm_db_connection_serial_find_and_ref(cdscpi->ci_serial);
+	if (!ci) {
+		DEBUG_TRACE("%p: No ci found for %u\n", cdscpi, cdscpi->ci_serial);
+		spin_lock_bh(&ecm_classifier_dscp_lock);
+		cdscpi->process_response.relevance = ECM_CLASSIFIER_RELEVANCE_NO;
+		goto dscp_classifier_out;
+	}
+	feci = ecm_db_connection_front_end_get_and_ref(ci);
 	feci->accel_state_get(feci, &accel_mode, &count, &limit, &can_accel);
 	feci->deref(feci);
 	if (!can_accel) {
@@ -323,7 +331,7 @@ static void ecm_classifier_dscp_process(struct ecm_classifier_instance *aci, ecm
 		/*
 		 * Get the other side ready to return our PR
 		 */
-		if (ecm_db_connection_protocol_get(cdscpi->ci) == IPPROTO_TCP) {
+		if (ecm_db_connection_protocol_get(ci) == IPPROTO_TCP) {
 			return_qos_tag = dscpcte->reply_priority;
 			return_dscp = dscpcte->reply_dscp;
 		} else {
@@ -358,7 +366,7 @@ static void ecm_classifier_dscp_process(struct ecm_classifier_instance *aci, ecm
 		/*
 		 * Get the other side ready to return our PR
 		 */
-		if (ecm_db_connection_protocol_get(cdscpi->ci) == IPPROTO_TCP) {
+		if (ecm_db_connection_protocol_get(ci) == IPPROTO_TCP) {
 			flow_qos_tag = dscpcte->flow_priority;
 			flow_dscp = dscpcte->flow_dscp;
 		} else {
@@ -407,7 +415,10 @@ static void ecm_classifier_dscp_process(struct ecm_classifier_instance *aci, ecm
 	}
 
 dscp_classifier_out:
-	;
+
+	if (ci) {
+		ecm_db_connection_deref(ci);
+	}
 
 	/*
 	 * Return our process response
@@ -595,7 +606,7 @@ struct ecm_classifier_dscp_instance *ecm_classifier_dscp_instance_alloc(struct e
 	cdscpi->base.xml_state_get = ecm_classifier_dscp_xml_state_get;
 	cdscpi->base.ref = ecm_classifier_dscp_ref;
 	cdscpi->base.deref = ecm_classifier_dscp_deref;
-	cdscpi->ci = ci;
+	cdscpi->ci_serial = ecm_db_connection_serial_get(ci);
 	cdscpi->process_response.process_actions = 0;
 	cdscpi->process_response.relevance = ECM_CLASSIFIER_RELEVANCE_MAYBE;
 
