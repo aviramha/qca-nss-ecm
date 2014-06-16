@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2014, The Linux Foundation.  All rights reserved.
+ * Copyright (c) 2014,2015 The Linux Foundation.  All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -1667,10 +1667,6 @@ static void ecm_tracker_tcp_state_update_callback(struct ecm_tracker_instance *t
 	struct tcphdr *tcp_hdr;
 	struct ecm_tracker_tcp_sender_state *sender_state;
 	struct ecm_tracker_tcp_sender_state *peer_state;
-	ecm_tracker_sender_state_t sender_state_new;
-	ecm_tracker_sender_state_t sender_state_current;
-	ecm_tracker_sender_state_t peer_state_new;
-	ecm_tracker_sender_state_t peer_state_current;
 
 	DEBUG_CHECK_MAGIC(ttii, ECM_TRACKER_TCP_INSTANCE_MAGIC, "%p: magic failed", ttii);
 
@@ -1680,10 +1676,6 @@ static void ecm_tracker_tcp_state_update_callback(struct ecm_tracker_instance *t
 	DEBUG_ASSERT((sender >= 0) && (sender <= 1), "%p: invalid sender %d\n", ttii, sender);
 	sender_state = &ttii->sender_states[sender];
 	peer_state = &ttii->sender_states[!sender];
-	spin_lock_bh(&ttii->lock);
-	sender_state_new = sender_state_current = sender_state->state;
-	peer_state_new = peer_state_current = peer_state->state;
-	spin_unlock_bh(&ttii->lock);
 
 	/*
 	 * Get tcp header
@@ -1702,7 +1694,7 @@ static void ecm_tracker_tcp_state_update_callback(struct ecm_tracker_instance *t
 	 * If either side reports a reset this is catastrophic for the connection
 	 */
 	if (unlikely(tcp_hdr->rst)) {
-		DEBUG_WARN("%p: RESET\n", ttii);
+		DEBUG_INFO("%p: RESET\n", ttii);
 		spin_lock_bh(&ttii->lock);
 		sender_state->state = ECM_TRACKER_SENDER_STATE_FAULT;
 		peer_state->state = ECM_TRACKER_SENDER_STATE_FAULT;
@@ -1712,88 +1704,171 @@ static void ecm_tracker_tcp_state_update_callback(struct ecm_tracker_instance *t
 
 	/*
 	 * Likely ack is set - this constitutes the mainstay of a TCP connection
+	 * The sending of an ack may put the other side of the connection into a different state
 	 */
+	spin_lock_bh(&ttii->lock);
 	if (likely(tcp_hdr->ack)) {
-		/*
-		 * The sending of an ack may put the other side of the connection into a different state
-		 */
-		if (unlikely(peer_state_current == ECM_TRACKER_SENDER_STATE_ESTABLISHING)) {
-			int32_t ackd;
-			uint32_t ack_seq = ntohl(tcp_hdr->ack_seq);
-			uint32_t syn_seq = peer_state->syn_seq;
+		ecm_tracker_sender_state_t peer_state_current = peer_state->state;
+		uint32_t ack_seq = ntohl(tcp_hdr->ack_seq);
 
-			spin_lock_bh(&ttii->lock);
+		switch (peer_state_current) {
+		case ECM_TRACKER_SENDER_STATE_UNKNOWN: {
+			/*
+			 * Looks like we came into this connection mid-flow.
+			 * Flag that the peer is established which is all we can infer right now and
+			 * initialise the peers SYN sequence for further analysis of sequence space.
+			 */
+			peer_state->state = ECM_TRACKER_SENDER_STATE_ESTABLISHED;
+			peer_state->syn_seq = (ack_seq - 1);		/* -1 is because the ACK has ack'd our ficticious SYN */
+			DEBUG_INFO("%p: From unkown to established, ack_seq: %u, syn_seq: %u\n", ttii, ack_seq, peer_state->syn_seq);
+			break;
+		}
+		case ECM_TRACKER_SENDER_STATE_ESTABLISHING: {
+			int32_t ackd;
+			uint32_t syn_seq;
+
+			syn_seq = peer_state->syn_seq;
 			ackd = (int32_t)(ack_seq - syn_seq);
 			DEBUG_TRACE("%p: ack %u for syn_seq %u? ackd = %d\n", ttii, ack_seq, syn_seq, ackd);
-			spin_unlock_bh(&ttii->lock);
 
 			if (ackd <= 0) {
-				DEBUG_TRACE("%p: NO\n", ttii);
+				DEBUG_TRACE("%p: No change\n", ttii);
 			} else {
-				DEBUG_TRACE("%p: Established\n", ttii);
-				peer_state_new = ECM_TRACKER_SENDER_STATE_ESTABLISHED;
+				DEBUG_INFO("%p: Established\n", ttii);
+				peer_state->state = ECM_TRACKER_SENDER_STATE_ESTABLISHED;
 			}
-		} else if (unlikely(peer_state->state == ECM_TRACKER_SENDER_STATE_CLOSING)) {
+			break;
+		}
+		case ECM_TRACKER_SENDER_STATE_CLOSING: {
 			int32_t ackd;
-			uint32_t ack_seq = ntohl(tcp_hdr->ack_seq);
-			uint32_t fin_seq = peer_state->fin_seq;
+			uint32_t fin_seq;
 
-			spin_lock_bh(&ttii->lock);
+			fin_seq = peer_state->fin_seq;
 			ackd = (int32_t)(ack_seq - fin_seq);
 			DEBUG_TRACE("%p: ack %u for fin_seq %u? ackd = %d\n", ttii, ack_seq, fin_seq, ackd);
-			spin_unlock_bh(&ttii->lock);
 
 			if (ackd <= 0) {
-				DEBUG_TRACE("%p: NO\n", ttii);
+				DEBUG_TRACE("%p: No change\n", ttii);
 			} else {
 				DEBUG_TRACE("%p: Closed\n", ttii);
-				peer_state_new = ECM_TRACKER_SENDER_STATE_CLOSED;
+				peer_state->state = ECM_TRACKER_SENDER_STATE_CLOSED;
 			}
+			break;
 		}
-	}
-
-	if (unlikely(tcp_hdr->syn)) {
-		sender_state_new = ECM_TRACKER_SENDER_STATE_ESTABLISHING;
-	} else if (unlikely(tcp_hdr->fin)) {
-		sender_state_new = ECM_TRACKER_SENDER_STATE_CLOSING;
-	} else if (unlikely(!tcp_hdr->ack)) {
-		/*
-		 * Only valid to have no ack if not established.
-		 */
-		if (sender_state_current >= ECM_TRACKER_SENDER_STATE_ESTABLISHED) {
-			DEBUG_TRACE("%p: no ack but state is %d\n", ttii, sender_state_current);
-			spin_lock_bh(&ttii->lock);
-			sender_state->state = ECM_TRACKER_SENDER_STATE_FAULT;
-			peer_state->state = ECM_TRACKER_SENDER_STATE_FAULT;
-			spin_unlock_bh(&ttii->lock);
-			return;
+		case ECM_TRACKER_SENDER_STATE_ESTABLISHED:
+		case ECM_TRACKER_SENDER_STATE_CLOSED:
+		case ECM_TRACKER_SENDER_STATE_FAULT:
+			/*
+			 * No change
+			 */
+			break;
+		default:
+			DEBUG_ASSERT(false, "%p: unhandled state: %d\n", ttii, peer_state_current);
 		}
 	}
 
 	/*
-	 * States can only progress
-	 * Unlikely any change will occur - remains in established state mostly
+	 * Handle control flags sent by the sender (SYN & FIN)
+	 * Handle SYN first because, in sequence space, SYN is first.
 	 */
-	if (unlikely(peer_state_new > peer_state_current)) {
-		DEBUG_TRACE("%p: Peer %d transitions from %d to %d\n", ttii, !sender, peer_state_current, peer_state_new);
-		spin_lock_bh(&ttii->lock);
-		peer_state->state = peer_state_new;
-		spin_unlock_bh(&ttii->lock);
-	}
-	if (unlikely(sender_state_new > sender_state_current)) {
+	if (tcp_hdr->syn) {
+		ecm_tracker_sender_state_t sender_state_current = sender_state->state;
 		uint32_t seq = ntohl(tcp_hdr->seq);
-		spin_lock_bh(&ttii->lock);
-		sender_state->state = sender_state_new;
-		if (sender_state_new == ECM_TRACKER_SENDER_STATE_ESTABLISHING) {
-			DEBUG_TRACE("%p: Sender %d is establishing, seq: %u\n", ttii, sender, seq);
-			sender_state->syn_seq = seq;
+
+		switch (sender_state_current) {
+		case ECM_TRACKER_SENDER_STATE_UNKNOWN:
+			sender_state->state = ECM_TRACKER_SENDER_STATE_ESTABLISHING;
+			sender_state->syn_seq = seq;		/* Seq is the sequence number of the SYN */
+			DEBUG_INFO("%p: From unkown to establishing, syn_seq: %u\n", ttii, sender_state->syn_seq);
+			break;
+		case ECM_TRACKER_SENDER_STATE_CLOSING:
+		case ECM_TRACKER_SENDER_STATE_CLOSED:
+			/*
+			 * SYN after seeing a FIN?  FAULT!
+			 */
+			sender_state->state = ECM_TRACKER_SENDER_STATE_FAULT;
+			DEBUG_INFO("%p: SYN after FIN - fault\n", ttii);
+			break;
+		case ECM_TRACKER_SENDER_STATE_ESTABLISHED:
+			/*
+			 * SYN when established is just a duplicate down to syn/ack timing subtleties
+			 */
+		case ECM_TRACKER_SENDER_STATE_ESTABLISHING:
+		case ECM_TRACKER_SENDER_STATE_FAULT:
+			/*
+			 * No change
+			 */
+			break;
+		default:
+			DEBUG_ASSERT(false, "%p: unhandled state: %d\n", ttii, sender_state_current);
 		}
-		if (sender_state_new == ECM_TRACKER_SENDER_STATE_CLOSING) {
-			DEBUG_TRACE("%p: Sender %d is closing, seq: %u\n", ttii, sender, seq);
-			sender_state->fin_seq = seq;
-		}
-		spin_unlock_bh(&ttii->lock);
 	}
+
+	if (tcp_hdr->fin) {
+		ecm_tracker_sender_state_t sender_state_current = sender_state->state;
+		uint32_t seq = ntohl(tcp_hdr->seq);
+
+		switch (sender_state_current) {
+		case ECM_TRACKER_SENDER_STATE_UNKNOWN:
+			/*
+			 * Looks like we joined mid-flow.
+			 * Have to set up both SYN and FIN.
+			 * NOTE: It's possible that SYN is in the same packet as FIN, account for that in the seq numbers
+			 */
+			sender_state->state = ECM_TRACKER_SENDER_STATE_CLOSING;
+			if (tcp_hdr->syn) {
+				sender_state->syn_seq = seq;
+				sender_state->fin_seq = seq + 1;
+			} else {
+				sender_state->fin_seq = seq;		/* seq is the FIN sequence */
+				sender_state->syn_seq = seq - 1;	/* Make a guess at what the SYN was */
+			}
+			DEBUG_INFO("%p: From unkown to closing, syn_seq: %u, fin_seq: %u\n", ttii, sender_state->syn_seq, sender_state->fin_seq);
+			break;
+		case ECM_TRACKER_SENDER_STATE_ESTABLISHED:
+			/*
+			 * Connection becomes closing.
+			 */
+			sender_state->state = ECM_TRACKER_SENDER_STATE_CLOSING;
+			sender_state->fin_seq = seq;
+			DEBUG_INFO("%p: From established to closing, fin_seq: %u\n", ttii, sender_state->fin_seq);
+			break;
+		case ECM_TRACKER_SENDER_STATE_ESTABLISHING: {
+			int32_t newer;
+
+			/*
+			 * FIN while waiting for SYN to be acknowledged is possible but only if it
+			 * it is in the same packet or later sequence space
+			 */
+			newer = (int32_t)(seq - sender_state->syn_seq);
+			if (!tcp_hdr->syn || (newer <= 0)) {
+				DEBUG_INFO("%p: From establishing to fault - odd FIN seen, syn: %u, syn_seq: %u, newer: %d\n",
+						ttii, tcp_hdr->syn, sender_state->syn_seq, newer);
+				sender_state->state = ECM_TRACKER_SENDER_STATE_FAULT;
+			} else {
+				uint32_t fin_seq = seq;
+				if (tcp_hdr->syn) {
+					fin_seq++;
+				}
+				sender_state->state = ECM_TRACKER_SENDER_STATE_CLOSING;
+				DEBUG_INFO("%p: From establishing to closing, syn: %u, syn_seq: %u, fin_seq: %u\n",
+						ttii, tcp_hdr->syn, sender_state->syn_seq, sender_state->fin_seq);
+			}
+			break;
+		}
+		case ECM_TRACKER_SENDER_STATE_CLOSING:
+		case ECM_TRACKER_SENDER_STATE_CLOSED:
+		case ECM_TRACKER_SENDER_STATE_FAULT:
+			/*
+			 * No change
+			 */
+			break;
+		default:
+			DEBUG_ASSERT(false, "%p: unhandled state: %d\n", ttii, sender_state_current);
+		}
+	}
+
+	spin_unlock_bh(&ttii->lock);
 }
 
 /*
