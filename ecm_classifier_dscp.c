@@ -213,6 +213,7 @@ static void ecm_classifier_dscp_process(struct ecm_classifier_instance *aci, ecm
 	uint32_t return_qos_tag;
 	uint8_t flow_dscp;
 	uint8_t return_dscp;
+	bool dscp_marked = false;
 
 	cdscpi = (struct ecm_classifier_dscp_instance *)aci;
 	DEBUG_CHECK_MAGIC(cdscpi, ECM_CLASSIFIER_DSCP_INSTANCE_MAGIC, "%p: magic failed\n", cdscpi);
@@ -265,7 +266,7 @@ static void ecm_classifier_dscp_process(struct ecm_classifier_instance *aci, ecm
 	}
 
 	/*
-	 * Is there a DSCP extension and is the rule valid for it?
+	 * Is there a valid conntrack?
 	 */
 	ct = nf_ct_get(skb, &ctinfo);
 	if (!ct) {
@@ -274,10 +275,12 @@ static void ecm_classifier_dscp_process(struct ecm_classifier_instance *aci, ecm
 		goto dscp_classifier_out;
 	}
 
+	/*
+	 * Is there a DSCPREMARK extension?
+	 */
 	spin_lock_bh(&ct->lock);
 	dscpcte = nf_ct_dscpremark_ext_find(ct);
-	if (!dscpcte || (nf_conntrack_dscpremark_ext_get_dscp_rule_validity(ct)
-			!= NF_CT_DSCPREMARK_EXT_RULE_VALID)) {
+	if (!dscpcte) {
 		spin_unlock_bh(&ct->lock);
 		spin_lock_bh(&ecm_classifier_dscp_lock);
 		cdscpi->process_response.relevance = ECM_CLASSIFIER_RELEVANCE_NO;
@@ -285,10 +288,27 @@ static void ecm_classifier_dscp_process(struct ecm_classifier_instance *aci, ecm
 	}
 
 	/*
+	 * Was a DSCP rule enabled for the flow using the iptables 'DSCP'
+	 * target?
+	 */
+	if (nf_conntrack_dscpremark_ext_get_dscp_rule_validity(ct)
+				== NF_CT_DSCPREMARK_EXT_RULE_VALID) {
+		dscp_marked = true;
+	}
+
+	/*
 	 * Extract the priority and DSCP from skb and store into ct extension
-	 * GGG TODO Need to understand why we are doing this instead of just storing it in our
-	 * classifier instance?
-	 * GGG TODO Should we deny acceleration until we see both directions?  What about uni-flows like single direction udp?
+	 * for each direction.
+	 *
+	 * For TCP flows, we would have the values for both the directions by
+	 * the time the connection is established. For UDP flows, we copy
+	 * over the values from one direction to another if we find the
+	 * values for the other direction not set, which would be due to one
+	 * of the following.
+	 * a. We might not have seen a packet in the opposite direction
+	 * b. There were no explicitly configured priority/DSCP for the opposite
+	 *    direction.
+	 *
 	 */
 	ct_dir = CTINFO2DIR(ctinfo);
 	if (ct_dir == IP_CT_DIR_ORIGINAL) {
@@ -303,8 +323,27 @@ static void ecm_classifier_dscp_process(struct ecm_classifier_instance *aci, ecm
 		/*
 		 * Get the other side ready to return our PR
 		 */
-		return_qos_tag = dscpcte->reply_priority;
-		return_dscp = dscpcte->reply_dscp;
+		if (ecm_db_connection_protocol_get(cdscpi->ci) == IPPROTO_TCP) {
+			return_qos_tag = dscpcte->reply_priority;
+			return_dscp = dscpcte->reply_dscp;
+		} else {
+			/*
+			 * Copy over the flow direction QoS
+			 * and DSCP if the reply direction
+			 * values are not set.
+			 */
+			if (dscpcte->reply_priority == 0) {
+				return_qos_tag = flow_qos_tag;
+			} else {
+				return_qos_tag = dscpcte->reply_priority;
+			}
+
+			if (dscpcte->reply_dscp == 0) {
+				return_dscp = flow_dscp;
+			} else {
+				return_dscp = dscpcte->reply_dscp;
+			}
+		}
 		DEBUG_TRACE("Flow DSCP: %x Flow priority: %d, Return DSCP: %x Return priority: %d\n",
 				dscpcte->flow_dscp, dscpcte->flow_priority, return_dscp, return_qos_tag);
 	} else {
@@ -319,8 +358,27 @@ static void ecm_classifier_dscp_process(struct ecm_classifier_instance *aci, ecm
 		/*
 		 * Get the other side ready to return our PR
 		 */
-		flow_qos_tag = dscpcte->flow_priority;
-		flow_dscp = dscpcte->flow_dscp;
+		if (ecm_db_connection_protocol_get(cdscpi->ci) == IPPROTO_TCP) {
+			flow_qos_tag = dscpcte->flow_priority;
+			flow_dscp = dscpcte->flow_dscp;
+		} else {
+			/*
+			 * Copy over the return direction QoS
+			 * and DSCP if the flow direction
+			 * values are not set.
+			 */
+			if (dscpcte->flow_priority == 0) {
+				flow_qos_tag = return_qos_tag;
+			} else {
+				flow_qos_tag = dscpcte->flow_priority;
+			}
+
+			if (dscpcte->flow_dscp == 0) {
+				flow_dscp = return_dscp;
+			} else {
+				flow_dscp = dscpcte->flow_dscp;
+			}
+		}
 		DEBUG_TRACE("Return DSCP: %x Return priority: %d, Flow DSCP: %x Flow priority: %d\n",
 				dscpcte->reply_dscp, dscpcte->reply_priority, flow_dscp, flow_qos_tag);
 	}
@@ -335,12 +393,18 @@ static void ecm_classifier_dscp_process(struct ecm_classifier_instance *aci, ecm
 	cdscpi->process_response.relevance = ECM_CLASSIFIER_RELEVANCE_YES;
 	cdscpi->process_response.became_relevant = became_relevant;
 
-	cdscpi->process_response.process_actions =
-			ECM_CLASSIFIER_PROCESS_ACTION_DSCP | ECM_CLASSIFIER_PROCESS_ACTION_QOS_TAG;
+	cdscpi->process_response.process_actions = ECM_CLASSIFIER_PROCESS_ACTION_QOS_TAG;
 	cdscpi->process_response.flow_qos_tag = flow_qos_tag;
 	cdscpi->process_response.return_qos_tag = return_qos_tag;
-	cdscpi->process_response.flow_dscp = flow_dscp;
-	cdscpi->process_response.return_dscp = return_dscp;
+
+	/*
+	 * Check if we need to set DSCP
+	 */
+	if (dscp_marked) {
+		cdscpi->process_response.flow_dscp = flow_dscp;
+		cdscpi->process_response.return_dscp = return_dscp;
+		cdscpi->process_response.process_actions |= ECM_CLASSIFIER_PROCESS_ACTION_DSCP;
+	}
 
 dscp_classifier_out:
 	;
