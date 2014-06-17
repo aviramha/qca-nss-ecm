@@ -4754,6 +4754,11 @@ static unsigned int ecm_front_end_ipv6_non_ported_process(struct net_device *out
 		dest_port = 0;
 	} else {
 		/*
+		 * Do not accelerate the non-ported connections except the ones we handle.
+		 */
+		can_accel = false;
+
+		/*
 		 * port numbers are just the negative protocol number equivalents for now.
 		 * GGG They could eventually be used as protocol specific identifiers such as icmp id's etc.
 		 */
