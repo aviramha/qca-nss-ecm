@@ -1150,6 +1150,12 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct net_device 
 	if (dev_type == ECM_ARPHRD_IPSEC_TUNNEL_TYPE) {
 		DEBUG_TRACE("Net device: %p is IPSec tunnel type: %d\n", dev, dev_type);
 		type_info.ipsec_tunnel.os_specific_ident = dev_interface_num;
+
+		/*
+		 * nss_interface_num for all IPsec tunnels will always be NSS_C2C_TX_INTERFACE
+		 */
+		nss_interface_num = NSS_C2C_TX_INTERFACE;
+
 		// GGG TODO Flesh this out with tunnel endpoint addressing detail
 		ii = ecm_interface_ipsec_tunnel_interface_establish(&type_info.ipsec_tunnel, dev_name, dev_interface_num, nss_interface_num, dev_mtu);
 		return ii;
