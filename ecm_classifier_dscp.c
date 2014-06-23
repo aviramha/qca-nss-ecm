@@ -204,6 +204,7 @@ static void ecm_classifier_dscp_process(struct ecm_classifier_instance *aci, ecm
 	ecm_classifier_acceleration_mode_t accel_mode;
 	int count;
 	int limit;
+	int protocol;
 	bool can_accel;
 	uint32_t became_relevant = 0;
 	struct nf_conn *ct;
@@ -267,6 +268,8 @@ static void ecm_classifier_dscp_process(struct ecm_classifier_instance *aci, ecm
 	feci = ecm_db_connection_front_end_get_and_ref(ci);
 	feci->accel_state_get(feci, &accel_mode, &count, &limit, &can_accel);
 	feci->deref(feci);
+	protocol = ecm_db_connection_protocol_get(ci);
+	ecm_db_connection_deref(ci);
 	if (!can_accel) {
 		spin_lock_bh(&ecm_classifier_dscp_lock);
 		cdscpi->process_response.relevance = ECM_CLASSIFIER_RELEVANCE_NO;
@@ -331,7 +334,7 @@ static void ecm_classifier_dscp_process(struct ecm_classifier_instance *aci, ecm
 		/*
 		 * Get the other side ready to return our PR
 		 */
-		if (ecm_db_connection_protocol_get(ci) == IPPROTO_TCP) {
+		if (protocol == IPPROTO_TCP) {
 			return_qos_tag = dscpcte->reply_priority;
 			return_dscp = dscpcte->reply_dscp;
 		} else {
@@ -366,7 +369,7 @@ static void ecm_classifier_dscp_process(struct ecm_classifier_instance *aci, ecm
 		/*
 		 * Get the other side ready to return our PR
 		 */
-		if (ecm_db_connection_protocol_get(ci) == IPPROTO_TCP) {
+		if (protocol == IPPROTO_TCP) {
 			flow_qos_tag = dscpcte->flow_priority;
 			flow_dscp = dscpcte->flow_dscp;
 		} else {
@@ -415,10 +418,6 @@ static void ecm_classifier_dscp_process(struct ecm_classifier_instance *aci, ecm
 	}
 
 dscp_classifier_out:
-
-	if (ci) {
-		ecm_db_connection_deref(ci);
-	}
 
 	/*
 	 * Return our process response
