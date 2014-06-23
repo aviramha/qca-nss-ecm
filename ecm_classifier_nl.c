@@ -79,6 +79,7 @@
 #define ECM_CLASSIFIER_NL_F_ACCEL	(1 << 0) /* acceleration requested */
 #define ECM_CLASSIFIER_NL_F_ACCEL_OK	(1 << 1) /* acceleration confirmed */
 #define ECM_CLASSIFIER_NL_F_CLOSED	(1 << 2) /* close event issued */
+#define ECM_CLASSIFIER_NL_F_MARK	(1 << 3) /* cached qos_tag is nonzero */
 
 /*
  * struct ecm_classifier_nl_instance
@@ -555,6 +556,7 @@ ecm_classifier_nl_process_mark(struct ecm_classifier_nl_instance *cnli,
 		cnli->process_response.return_qos_tag = mark;
 		cnli->process_response.process_actions |=
 			ECM_CLASSIFIER_PROCESS_ACTION_QOS_TAG;
+		cnli->flags |= ECM_CLASSIFIER_NL_F_MARK;
 		updated = true;
 	}
 	spin_unlock_bh(&ecm_classifier_nl_lock);
@@ -620,10 +622,22 @@ static void ecm_classifier_nl_process(struct ecm_classifier_instance *aci, ecm_t
 	cnli = (struct ecm_classifier_nl_instance *)aci;
 	DEBUG_CHECK_MAGIC(cnli, ECM_CLASSIFIER_NL_INSTANCE_MAGIC, "%p: magic failed\n", cnli);
 
+	spin_lock_bh(&ecm_classifier_nl_lock);
+
+	if (cnli->flags & ECM_CLASSIFIER_NL_F_MARK) {
+		if (skb->priority != 0) {
+			/* defer to the existing skb->priority */
+			cnli->process_response.process_actions &=
+				~ECM_CLASSIFIER_PROCESS_ACTION_QOS_TAG;
+		} else {
+			cnli->process_response.process_actions |=
+				ECM_CLASSIFIER_PROCESS_ACTION_QOS_TAG;
+		}
+	}
+
 	/*
 	 * Have we decided our relevance?  If so return our state.
 	 */
-	spin_lock_bh(&ecm_classifier_nl_lock);
 	relevance = cnli->process_response.relevance;
 	if (relevance != ECM_CLASSIFIER_RELEVANCE_MAYBE) {
 		*process_response = cnli->process_response;
