@@ -1755,7 +1755,7 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfac
 					next_dev = bond_get_tx_dev(NULL, src_mac_addr, dest_mac_addr,
 								   &src_addr_32, &dest_addr_32,
 								   htons((uint16_t)ETH_P_IP), dest_dev);
-					if (next_dev) {
+					if (next_dev && netif_carrier_ok(next_dev)) {
 						dev_hold(next_dev);
 					} else {
 						DEBUG_WARN("Unable to obtain LAG output slave device\n");
@@ -2192,7 +2192,11 @@ static int ecm_interface_netdev_notifier_callback(struct notifier_block *this, u
 		DEBUG_INFO("Net device: %p, CHANGE\n", dev);
 		if (!netif_carrier_ok(dev)) {
 			DEBUG_INFO("Net device: %p, CARRIER BAD\n", dev);
-			ecm_interface_dev_regenerate_connections(dev);
+			if (netif_is_bond_slave(dev)) {
+				ecm_interface_dev_regenerate_connections(dev->master);
+			} else {
+				ecm_interface_dev_regenerate_connections(dev);
+			}
 		}
 		break;
 

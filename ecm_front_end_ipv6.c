@@ -596,7 +596,7 @@ int32_t ecm_front_end_ipv6_interface_heirarchy_construct(struct ecm_db_iface_ins
 					}
 
 					next_dev = bond_get_tx_dev(NULL, src_mac_addr, dest_mac_addr, src_addr, dest_addr, htons((uint16_t)ETH_P_IPV6), dest_dev);
-					if (next_dev) {
+					if (next_dev && netif_carrier_ok(next_dev)) {
 						dev_hold(next_dev);
 					} else {
 						DEBUG_WARN("Unable to obtain LAG output slave device\n");
@@ -3990,14 +3990,6 @@ static unsigned int ecm_front_end_ipv6_tcp_process(struct net_device *out_dev,
 		 * Release the assignments and re-obtain them as there may be new ones been reassigned.
 		 */
 		ecm_db_connection_assignments_release(assignment_count, assignments);
-
-		/*
-		 * Interface lists are regenerated in any situation as they determine correct packet flow
-		 * through the system - essential for correct interaction with the NSS and acceleration rule creation.
-		 */
-		DEBUG_TRACE("%p: Clearing interface lists\n", ci);
-		ecm_db_connection_from_interfaces_clear(ci);
-		ecm_db_connection_to_interfaces_clear(ci);
 	}
 
 	/*
@@ -4536,14 +4528,6 @@ static unsigned int ecm_front_end_ipv6_udp_process(struct net_device *out_dev,
 		 * Release the assignments and re-obtain them as there may be new ones been reassigned.
 		 */
 		ecm_db_connection_assignments_release(assignment_count, assignments);
-
-		/*
-		 * Interface lists are regenerated in any situation as they determine correct packet flow
-		 * through the system - essential for correct interaction with the NSS and acceleration rule creation.
-		 */
-		DEBUG_TRACE("%p: Clearing interface lists\n", ci);
-		ecm_db_connection_from_interfaces_clear(ci);
-		ecm_db_connection_to_interfaces_clear(ci);
 	}
 
 	/*
@@ -5038,14 +5022,6 @@ static unsigned int ecm_front_end_ipv6_non_ported_process(struct net_device *out
 		 * Release the assignments and re-obtain them as there may be new ones been reassigned.
 		 */
 		ecm_db_connection_assignments_release(assignment_count, assignments);
-
-		/*
-		 * Interface lists are regenerated in any situation as they determine correct packet flow
-		 * through the system - essential for correct interaction with the NSS and acceleration rule creation.
-		 */
-		DEBUG_TRACE("%p: Clearing interface lists\n", ci);
-		ecm_db_connection_from_interfaces_clear(ci);
-		ecm_db_connection_to_interfaces_clear(ci);
 	}
 
 	/*
