@@ -127,6 +127,11 @@ static struct ecm_classifier_nl_instance *ecm_classifier_nl_instances = NULL;
 static int ecm_classifier_nl_count = 0;					/* Tracks number of instances allocated */
 
 /*
+ * Listener for db events
+ */
+struct ecm_db_listener_instance *ecm_classifier_nl_li = NULL;
+
+/*
  * Generic Netlink family and multicast group names
  */
 static struct genl_multicast_group ecm_cl_nl_genl_mcgrp = {
@@ -295,47 +300,22 @@ ecm_classifier_nl_genl_msg_ACCEL_OK(struct ecm_classifier_nl_instance *cnli)
 					&tuple);
 }
 
-static void
-ecm_classifier_nl_genl_msg_CLOSED(struct ecm_classifier_nl_instance *cnli)
+/*
+ * ecm_classifier_nl_genl_msg_closed()
+ *	Invoke this when the connection has been closed and it has been accelerated previously.
+ *
+ * GGG TODO The purpose of this is not clear, esp. wrt. "accel ok" message.
+ * DO NOT CALL THIS UNLESS ECM_CLASSIFIER_NL_F_ACCEL_OK has been set.
+ */
+static void ecm_classifier_nl_genl_msg_closed(struct ecm_classifier_nl_instance *cnli,
+					int proto, ip_addr_t src_ip, ip_addr_t dst_ip, int src_port, int dst_port)
 {
-	struct ecm_db_connection_instance *ci;
 	int ret;
-	int proto;
-	int src_port;
-	int dst_port;
-	ip_addr_t src_ip;
-	ip_addr_t dst_ip;
 	struct ecm_cl_nl_genl_attr_tuple tuple;
 
-	/*
-	 * Lookup the associated connection
-	 */
-	ci = ecm_db_connection_serial_find_and_ref(cnli->ci_serial);
-	if (!ci) {
-		DEBUG_TRACE("%p: No ci found for %u\n", cnli, cnli->ci_serial);
-		return;
-	}
-
 	spin_lock_bh(&ecm_classifier_nl_lock);
-
-	/* if we haven't issued an ACCEL_OK on this connection,
-	   we do not need to send a CLOSED event */
-	if (!(cnli->flags & ECM_CLASSIFIER_NL_F_ACCEL_OK)) {
-		spin_unlock_bh(&ecm_classifier_nl_lock);
-		ecm_db_connection_deref(ci);
-		return;
-	}
-
 	cnli->flags |= ECM_CLASSIFIER_NL_F_CLOSED;
-
-	proto = ecm_db_connection_protocol_get(ci);
-	ecm_db_connection_from_address_get(ci, src_ip);
-	src_port = (uint16_t)ecm_db_connection_from_port_get(ci);
-	ecm_db_connection_to_address_get(ci, dst_ip);
-	dst_port = ecm_db_connection_to_port_get(ci);
-
 	spin_unlock_bh(&ecm_classifier_nl_lock);
-	ecm_db_connection_deref(ci);
 
 	ret = ecm_cl_nl_genl_attr_tuple_encode(&tuple,
 					       proto,
@@ -348,8 +328,7 @@ ecm_classifier_nl_genl_msg_CLOSED(struct ecm_classifier_nl_instance *cnli)
 		return;
 	}
 
-	ecm_classifier_nl_send_genl_msg(ECM_CL_NL_GENL_CMD_CONNECTION_CLOSED,
-					&tuple);
+	ecm_classifier_nl_send_genl_msg(ECM_CL_NL_GENL_CMD_CONNECTION_CLOSED, &tuple);
 }
 
 /*
@@ -473,12 +452,9 @@ static void ecm_classifier_nl_ref(struct ecm_classifier_instance *ci)
 static int ecm_classifier_nl_deref(struct ecm_classifier_instance *ci)
 {
 	struct ecm_classifier_nl_instance *cnli;
-	bool accel_ok;
-
 	cnli = (struct ecm_classifier_nl_instance *)ci;
 
-	DEBUG_CHECK_MAGIC(cnli, ECM_CLASSIFIER_NL_INSTANCE_MAGIC,
-			  "%p: magic failed\n", cnli);
+	DEBUG_CHECK_MAGIC(cnli, ECM_CLASSIFIER_NL_INSTANCE_MAGIC, "%p: magic failed\n", cnli);
 
 	spin_lock_bh(&ecm_classifier_nl_lock);
 	cnli->refs--;
@@ -510,16 +486,7 @@ static int ecm_classifier_nl_deref(struct ecm_classifier_instance *ci)
 	}
 	cnli->next = NULL;
 	cnli->prev = NULL;
-
-	/*
-	 * send a closed event to multicast if we previously issued
-	 * an accelerated-ok event.
-	 */
-	accel_ok = (cnli->flags & ECM_CLASSIFIER_NL_F_ACCEL_OK)? true : false;
 	spin_unlock_bh(&ecm_classifier_nl_lock);
-	if (accel_ok) {
-		ecm_classifier_nl_genl_msg_CLOSED(cnli);
-	}
 
 	/*
 	 * Final
@@ -878,6 +845,60 @@ static int ecm_classifier_nl_xml_state_get(struct ecm_classifier_instance *ci, c
 	}
 	total += count;
 	return total;
+}
+
+/*
+ * ecm_classifier_nl_connection_removed()
+ *	Invoked when a connection is removed from the DB
+ */
+static void ecm_classifier_nl_connection_removed(void *arg, struct ecm_db_connection_instance *ci)
+{
+	uint32_t serial __attribute__((unused)) = ecm_db_connection_serial_get(ci);
+	struct ecm_classifier_instance *classi;
+	struct ecm_classifier_nl_instance *cnli;
+	bool accel_ok;
+	int proto;
+	int src_port;
+	int dst_port;
+	ip_addr_t src_ip;
+	ip_addr_t dst_ip;
+
+	DEBUG_INFO("%p: NL Listener: conn removed with serial: %u\n", ci, serial);
+
+	/*
+	 * Only handle events if there is an NL classifier attached
+	 */
+	classi = ecm_db_connection_assigned_classifier_find_and_ref(ci, ECM_CLASSIFIER_TYPE_NL);
+	if (!classi) {
+		DEBUG_TRACE("%p: Connection removed ignored - no NL classifier\n", ci);
+		return;
+	}
+
+	cnli = (struct ecm_classifier_nl_instance *)classi;
+	DEBUG_INFO("%p: removed conn with serial: %u, NL classifier: %p\n", ci, serial, cnli);
+
+	/*
+	 * If the connection was accelerated OK then issue a close
+	 */
+	spin_lock_bh(&ecm_classifier_nl_lock);
+	accel_ok = (cnli->flags & ECM_CLASSIFIER_NL_F_ACCEL_OK)? true : false;
+	spin_unlock_bh(&ecm_classifier_nl_lock);
+	if (!accel_ok) {
+		DEBUG_INFO("%p: cnli: %p, accel not ok\n", ci, cnli);
+		classi->deref(classi);
+		return;
+	}
+
+	proto = ecm_db_connection_protocol_get(ci);
+	ecm_db_connection_from_address_get(ci, src_ip);
+	src_port = (uint16_t)ecm_db_connection_from_port_get(ci);
+	ecm_db_connection_to_address_get(ci, dst_ip);
+	dst_port = ecm_db_connection_to_port_get(ci);
+
+	DEBUG_INFO("%p: NL classifier: %p, issue Close\n", ci, cnli);
+	ecm_classifier_nl_genl_msg_closed(cnli, proto, src_ip, dst_ip, src_port, dst_port);
+
+	classi->deref(classi);
 }
 
 /*
@@ -1303,6 +1324,33 @@ int ecm_classifier_nl_rules_init(void)
 		goto classifier_task_cleanup_2;
 	}
 
+	/*
+	 * Allocate listener instance to listen for db events
+	 */
+	ecm_classifier_nl_li = ecm_db_listener_alloc();
+	if (!ecm_classifier_nl_li) {
+		DEBUG_ERROR("Failed to allocate listener\n");
+		goto classifier_task_cleanup_2;
+	}
+
+	/*
+	 * Add the listener into the database
+	 * NOTE: Ref the thread count for the listener
+	 */
+	ecm_db_listener_add(ecm_classifier_nl_li,
+			NULL /* ecm_classifier_nl_iface_added */,
+			NULL /* ecm_classifier_nl_iface_removed */,
+			NULL /* ecm_classifier_nl_node_added */,
+			NULL /* ecm_classifier_nl_node_removed */,
+			NULL /* ecm_classifier_nl_host_added */,
+			NULL /* ecm_classifier_nl_host_removed */,
+			NULL /* ecm_classifier_nl_mapping_added */,
+			NULL /* ecm_classifier_nl_mapping_removed */,
+			NULL /* ecm_classifier_nl_connection_added */,
+			ecm_classifier_nl_connection_removed,
+			NULL /* ecm_classifier_nl_listener_final */,
+			ecm_classifier_nl_li);
+
 	return 0;
 
 classifier_task_cleanup_2:
@@ -1321,6 +1369,16 @@ EXPORT_SYMBOL(ecm_classifier_nl_rules_init);
 void ecm_classifier_nl_rules_exit(void)
 {
 	DEBUG_INFO("Netlink classifier Module exit\n");
+
+	/*
+	 * Release our ref to the listener.
+	 * This will cause it to be unattached to the db listener list.
+	 * GGG TODO THIS IS TOTALLY BROKEN (DUE TO REF COUNT HANDLING NOT BEING HONOURED)
+	 */
+	if (ecm_classifier_nl_li) {
+		ecm_db_listener_deref(ecm_classifier_nl_li);
+		ecm_classifier_nl_li = NULL;
+	}
 
 	spin_lock_bh(&ecm_classifier_nl_lock);
 	ecm_classifier_nl_terminate_pending = true;
