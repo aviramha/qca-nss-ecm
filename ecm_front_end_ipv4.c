@@ -1314,8 +1314,8 @@ static int ecm_front_end_ipv4_connection_tcp_front_end_deref(struct ecm_front_en
 	 * We can now destroy the instance
 	 */
 	DEBUG_TRACE("%p: fecti final\n", fecti);
-	kfree(fecti);
 	DEBUG_CLEAR_MAGIC(fecti);
+	kfree(fecti);
 
 	/*
 	 * Thread may be able to exit on object destruction
@@ -2168,8 +2168,8 @@ static int ecm_front_end_ipv4_connection_udp_front_end_deref(struct ecm_front_en
 	 * We can now destroy the instance
 	 */
 	DEBUG_TRACE("%p: fecui final\n", fecui);
-	kfree(fecui);
 	DEBUG_CLEAR_MAGIC(fecui);
+	kfree(fecui);
 
 	/*
 	 * Thread may be able to exit on object destruction
@@ -3026,8 +3026,8 @@ static int ecm_front_end_ipv4_connection_non_ported_front_end_deref(struct ecm_f
 	 * We can now destroy the instance
 	 */
 	DEBUG_TRACE("%p: fecnpi final\n", fecnpi);
-	kfree(fecnpi);
 	DEBUG_CLEAR_MAGIC(fecnpi);
+	kfree(fecnpi);
 
 	/*
 	 * Thread may be able to exit on object destruction
