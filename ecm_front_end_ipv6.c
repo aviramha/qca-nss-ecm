@@ -3674,6 +3674,29 @@ static unsigned int ecm_front_end_ipv6_tcp_process(struct net_device *out_dev,
 		return NF_ACCEPT;
 	}
 
+	if (ct) {
+		/*
+		 * Don't try to manage a non-established connection.
+		 */
+		if (!test_bit(IPS_ASSURED_BIT, &ct->status)) {
+			DEBUG_TRACE("%p: Non-established connection\n", ct);
+			return NF_ACCEPT;
+		}
+
+		/*
+		 * If the connection is shutting down do not manage it.
+		 * state can not be SYN_SENT, SYN_RECV because connection is assured
+		 * Not managed states: FIN_WAIT, CLOSE_WAIT, LAST_ACK, TIME_WAIT, CLOSE.
+		 */
+		spin_lock_bh(&ct->lock);
+		if (ct->proto.tcp.state != TCP_CONNTRACK_ESTABLISHED) {
+			spin_unlock_bh(&ct->lock);
+			DEBUG_TRACE("%p: Connection in termination state %#X\n", ct, ct->proto.tcp.state);
+			return NF_ACCEPT;
+		}
+		spin_unlock_bh(&ct->lock);
+	}
+
 	/*
 	 * Now extract information, if we have conntrack then use that (which would already be in the tuples)
 	 */
