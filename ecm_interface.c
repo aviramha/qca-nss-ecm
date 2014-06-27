@@ -229,6 +229,7 @@ static bool ecm_interface_mac_addr_get_ipv6(ip_addr_t addr, uint8_t *mac_addr, b
 	 */
 	ECM_IP_ADDR_TO_NIN6_ADDR(daddr, addr);
 	if (!ecm_interface_find_route_by_addr(addr, &ecm_rt)) {
+		*on_link = false;
 		return false;
 	}
 	DEBUG_ASSERT(!ecm_rt.v4_route, "Did not locate a v6 route!\n");
@@ -311,6 +312,7 @@ static bool ecm_interface_mac_addr_get_ipv4(ip_addr_t addr, uint8_t *mac_addr, b
 	 */
 	ECM_IP_ADDR_TO_NIN4_ADDR(ipv4_addr, addr);
 	if (!ecm_interface_find_route_by_addr(addr, &ecm_rt)) {
+		*on_link = false;
 		return false;
 	}
 	DEBUG_ASSERT(ecm_rt.v4_route, "Did not locate a v4 route!\n");

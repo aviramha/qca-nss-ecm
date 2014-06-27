@@ -228,14 +228,14 @@ static struct ecm_db_node_instance *ecm_front_end_ipv4_node_establish_and_ref(st
 	}
 	for (i = ECM_DB_IFACE_HEIRARCHY_MAX - 1; (!done) && (i >= interface_list_first); i--) {
 		ecm_db_iface_type_t type;
+		ip_addr_t gw_addr = ECM_IP_ADDR_NULL;
+		bool on_link = false;
+		struct ecm_db_interface_info_pppoe pppoe_info;
 
 		type = ecm_db_connection_iface_type_get(interface_list[i]);
 		DEBUG_INFO("Lookup node address, interface @ %d is type: %d\n", i, type);
 
 		switch (type) {
-			ip_addr_t gw_addr = ECM_IP_ADDR_NULL;
-			bool on_link;
-			struct ecm_db_interface_info_pppoe pppoe_info;
 
 		case ECM_DB_IFACE_TYPE_PPPOE:
 			/*
