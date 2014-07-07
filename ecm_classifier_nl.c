@@ -44,6 +44,7 @@
 #include <net/netfilter/nf_conntrack_l4proto.h>
 #include <net/netfilter/nf_conntrack_l3proto.h>
 #include <net/netfilter/nf_conntrack_core.h>
+#include <net/netfilter/nf_conntrack_zones.h>
 #include <net/netfilter/ipv4/nf_conntrack_ipv4.h>
 #include <net/netfilter/ipv4/nf_defrag_ipv4.h>
 #include <net/genetlink.h>
@@ -848,6 +849,109 @@ static int ecm_classifier_nl_xml_state_get(struct ecm_classifier_instance *ci, c
 }
 
 /*
+ * ecm_classifier_nl_ct_get_and_ref()
+ * 	Returns the conntrack entry for an ecm_db_connection_instance.
+ * @param ci The connection instance to be used for the conntrack search.
+ * @return struct nf_conn * A pointer and a reference to a matching conntrack
+ *                          entry, or NULL if no such entry is found.
+ * @pre The ci instance is not NULL.
+ * @note This function takes a reference to the associated conntrack entry if
+ *       it is found, and the caller must nf_ct_put() this entry when done.
+ * @note FIXME: The param ci should be const, but none of the called functions
+ *       are declared const.  This would be a larger change.
+ */
+static struct nf_conn *
+ecm_classifier_nl_ct_get_and_ref(struct ecm_db_connection_instance *ci)
+{
+	int proto;
+	int src_port;
+	int dst_port;
+	ip_addr_t src_ip;
+	ip_addr_t dst_ip;
+	struct nf_conntrack_tuple_hash *h;
+	struct nf_conntrack_tuple tuple = {};
+
+	DEBUG_ASSERT(ci != NULL, "ci was NULL for ct lookup");
+	proto = ecm_db_connection_protocol_get(ci);
+	ecm_db_connection_from_address_get(ci, src_ip);
+	src_port = (uint16_t)ecm_db_connection_from_port_get(ci);
+	ecm_db_connection_to_address_nat_get(ci, dst_ip);
+	dst_port = (uint16_t)ecm_db_connection_to_port_nat_get(ci);
+
+	/*
+	 * FIXME: This assumes that all connections for which _IS_V4() is false
+	 * are V6 connections.  If this is false...this will break.
+	 */
+	if (ECM_IP_ADDR_IS_V4(src_ip)) {
+		DEBUG_ASSERT(ECM_IP_ADDR_IS_V4(dst_ip),
+			     "src IP was V4 but dst IP was not");
+		tuple.src.l3num = AF_INET;
+		ECM_IP_ADDR_TO_NIN4_ADDR(tuple.src.u3.ip, src_ip);
+		ECM_IP_ADDR_TO_NIN4_ADDR(tuple.dst.u3.ip, dst_ip);
+	} else {
+		DEBUG_ASSERT(!ECM_IP_ADDR_IS_V4(dst_ip),
+			     "src IP was V6 but dst IP was not");
+		tuple.src.l3num = AF_INET6;
+		ECM_IP_ADDR_TO_NIN6_ADDR(tuple.src.u3.in6, src_ip);
+		ECM_IP_ADDR_TO_NIN6_ADDR(tuple.dst.u3.in6, dst_ip);
+	}
+	tuple.dst.protonum = proto;
+	tuple.src.u.all = htons(src_port);
+	tuple.dst.u.all = htons(dst_port);
+
+	h = nf_conntrack_find_get(&init_net, NF_CT_DEFAULT_ZONE, &tuple);
+	if (NULL == h) {
+		return NULL;
+	}
+
+	return nf_ct_tuplehash_to_ctrack(h);
+}
+
+/*
+ * ecm_classifier_nl_connection_added()
+ *	Invoked when a connection is added to the DB
+ */
+static void ecm_classifier_nl_connection_added(void *arg, struct ecm_db_connection_instance *ci)
+{
+	struct nf_conn *ct;
+	struct ecm_classifier_instance *classi;
+	struct ecm_classifier_nl_instance *cnli;
+	uint32_t serial __attribute__((unused)) = ecm_db_connection_serial_get(ci);
+	DEBUG_INFO("%p: NL Listener: conn added with serial: %u\n", ci, serial);
+
+	/*
+	 * Only handle events if there is an NL classifier attached
+	 */
+	classi = ecm_db_connection_assigned_classifier_find_and_ref(ci, ECM_CLASSIFIER_TYPE_NL);
+	if (NULL == classi) {
+		DEBUG_TRACE("%p: Connection added ignored - no NL classifier\n", ci);
+		return;
+	}
+	cnli = (struct ecm_classifier_nl_instance *)classi;
+	DEBUG_TRACE("%p: added conn, serial: %u, NL classifier: %p\n", ci,
+		    serial, classi);
+
+	ct = ecm_classifier_nl_ct_get_and_ref(ci);
+	if (NULL == ct) {
+		DEBUG_TRACE("%p: Connection add skipped - no associated CT entry.\n", ci);
+		goto classi;
+	}
+	DEBUG_TRACE("%p: added conn, serial: %u, NL classifier: %p, CT: %p\n",
+		    ci, serial, classi, ct);
+
+	spin_lock_bh(&ecm_classifier_nl_lock);
+	cnli->process_response.flow_qos_tag = ct->mark;
+	cnli->process_response.return_qos_tag = ct->mark;
+	spin_unlock_bh(&ecm_classifier_nl_lock);
+	nf_ct_put(ct);
+
+classi:
+	classi->deref(classi);
+
+	return;
+}
+
+/*
  * ecm_classifier_nl_connection_removed()
  *	Invoked when a connection is removed from the DB
  */
@@ -1346,7 +1450,7 @@ int ecm_classifier_nl_rules_init(void)
 			NULL /* ecm_classifier_nl_host_removed */,
 			NULL /* ecm_classifier_nl_mapping_added */,
 			NULL /* ecm_classifier_nl_mapping_removed */,
-			NULL /* ecm_classifier_nl_connection_added */,
+			ecm_classifier_nl_connection_added,
 			ecm_classifier_nl_connection_removed,
 			NULL /* ecm_classifier_nl_listener_final */,
 			ecm_classifier_nl_li);
