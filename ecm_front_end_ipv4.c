@@ -3366,6 +3366,19 @@ static unsigned int ecm_front_end_ipv4_tcp_process(struct net_device *out_dev, s
 				ECM_IP_ADDR_TO_DOT(ip_src_addr), src_port, ECM_IP_ADDR_TO_DOT(ip_dest_addr), dest_port);
 
 		/*
+		 * Do not add a connection in terminating state
+		 */
+		if (ct) {
+			spin_lock_bh(&ct->lock);
+			if (ct->proto.tcp.state >= TCP_CONNTRACK_FIN_WAIT && ct->proto.tcp.state <= TCP_CONNTRACK_CLOSE) {
+				spin_unlock_bh(&ct->lock);
+				DEBUG_TRACE("%p: Connection in termination state %#X\n", ct, ct->proto.tcp.state);
+				return NF_ACCEPT;
+			}
+			spin_unlock_bh(&ct->lock);
+		}
+
+		/*
 		 * Before we attempt to create the connection are we being terminated?
 		 */
 		spin_lock_bh(&ecm_front_end_ipv4_lock);
