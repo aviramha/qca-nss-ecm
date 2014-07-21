@@ -5428,6 +5428,7 @@ static unsigned int ecm_front_end_ipv6_bridge_post_routing_hook(unsigned int hoo
 {
 	struct ethhdr *skb_eth_hdr;
 	uint16_t eth_type;
+	struct net_device *bridge;
 	struct net_device *in;
 	bool can_accel = true;
 	unsigned int result;
@@ -5460,40 +5461,56 @@ static unsigned int ecm_front_end_ipv6_bridge_post_routing_hook(unsigned int hoo
 	}
 
 	/*
-	 * Identify interface from where this packet came
+	 * Identify interface from where this packet came.
+	 * There are three scenarios to consider here:
+	 * 1. Packet came from a local source.
+	 *	Ignore - local is not handled.
+	 * 2. Packet came from a routed path.
+	 *	Ignore - it was handled in INET post routing.
+	 * 3. Packet is bridged from another port.
+	 *	Process.
+	 *
+	 * Begin by identifying case 1.
+	 * NOTE: We are given 'out' (which we implicitly know is a bridge port) so out->master is the 'bridge'.
 	 */
+	bridge = out->master;
 	in = dev_get_by_index(&init_net, skb->skb_iif);
-	if (unlikely(!in)) {
+	if  (!in) {
 		/*
-		 * Locally sourced packets are not processed in ECM.
+		 * Case 1.
 		 */
+		DEBUG_TRACE("Local traffic: %p, ignoring traffic to bridge: %p (%s) \n", skb, bridge, bridge->name);
 		return NF_ACCEPT;
 	}
-
-	if (netif_is_bond_slave(in)) {
-		dev_put(in);
-		in = in->master;
-		dev_hold(in);
-	}
+	dev_put(in);
 
 	/*
-	 * This is bridge post routing so "out" is a bridge port (obvious).
-	 * If the "in" device is NOT a port on this same bridge (non-bridged traffic)
-	 * then this would have been handled in normal post routing hook so we don't duplicate effort.
+	 * Case 2:
+	 *	For routed packets the skb will have the src mac matching the bridge mac.
+	 * Case 3:
+	 *	If the packet was not local (case 1) or routed (case 2) then we process.
 	 */
-	if (!in->master || (in->master != out->master)) {
+	in = br_port_dev_get(out->master, skb_eth_hdr->h_source);
+	if (!in) {
+		DEBUG_TRACE("skb: %p, no in device for bridge: %p (%s)\n", skb, bridge, bridge->name);
+		return NF_ACCEPT;
+	}
+	if (in == out) {
+		DEBUG_TRACE("skb: %p, bridge: %p (%s), port bounce on %p (%s)\n", skb, bridge, bridge->name, out, out->name);
+		dev_put(in);
+		return NF_ACCEPT;
+	}
+	if (!compare_ether_addr(skb_eth_hdr->h_source, bridge->dev_addr)) {
 		/*
-		 * 'in' is either a non-slave device - so the packet has definately routed to this bridge
-		 * or 'in' is a slave BUT it's a slave of a different master, again the packet has been routed to the bridge.
+		 * Case 2: Routed trafffic would be handled by the INET post routing.
 		 */
-		DEBUG_TRACE("Ignoring bridge post routed packet: %p, in: %p (%s), in->master: %p (%s), out: %p (%s), out->master: %p (%s)\n",
-				skb, in, in->name, in->master, (in->master)? in->master->name : "NULL",
-				out, out->name, out->master, (out->master)? out->master->name : "NULL");
+		DEBUG_TRACE("skb: %p, Ignoring routed packet to bridge: %p (%s)\n", skb, bridge, bridge->name);
 		dev_put(in);
 		return NF_ACCEPT;
 	}
 
-	DEBUG_TRACE("%p: Name: %s Bridge process skb %p, in: %p\n", out, out->name, skb, in);
+	DEBUG_TRACE("Bridge process skb: %p, bridge: %p (%s), In: %p (%s), Out: %p (%s)\n",
+			skb, bridge, bridge->name, in, in->name, out, out->name);
 	result = ecm_front_end_ipv6_ip_process((struct net_device *)out, in,
 							skb_eth_hdr->h_source, skb_eth_hdr->h_dest, can_accel, false, skb);
 	dev_put(in);
