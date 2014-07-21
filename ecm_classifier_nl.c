@@ -149,8 +149,11 @@ static struct genl_family ecm_cl_nl_genl_family = {
 
 /*
  * helper for sending basic genl commands requiring only a tuple attribute
+ *
+ * TODO: implement a message queue serviced by a thread to allow automatic
+ *	 retries for accel_ok and closed messages.
  */
-static void
+static int
 ecm_classifier_nl_send_genl_msg(enum ECM_CL_NL_GENL_CMD cmd,
 				struct ecm_cl_nl_genl_attr_tuple *tuple)
 {
@@ -158,9 +161,10 @@ ecm_classifier_nl_send_genl_msg(enum ECM_CL_NL_GENL_CMD cmd,
 	void *msg_head;
 	struct sk_buff *skb;
 
-	skb = nlmsg_new(NLMSG_GOODSIZE, GFP_ATOMIC);
+	skb = nlmsg_new(sizeof(*tuple), GFP_ATOMIC);
 	if (skb == NULL) {
-		return;
+		DEBUG_WARN("failed to alloc nlmsg\n");
+		return -ENOMEM;
 	}
 
 	msg_head = genlmsg_put(skb,
@@ -170,23 +174,33 @@ ecm_classifier_nl_send_genl_msg(enum ECM_CL_NL_GENL_CMD cmd,
 			       0, /* flags */
 			       cmd);
 	if (msg_head == NULL) {
+		DEBUG_WARN("failed to add genl headers\n");
 		nlmsg_free(skb);
-		return;
+		return -ENOMEM;
 	}
 
 	ret = nla_put(skb, ECM_CL_NL_GENL_ATTR_TUPLE, sizeof(*tuple), tuple);
 	if (ret != 0) {
+		DEBUG_WARN("failed to put tuple into genl msg: %d\n", ret);
 		nlmsg_free(skb);
-		return;
+		return ret;
 	}
 
 	ret = genlmsg_end(skb, msg_head);
 	if (ret < 0) {
+		DEBUG_WARN("failed to finalize genl msg: %d\n", ret);
 		nlmsg_free(skb);
-		return;
+		return ret;
 	}
 
-	genlmsg_multicast(skb, 0, ecm_cl_nl_genl_mcgrp.id, GFP_ATOMIC);
+	/* genlmsg_multicast frees the skb in both success and error cases */
+	ret = genlmsg_multicast(skb, 0, ecm_cl_nl_genl_mcgrp.id, GFP_ATOMIC);
+	if (ret != 0) {
+		DEBUG_WARN("genl multicast failed: %d\n", ret);
+		return ret;
+	}
+
+	return 0;
 }
 
 /*
@@ -275,7 +289,7 @@ ecm_classifier_nl_genl_msg_ACCEL_OK(struct ecm_classifier_nl_instance *cnli)
 		return;
 	}
 
-	cnli->flags |= ECM_CLASSIFIER_NL_F_ACCEL_OK;
+	spin_unlock_bh(&ecm_classifier_nl_lock);
 
 	proto = ecm_db_connection_protocol_get(ci);
 	ecm_db_connection_from_address_get(ci, src_ip);
@@ -283,7 +297,6 @@ ecm_classifier_nl_genl_msg_ACCEL_OK(struct ecm_classifier_nl_instance *cnli)
 	ecm_db_connection_to_address_get(ci, dst_ip);
 	dst_port = ecm_db_connection_to_port_get(ci);
 
-	spin_unlock_bh(&ecm_classifier_nl_lock);
 	ecm_db_connection_deref(ci);
 
 	ret = ecm_cl_nl_genl_attr_tuple_encode(&tuple,
@@ -297,8 +310,17 @@ ecm_classifier_nl_genl_msg_ACCEL_OK(struct ecm_classifier_nl_instance *cnli)
 		return;
 	}
 
-	ecm_classifier_nl_send_genl_msg(ECM_CL_NL_GENL_CMD_ACCEL_OK,
-					&tuple);
+	ret = ecm_classifier_nl_send_genl_msg(ECM_CL_NL_GENL_CMD_ACCEL_OK,
+					      &tuple);
+	if (ret != 0) {
+		DEBUG_WARN("failed to send ACCEL_OK: %p, serial %u\n",
+			   cnli, cnli->ci_serial);
+		return;
+	}
+
+	spin_lock_bh(&ecm_classifier_nl_lock);
+	cnli->flags |= ECM_CLASSIFIER_NL_F_ACCEL_OK;
+	spin_unlock_bh(&ecm_classifier_nl_lock);
 }
 
 /*
