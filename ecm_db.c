@@ -7187,6 +7187,16 @@ void ecm_db_iface_add_loopback(struct ecm_db_iface_instance *ii, uint32_t os_spe
 EXPORT_SYMBOL(ecm_db_iface_add_loopback);
 
 /*
+ * ecm_db_iface_sit_daddr_is_null()
+ *	The sit addr is null or not
+ */
+bool ecm_db_iface_sit_daddr_is_null(struct ecm_db_iface_instance *ii)
+{
+	return ii->type_info.sit.daddr[0] == 0;
+}
+EXPORT_SYMBOL(ecm_db_iface_sit_daddr_is_null);
+
+/*
  * ecm_db_iface_add_sit()
  *	Add a iface instance into the database
  */
