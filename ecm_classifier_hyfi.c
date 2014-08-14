@@ -48,7 +48,8 @@
 #include <net/netfilter/ipv4/nf_defrag_ipv4.h>
 
 #include <nss_api_if.h>
-#include "hyfi_ecm.h"
+#include <hyfi_ecm.h>
+#include <hyfi_hash.h>
 
 /*
  * Debug output levels
@@ -79,10 +80,8 @@
  * Definitions
  */
 #define ECM_CLASSIFIER_HYFI_STATE_INIT              ( 1 << 0 )
-#define ECM_CLASSIFIER_HYFI_STATE_ACCELERATED       ( 1 << 1 )
+#define ECM_CLASSIFIER_HYFI_STATE_REGISTERED	    ( 1 << 1 )
 #define ECM_CLASSIFIER_HYFI_STATE_IGNORE            ( 1 << 2 )
-
-#define ECM_CLASSIFIER_HYFI_HASH_UNINITIALIZED		( ~0 )
 
 /*
  * struct ecm_classifier_hyfi_instance
@@ -98,7 +97,7 @@ struct ecm_classifier_hyfi_instance {
 	struct ecm_classifier_process_response process_response;/* Last process response computed */
 
 	uint32_t hyfi_state;
-	uint32_t hyfi_hash;
+	struct hyfi_ecm_flow_data_t flow;
 
 	int refs;						/* Integer to trap we never go negative */
 #if (DEBUG_LEVEL > 0)
@@ -222,7 +221,6 @@ static void ecm_classifier_hyfi_process(struct ecm_classifier_instance *aci, ecm
 	struct ecm_front_end_connection_instance *feci;
 	ecm_front_end_acceleration_mode_t accel_mode;
 	uint32_t became_relevant = 0;
-	uint32_t ecm_serial;
 
 	chfi = (struct ecm_classifier_hyfi_instance *)aci;
 	DEBUG_CHECK_MAGIC(chfi, ECM_CLASSIFIER_HYFI_INSTANCE_MAGIC, "%p: magic failed\n", chfi);
@@ -259,6 +257,7 @@ static void ecm_classifier_hyfi_process(struct ecm_classifier_instance *aci, ecm
 		feci->deref(feci);
 		ecm_db_connection_deref(ci);
 	}
+
 	if (enabled && ECM_FRONT_END_ACCELERATION_POSSIBLE(accel_mode)) {
 		relevance = ECM_CLASSIFIER_RELEVANCE_YES;
 		became_relevant = ecm_db_time_get();
@@ -282,24 +281,26 @@ hyfi_classifier_out:
 	/*
 	 * Fast path, already accelerated or ignored
 	 */
-	if (chfi->hyfi_state & (ECM_CLASSIFIER_HYFI_STATE_ACCELERATED | ECM_CLASSIFIER_HYFI_STATE_IGNORE)) {
+	if (chfi->hyfi_state & (ECM_CLASSIFIER_HYFI_STATE_REGISTERED | ECM_CLASSIFIER_HYFI_STATE_IGNORE)) {
 		goto hyfi_classifier_done;
 	}
 
 	/*
-	 * Call Hy-Fi bridge and initialize the classifier
+	 * Compute the hash
 	 */
-	if (hyfi_ecm_new_connection(skb, chfi->ci_serial, &chfi->hyfi_hash) < 0) {
-		chfi->hyfi_state = ECM_CLASSIFIER_HYFI_STATE_IGNORE;
-		goto hyfi_classifier_done;
+	if (unlikely(hyfi_hash_skbuf(skb, &chfi->flow.hash, &chfi->flow.flag, &chfi->flow.priority, &chfi->flow.seq))) {
+		goto hyfi_classifier_out;
 	}
 
-	if (chfi->hyfi_hash != ECM_CLASSIFIER_HYFI_HASH_UNINITIALIZED) {
-		/*
-		 * Mark as accelerated, hash stored and mapped
-		 */
-		chfi->hyfi_state = ECM_CLASSIFIER_HYFI_STATE_ACCELERATED;
-	}
+	chfi->flow.ecm_serial = chfi->ci_serial;
+	memcpy(&chfi->flow.sa, eth_hdr(skb)->h_source, ETH_ALEN);
+	memcpy(&chfi->flow.da, eth_hdr(skb)->h_dest, ETH_ALEN);
+
+	DEBUG_INFO("Flow serial: %d\nFlow hash: 0x%02x, priority 0x%08x, flag: %d\nSA: %pM\nDA: %pM\n\n",
+			chfi->flow.ecm_serial, chfi->flow.hash, chfi->flow.priority, chfi->flow.flag,
+			chfi->flow.sa, chfi->flow.da);
+
+	chfi->hyfi_state = ECM_CLASSIFIER_HYFI_STATE_REGISTERED;
 
 hyfi_classifier_done:
 	;
@@ -317,12 +318,13 @@ static void ecm_classifier_hyfi_sync_to_v4(struct ecm_classifier_instance *aci, 
 	struct ecm_db_connection_instance *ci;
 	uint64_t num_packets = 0;
 	uint64_t num_bytes = 0;
+	int32_t ret;
 
 	chfi = (struct ecm_classifier_hyfi_instance *)aci;
 	DEBUG_CHECK_MAGIC(chfi, ECM_CLASSIFIER_HYFI_INSTANCE_MAGIC, "%p: magic failed", chfi);
 
 	if (chfi->hyfi_state &
-			(ECM_CLASSIFIER_HYFI_STATE_INIT | ECM_CLASSIFIER_HYFI_STATE_IGNORE)) {
+			(ECM_CLASSIFIER_HYFI_STATE_IGNORE)) {
 		return;
 	}
 
@@ -341,9 +343,33 @@ static void ecm_classifier_hyfi_sync_to_v4(struct ecm_classifier_instance *aci, 
 			NULL, NULL );
 	ecm_db_connection_deref(ci);
 
-	if (hyfi_ecm_update_stats(chfi->hyfi_hash, chfi->ci_serial, num_bytes, num_packets) < 0) {
-		/* If update fails, move the state to init state */
+	DEBUG_INFO("UPDATE STATS: Flow serial: %d\nFlow hash: 0x%02x, priority 0x%08x, flag: %d\nSA: %pM\nDA: %pM\n\n",
+			chfi->flow.ecm_serial, chfi->flow.hash, chfi->flow.priority, chfi->flow.flag,
+			chfi->flow.sa, chfi->flow.da);
+
+	DEBUG_INFO("num_bytes = %lld, num_packets = %lld\n", num_bytes, num_packets);
+
+	ret = hyfi_ecm_update_stats(&chfi->flow, num_bytes, num_packets);
+
+	if (ret < 0) {
+		printk("%s: Fatal error\n", __func__);
+		return;
+	}
+
+	switch(ret)
+	{
+	case 0: /* OK */
+		chfi->hyfi_state = ECM_CLASSIFIER_HYFI_STATE_REGISTERED;
+		break;
+
+	case 1: /* Not interested */
+		chfi->hyfi_state = ECM_CLASSIFIER_HYFI_STATE_IGNORE;
+		break;
+
+	case 2: /* Not attached, may be interested in the future */
+	default:
 		chfi->hyfi_state = ECM_CLASSIFIER_HYFI_STATE_INIT;
+		break;
 	}
 }
 
@@ -369,12 +395,13 @@ static void ecm_classifier_hyfi_sync_to_v6(struct ecm_classifier_instance *aci, 
 	struct ecm_db_connection_instance *ci;
 	uint64_t num_packets = 0;
 	uint64_t num_bytes = 0;
+	int32_t ret;
 
 	chfi = (struct ecm_classifier_hyfi_instance *)aci;
 	DEBUG_CHECK_MAGIC(chfi, ECM_CLASSIFIER_HYFI_INSTANCE_MAGIC, "%p: magic failed", chfi);
 
 	if (chfi->hyfi_state &
-			(ECM_CLASSIFIER_HYFI_STATE_INIT | ECM_CLASSIFIER_HYFI_STATE_IGNORE)) {
+			(ECM_CLASSIFIER_HYFI_STATE_IGNORE)) {
 		return;
 	}
 
@@ -393,7 +420,28 @@ static void ecm_classifier_hyfi_sync_to_v6(struct ecm_classifier_instance *aci, 
 			NULL, NULL );
 	ecm_db_connection_deref(ci);
 
-	hyfi_ecm_update_stats(chfi->hyfi_hash, chfi->ci_serial,	num_bytes, num_packets);
+	ret = hyfi_ecm_update_stats(&chfi->flow, num_bytes, num_packets);
+
+	if (ret < 0) {
+		printk("%s: Fatal error\n", __func__);
+		return;
+	}
+
+	switch(ret)
+	{
+	case 0: /* OK */
+		chfi->hyfi_state = ECM_CLASSIFIER_HYFI_STATE_REGISTERED;
+		break;
+
+	case 1: /* Not interested */
+		chfi->hyfi_state = ECM_CLASSIFIER_HYFI_STATE_IGNORE;
+		break;
+
+	case 2: /* Not attached, may be interested in the future */
+	default:
+		chfi->hyfi_state = ECM_CLASSIFIER_HYFI_STATE_INIT;
+		break;
+	}
 }
 
 /*
@@ -547,7 +595,6 @@ struct ecm_classifier_hyfi_instance *ecm_classifier_hyfi_instance_alloc(struct e
 	/*
 	 * Init Hy-Fi state
 	 */
-	chfi->hyfi_hash = ECM_CLASSIFIER_HYFI_HASH_UNINITIALIZED;
 	chfi->hyfi_state = ECM_CLASSIFIER_HYFI_STATE_INIT;
 
 	spin_lock_bh(&ecm_classifier_hyfi_lock);
