@@ -445,7 +445,7 @@ static void ecm_classifier_default_last_process_response_get(struct ecm_classifi
  * ecm_classifier_default_sync_to_v4()
  *	Front end is pushing NSS state to us
  */
-static void ecm_classifier_default_sync_to_v4(struct ecm_classifier_instance *aci, struct nss_ipv4_cb_params *params)
+static void ecm_classifier_default_sync_to_v4(struct ecm_classifier_instance *aci, struct nss_ipv4_conn_sync *sync)
 {
 	struct ecm_classifier_default_internal_instance *cdii __attribute__((unused));
 
@@ -457,7 +457,7 @@ static void ecm_classifier_default_sync_to_v4(struct ecm_classifier_instance *ac
  * ecm_classifier_default_sync_from_v4()
  *	Front end is retrieving NSS state from us
  */
-static void ecm_classifier_default_sync_from_v4(struct ecm_classifier_instance *aci, struct nss_ipv4_create *create)
+static void ecm_classifier_default_sync_from_v4(struct ecm_classifier_instance *aci, struct nss_ipv4_rule_create_msg *nircm)
 {
 	struct ecm_classifier_default_internal_instance *cdii __attribute__((unused));
 
