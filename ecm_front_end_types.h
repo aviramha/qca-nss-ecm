@@ -28,13 +28,38 @@
 #define ecm_front_end_is_lag_slave(dev)	((dev->flags & IFF_SLAVE)	\
 							 && (dev->priv_flags & IFF_BONDING))
 
+/*
+ * enum ecm_front_end_acceleration_modes
+ *	Acceleration mode of a connection as tracked by the front end.
+ *
+ * Typically when classifiers permit acceleration the front end will then accelerate the connection.
+ * These states indicate the front end record of acceleration mode for the connection.
+ * An acceleration mode less than zero indicates a connection that cannot be accelerated, maybe due to error.
+ */
+enum ecm_front_end_acceleration_modes {
+	ECM_FRONT_END_ACCELERATION_MODE_FAIL_DECEL = -6,	/* Acceleration has permanently failed due to deceleration malfunction */
+	ECM_FRONT_END_ACCELERATION_MODE_FAIL_NO_ACTION = -5,	/* Acceleration has permanently failed due to too many offloads that were rejected without any packets being offloaded */
+	ECM_FRONT_END_ACCELERATION_MODE_FAIL_NSS = -4,		/* Acceleration has permanently failed due to too many NSS NAK's */
+	ECM_FRONT_END_ACCELERATION_MODE_FAIL_DRIVER = -3,	/* Acceleration has permanently failed due to too many driver interaction failures */
+	ECM_FRONT_END_ACCELERATION_MODE_FAIL_RULE = -2,		/* Acceleration has permanently failed due to bad rule data */
+	ECM_FRONT_END_ACCELERATION_MODE_FAIL_DENIED = -1,	/* Acceleration has permanently failed due to can_accel denying accel */
+	ECM_FRONT_END_ACCELERATION_MODE_DECEL = 0,		/* Connection is not accelerated */
+	ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING,		/* Connection is in the process of being accelerated */
+	ECM_FRONT_END_ACCELERATION_MODE_ACCEL,			/* Connection is accelerated */
+	ECM_FRONT_END_ACCELERATION_MODE_DECEL_PENDING,		/* Connection is in the process of being decelerated */
+};
+typedef enum ecm_front_end_acceleration_modes ecm_front_end_acceleration_mode_t;
+
+#define ECM_FRONT_END_ACCELERATION_NOT_POSSIBLE(accel_mode) ((accel_mode < 0) || (accel_mode == ECM_FRONT_END_ACCELERATION_MODE_DECEL_PENDING))
+#define ECM_FRONT_END_ACCELERATION_POSSIBLE(accel_mode) (accel_mode >= 0)
+#define ECM_FRONT_END_ACCELERATION_FAILED(accel_mode) (accel_mode < 0)
 
 /*
  * Front end methods
  */
 struct ecm_front_end_connection_instance;
 typedef void (*ecm_front_end_connection_decelerate_method_t)(struct ecm_front_end_connection_instance *feci);
-typedef void (*ecm_front_end_connection_accel_state_get_method_t)(struct ecm_front_end_connection_instance *feci, ecm_classifier_acceleration_mode_t *accel_mode, int *count, int *limit, bool *can_accel);
+typedef ecm_front_end_acceleration_mode_t (*ecm_front_end_connection_accel_state_get_method_t)(struct ecm_front_end_connection_instance *feci);
 typedef void (*ecm_front_end_connection_ref_method_t)(struct ecm_front_end_connection_instance *feci);
 typedef int (*ecm_front_end_connection_deref_callback_t)(struct ecm_front_end_connection_instance *feci);
 typedef void (*ecm_front_end_connection_accel_count_reset_method_t)(struct ecm_front_end_connection_instance *feci);

@@ -524,11 +524,8 @@ void
 ecm_classifier_nl_process_mark(struct ecm_classifier_nl_instance *cnli,
 			       uint32_t mark)
 {
-	int limit;
-	int count;
 	bool updated;
-	bool can_accel;
-	ecm_classifier_acceleration_mode_t accel_mode;
+	ecm_front_end_acceleration_mode_t accel_mode;
 	struct ecm_db_connection_instance *ci;
 	struct ecm_front_end_connection_instance *feci;
 
@@ -571,12 +568,9 @@ ecm_classifier_nl_process_mark(struct ecm_classifier_nl_instance *cnli,
 		return;
 	}
 	feci = ecm_db_connection_front_end_get_and_ref(ci);
-	feci->accel_state_get(feci,
-			      &accel_mode,
-			      &count,
-			      &limit,
-			      &can_accel);
-	if (accel_mode == ECM_CLASSIFIER_ACCELERATION_MODE_ACCEL) {
+	accel_mode = feci->accel_state_get(feci);
+	if ((accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL)
+			|| (accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING)) {
 		DEBUG_TRACE("%p: mark changed on offloaded connection, decelerate. new mark: 0x%08x\n",
 			    cnli, mark);
 		feci->decelerate(feci);
@@ -601,10 +595,7 @@ static void ecm_classifier_nl_process(struct ecm_classifier_instance *aci, ecm_t
 	ecm_classifier_relevence_t relevance;
 	bool enabled;
 	struct ecm_db_connection_instance *ci;
-	ecm_classifier_acceleration_mode_t accel_mode;
-	int count;
-	int limit;
-	bool can_accel;
+	ecm_front_end_acceleration_mode_t accel_mode;
 	uint32_t became_relevant = 0;
 
 	cnli = (struct ecm_classifier_nl_instance *)aci;
@@ -636,9 +627,9 @@ static void ecm_classifier_nl_process(struct ecm_classifier_instance *aci, ecm_t
 	if (ci) {
 		struct ecm_front_end_connection_instance *feci;
 		feci = ecm_db_connection_front_end_get_and_ref(ci);
-		feci->accel_state_get(feci, &accel_mode, &count, &limit, &can_accel);
+		accel_mode = feci->accel_state_get(feci);
 		feci->deref(feci);
-		if (enabled && can_accel && ecm_db_connection_is_routed_get(ci)) {
+		if (enabled && ECM_FRONT_END_ACCELERATION_POSSIBLE(accel_mode) && ecm_db_connection_is_routed_get(ci)) {
 			relevance = ECM_CLASSIFIER_RELEVANCE_YES;
 			became_relevant = ecm_db_time_get();
 		}

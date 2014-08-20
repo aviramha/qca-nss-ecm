@@ -1227,19 +1227,16 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_decelerate(struct ecm_fr
  * ecm_front_end_ipv4_connection_tcp_front_end_accel_state_get()
  *	Get acceleration state
  */
-static void ecm_front_end_ipv4_connection_tcp_front_end_accel_state_get(struct ecm_front_end_connection_instance *feci,
-								ecm_classifier_acceleration_mode_t *accel_mode,
-								int *count, int *limit, bool *can_accel)
+static ecm_front_end_acceleration_mode_t ecm_front_end_ipv4_connection_tcp_front_end_accel_state_get(struct ecm_front_end_connection_instance *feci)
 {
 	struct ecm_front_end_ipv4_connection_tcp_instance *fecti = (struct ecm_front_end_ipv4_connection_tcp_instance *)feci;
+	ecm_front_end_acceleration_mode_t state;
 
 	DEBUG_CHECK_MAGIC(fecti, ECM_FRONT_END_IPV4_CONNECTION_TCP_INSTANCE_MAGIC, "%p: magic failed", fecti);
 	spin_lock_bh(&fecti->lock);
-	*accel_mode = fecti->accel_mode;
-	*count = fecti->accel_count;
-	*limit = fecti->accel_limit;
-	*can_accel = fecti->can_accel;
+	state = fecti->accel_mode;
 	spin_unlock_bh(&fecti->lock);
+	return state;
 }
 
 /*
@@ -2081,19 +2078,16 @@ static void ecm_front_end_ipv4_connection_udp_front_end_decelerate(struct ecm_fr
  * ecm_front_end_ipv4_connection_udp_front_end_accel_state_get()
  *	Get acceleration state
  */
-static void ecm_front_end_ipv4_connection_udp_front_end_accel_state_get(struct ecm_front_end_connection_instance *feci,
-								ecm_classifier_acceleration_mode_t *accel_mode,
-								int *count, int *limit, bool *can_accel)
+static ecm_front_end_acceleration_mode_t ecm_front_end_ipv4_connection_udp_front_end_accel_state_get(struct ecm_front_end_connection_instance *feci)
 {
 	struct ecm_front_end_ipv4_connection_udp_instance *fecui = (struct ecm_front_end_ipv4_connection_udp_instance *)feci;
+	ecm_front_end_acceleration_mode_t state;
 
 	DEBUG_CHECK_MAGIC(fecui, ECM_FRONT_END_IPV4_CONNECTION_UDP_INSTANCE_MAGIC, "%p: magic failed", fecui);
 	spin_lock_bh(&fecui->lock);
-	*accel_mode = fecui->accel_mode;
-	*count = fecui->accel_count;
-	*limit = fecui->accel_limit;
-	*can_accel = fecui->can_accel;
+	state = fecui->accel_mode;
 	spin_unlock_bh(&fecui->lock);
+	return state;
 }
 
 /*
@@ -2937,19 +2931,16 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_decelerate(struct
  * ecm_front_end_ipv4_connection_non_ported_front_end_accel_state_get()
  *	Get acceleration state
  */
-static void ecm_front_end_ipv4_connection_non_ported_front_end_accel_state_get(struct ecm_front_end_connection_instance *feci,
-								ecm_classifier_acceleration_mode_t *accel_mode,
-								int *count, int *limit, bool *can_accel)
+static ecm_front_end_acceleration_mode_t ecm_front_end_ipv4_connection_non_ported_front_end_accel_state_get(struct ecm_front_end_connection_instance *feci)
 {
 	struct ecm_front_end_ipv4_connection_non_ported_instance *fecnpi = (struct ecm_front_end_ipv4_connection_non_ported_instance *)feci;
+	ecm_front_end_acceleration_mode_t state;
 
 	DEBUG_CHECK_MAGIC(fecnpi, ECM_FRONT_END_IPV4_CONNECTION_NON_PORTED_INSTANCE_MAGIC, "%p: magic failed", fecnpi);
 	spin_lock_bh(&fecnpi->lock);
-	*accel_mode = fecnpi->accel_mode;
-	*count = fecnpi->accel_count;
-	*limit = fecnpi->accel_limit;
-	*can_accel = fecnpi->can_accel;
+	state = fecnpi->accel_mode;
 	spin_unlock_bh(&fecnpi->lock);
+	return state;
 }
 
 /*
@@ -6056,10 +6047,6 @@ static void ecm_front_end_ipv4_conntrack_event_destroy(struct nf_conn *ct)
 {
 	struct ecm_db_connection_instance *ci;
 	struct ecm_front_end_connection_instance *feci;
-	ecm_classifier_acceleration_mode_t accel_mode;
-	int count;
-	int limit;
-	bool can_accel;
 
 	DEBUG_INFO("Destroy event for ct: %p\n", ct);
 
@@ -6074,11 +6061,7 @@ static void ecm_front_end_ipv4_conntrack_event_destroy(struct nf_conn *ct)
 	 * If this connection is accelerated then we need to issue a destroy command
 	 */
 	feci = ecm_db_connection_front_end_get_and_ref(ci);
-	feci->accel_state_get(feci, &accel_mode, &count, &limit, &can_accel);
-	if (accel_mode == ECM_CLASSIFIER_ACCELERATION_MODE_ACCEL) {
-		DEBUG_TRACE("%p: Connection is accelerated, terminating acceleration", ci);
-		feci->decelerate(feci);
-	}
+	feci->decelerate(feci);
 	feci->deref(feci);
 
 	/*

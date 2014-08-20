@@ -201,11 +201,8 @@ static void ecm_classifier_dscp_process(struct ecm_classifier_instance *aci, ecm
 	ecm_classifier_relevence_t relevance;
 	struct ecm_db_connection_instance *ci = NULL;
 	struct ecm_front_end_connection_instance *feci;
-	ecm_classifier_acceleration_mode_t accel_mode;
-	int count;
-	int limit;
+	ecm_front_end_acceleration_mode_t accel_mode;
 	int protocol;
-	bool can_accel;
 	uint32_t became_relevant = 0;
 	struct nf_conn *ct;
 	enum ip_conntrack_info ctinfo;
@@ -266,11 +263,11 @@ static void ecm_classifier_dscp_process(struct ecm_classifier_instance *aci, ecm
 		goto dscp_classifier_out;
 	}
 	feci = ecm_db_connection_front_end_get_and_ref(ci);
-	feci->accel_state_get(feci, &accel_mode, &count, &limit, &can_accel);
+	accel_mode = feci->accel_state_get(feci);
 	feci->deref(feci);
 	protocol = ecm_db_connection_protocol_get(ci);
 	ecm_db_connection_deref(ci);
-	if (!can_accel) {
+	if (ECM_FRONT_END_ACCELERATION_NOT_POSSIBLE(accel_mode)) {
 		spin_lock_bh(&ecm_classifier_dscp_lock);
 		cdscpi->process_response.relevance = ECM_CLASSIFIER_RELEVANCE_NO;
 		goto dscp_classifier_out;
