@@ -451,7 +451,7 @@ static void ecm_classifier_dscp_sync_from_v4(struct ecm_classifier_instance *aci
  * ecm_classifier_dscp_sync_to_v6()
  *	Front end is pushing NSS state to us
  */
-static void ecm_classifier_dscp_sync_to_v6(struct ecm_classifier_instance *aci, struct nss_ipv6_cb_params *params)
+static void ecm_classifier_dscp_sync_to_v6(struct ecm_classifier_instance *aci, struct nss_ipv6_conn_sync *sync)
 {
 	struct ecm_classifier_dscp_instance *cdscpi __attribute__((unused));
 
@@ -463,7 +463,7 @@ static void ecm_classifier_dscp_sync_to_v6(struct ecm_classifier_instance *aci, 
  * ecm_classifier_dscp_sync_from_v6()
  *	Front end is retrieving NSS state from us
  */
-static void ecm_classifier_dscp_sync_from_v6(struct ecm_classifier_instance *aci, struct nss_ipv6_create *create)
+static void ecm_classifier_dscp_sync_from_v6(struct ecm_classifier_instance *aci, struct nss_ipv6_rule_create_msg *nircm)
 {
 	struct ecm_classifier_dscp_instance *cdscpi __attribute__((unused));
 

@@ -101,9 +101,9 @@ typedef void (*ecm_classifier_sync_from_v4_callback_t)(struct ecm_classifier_ins
 											/* Sync the NSS state with state from the classifier */
 typedef void (*ecm_classifier_sync_to_v4_callback_t)(struct ecm_classifier_instance *ci, struct nss_ipv4_conn_sync *sync);
 											/* Sync the classifier state with current NSS state */
-typedef void (*ecm_classifier_sync_from_v6_callback_t)(struct ecm_classifier_instance *ci, struct nss_ipv6_create *params);
+typedef void (*ecm_classifier_sync_from_v6_callback_t)(struct ecm_classifier_instance *ci, struct nss_ipv6_rule_create_msg *nircm);
 											/* Sync the NSS state with state from the classifier */
-typedef void (*ecm_classifier_sync_to_v6_callback_t)(struct ecm_classifier_instance *ci, struct nss_ipv6_cb_params *params);
+typedef void (*ecm_classifier_sync_to_v6_callback_t)(struct ecm_classifier_instance *ci, struct nss_ipv6_conn_sync *sync);
 											/* Sync the classifier state with current NSS state */
 typedef ecm_classifier_type_t (*ecm_classifier_type_get_callback_t)(struct ecm_classifier_instance *ci);
 											/* Get type of classifier this is */
