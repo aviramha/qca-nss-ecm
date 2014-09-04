@@ -45,6 +45,8 @@ typedef enum ecm_classifier_relevances ecm_classifier_relevence_t;
 /*
  * enum ecm_classifier_acceleration_modes
  *	Modes in which a connection may be accelerated
+ *
+ * These are used by a classifier to indicate its desire to accelerate.
  */
 enum ecm_classifier_acceleration_modes {
 	ECM_CLASSIFIER_ACCELERATION_MODE_DONT_CARE = 0,		/* Classifier does not care if the connection is accelerated */

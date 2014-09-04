@@ -220,10 +220,7 @@ static void ecm_classifier_hyfi_process(struct ecm_classifier_instance *aci, ecm
 	bool enabled;
 	struct ecm_db_connection_instance *ci;
 	struct ecm_front_end_connection_instance *feci;
-	ecm_classifier_acceleration_mode_t accel_mode;
-	int count;
-	int limit;
-	bool can_accel;
+	ecm_front_end_acceleration_mode_t accel_mode;
 	uint32_t became_relevant = 0;
 	uint32_t ecm_serial;
 
@@ -255,14 +252,14 @@ static void ecm_classifier_hyfi_process(struct ecm_classifier_instance *aci, ecm
 	ci = ecm_db_connection_serial_find_and_ref(chfi->ci_serial);
 	if (!ci) {
 		DEBUG_TRACE("%p: No ci found for %u\n", chfi, chfi->ci_serial);
-		can_accel = false;
+		accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DENIED;
 	} else {
 		feci = ecm_db_connection_front_end_get_and_ref(ci);
-		feci->accel_state_get(feci, &accel_mode, &count, &limit, &can_accel);
+		accel_mode = feci->accel_state_get(feci);
 		feci->deref(feci);
 		ecm_db_connection_deref(ci);
 	}
-	if (enabled && can_accel) {
+	if (enabled && ECM_FRONT_END_ACCELERATION_POSSIBLE(accel_mode)) {
 		relevance = ECM_CLASSIFIER_RELEVANCE_YES;
 		became_relevant = ecm_db_time_get();
 	}
