@@ -71,6 +71,22 @@ typedef int (*ecm_front_end_connection_xml_state_get_callback_t)(struct ecm_fron
 											 */
 
 /*
+ * Accel/decel mode statistics data structure.
+ */
+struct ecm_front_end_connection_mode_stats {
+	bool decelerate_pending;		/* Decel was attempted during pending accel - will be actioned when accel is done */
+	uint32_t no_action_seen_total;		/* Total of times acceleration was ended by the NSS itself without any offload action */
+	uint32_t no_action_seen;		/* Count of times consecutive  acceleration was ended by the NSS itself without any offload action */
+	uint32_t no_action_seen_limit;		/* Limit on consecutive no-action at which point offload permanently fails out */
+	uint32_t driver_fail_total;		/* Total times driver failed to send our command */
+	uint32_t driver_fail;			/* Count of consecutive times driver failed to send our command, when this reaches driver_fail_limit acceleration will permanently fail */
+	uint32_t driver_fail_limit;		/* Limit on drivers consecutive fails at which point offload permanently fails out */
+	uint32_t nss_nack_total;		/* Total times NSS NAK's an accel command */
+	uint32_t nss_nack;			/* Count of consecutive times driver failed to ack */
+	uint32_t nss_nack_limit;		/* Limit on consecutive nacks at which point offload permanently fails out */
+};
+
+/*
  * Connection front end instance
  *	Each new connection requires it to also have one of these to maintain front end specific information and operations
  */
@@ -82,5 +98,10 @@ struct ecm_front_end_connection_instance {
 	ecm_front_end_connection_accel_count_reset_method_t accel_count_reset;	/* Reset acceleration count */
 	ecm_front_end_connection_accel_ceased_method_t accel_ceased;		/* Acceleration has stopped */
 	ecm_front_end_connection_xml_state_get_callback_t xml_state_get;	/* Obtain XML formatted state for this object */
+
+	/*
+	 * Accel/decel mode statistics.
+	 */
+	struct ecm_front_end_connection_mode_stats stats;
 };
 

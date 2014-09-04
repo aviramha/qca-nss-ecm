@@ -95,17 +95,12 @@
  */
 struct ecm_front_end_ipv4_connection_tcp_instance {
 	struct ecm_front_end_connection_instance base;		/* Base class */
-
 	struct ecm_db_connection_instance *ci;			/* RO: The connection instance relating to this instance. */
-
 	bool can_accel;						/* RO: True when the connection can be accelerated */
-	ecm_classifier_acceleration_mode_t accel_mode;
-								/* Indicates  the type of acceleration being applied to a connection, if any. */
-	int accel_count;					/* Number of times this connection has been accelerated */
-	int accel_limit;					/* Limit to the number of times acceleration can be applied to this connection */
-
+	ecm_classifier_acceleration_mode_t accel_mode;		/* Indicates  the type of acceleration being applied to a connection, if any. */
+	int accel_count;                                        /* Number of times this connection has been accelerated */
+	int accel_limit;                                        /* Limit to the number of times acceleration can be applied to this connection */
 	spinlock_t lock;					/* Lock for structure data */
-
 	int refs;						/* Integer to trap we never go negative */
 #if (DEBUG_LEVEL > 0)
 	uint16_t magic;
@@ -118,17 +113,12 @@ struct ecm_front_end_ipv4_connection_tcp_instance {
  */
 struct ecm_front_end_ipv4_connection_udp_instance {
 	struct ecm_front_end_connection_instance base;		/* Base class */
-
 	struct ecm_db_connection_instance *ci;			/* RO: The connection instance relating to this instance. */
-
 	bool can_accel;						/* RO: True when the connection can be accelerated */
-	ecm_classifier_acceleration_mode_t accel_mode;
-								/* Indicates  the type of acceleration being applied to a connection, if any. */
-	int accel_count;					/* Number of times this connection has been accelerated */
-	int accel_limit;					/* Limit to the number of times acceleration can be applied to this connection */
-
-	spinlock_t lock;					/* Lock for structure dtaa */
-
+	ecm_classifier_acceleration_mode_t accel_mode;		/* Indicates  the type of acceleration being applied to a connection, if any. */
+	int accel_count;                                        /* Number of times this connection has been accelerated */
+	int accel_limit;                                        /* Limit to the number of times acceleration can be applied to this connection */
+	spinlock_t lock;					/* Lock for structure data */
 	int refs;						/* Integer to trap we never go negative */
 #if (DEBUG_LEVEL > 0)
 	uint16_t magic;
@@ -141,24 +131,25 @@ struct ecm_front_end_ipv4_connection_udp_instance {
  */
 struct ecm_front_end_ipv4_connection_non_ported_instance {
 	struct ecm_front_end_connection_instance base;		/* Base class */
-
 	struct ecm_db_connection_instance *ci;			/* RO: The connection instance relating to this instance. */
-
 	bool can_accel;						/* RO: True when the connection can be accelerated */
-	ecm_classifier_acceleration_mode_t accel_mode;
-								/* Indicates  the type of acceleration being applied to a connection, if any. */
-	int accel_count;					/* Number of times this connection has been accelerated */
-	int accel_limit;					/* Limit to the number of times acceleration can be applied to this connection */
-
-	spinlock_t lock;					/* Lock for structure dtaa */
-
+	ecm_classifier_acceleration_mode_t accel_mode;		/* Indicates  the type of acceleration being applied to a connection, if any. */
+	int accel_count;                                        /* Number of times this connection has been accelerated */
+	int accel_limit;                                        /* Limit to the number of times acceleration can be applied to this connection */
+	spinlock_t lock;					/* Lock for structure data */
 	int refs;						/* Integer to trap we never go negative */
 #if (DEBUG_LEVEL > 0)
 	uint16_t magic;
 #endif
 };
 
-static int ecm_front_end_ipv4_accel_limit_default = 250;		/* Default acceleration limit */
+static int ecm_front_end_ipv4_no_action_limit_default = 250;		/* Default no-action limit. */
+static int ecm_front_end_ipv4_driver_fail_limit_default = 250;		/* Default driver fail limit. */
+static int ecm_front_end_ipv4_nack_limit_default = 250;			/* Default nack limit. */
+static int ecm_front_end_ipv4_udp_accelerated_count = 0;		/* Number of UDP connections currently offloaded */
+static int ecm_front_end_ipv4_tcp_accelerated_count = 0;		/* Number of TCP connections currently offloaded */
+static int ecm_front_end_ipv4_non_ported_accelerated_count = 0;		/* Number of Non-Ported connections currently offloaded */
+static int ecm_front_end_ipv4_accelerated_count = 0;			/* Total offloads */
 
 /*
  * Locking of the classifier - concurrency control
@@ -352,13 +343,12 @@ static struct ecm_db_node_instance *ecm_front_end_ipv4_node_establish_and_ref(st
 	}
 
 	ecm_db_node_add(nni, ii, node_addr, NULL, nni);
+	spin_unlock_bh(&ecm_front_end_ipv4_lock);
 
 	/*
 	 * Don't need iface instance now
 	 */
 	ecm_db_iface_deref(ii);
-
-	spin_unlock_bh(&ecm_front_end_ipv4_lock);
 
 	DEBUG_TRACE("%p: node established\n", nni);
 	return nni;
@@ -1328,8 +1318,7 @@ static int ecm_front_end_ipv4_connection_tcp_front_end_xml_state_get(struct ecm_
 {
 	bool can_accel;
 	ecm_classifier_acceleration_mode_t accel_mode;
-	int accel_count;
-	int accel_limit;
+	struct ecm_front_end_connection_mode_stats stats;
 	struct ecm_front_end_ipv4_connection_tcp_instance *fecti = (struct ecm_front_end_ipv4_connection_tcp_instance *)feci;
 
 	DEBUG_CHECK_MAGIC(fecti, ECM_FRONT_END_IPV4_CONNECTION_TCP_INSTANCE_MAGIC, "%p: magic failed", fecti);
@@ -1337,17 +1326,23 @@ static int ecm_front_end_ipv4_connection_tcp_front_end_xml_state_get(struct ecm_
 	spin_lock_bh(&fecti->lock);
 	can_accel = fecti->can_accel;
 	accel_mode = fecti->accel_mode;
-	accel_count = fecti->accel_count;
-	accel_limit = fecti->accel_limit;
+	memcpy(&stats, &feci->stats, sizeof(struct ecm_front_end_connection_mode_stats));
 	spin_unlock_bh(&fecti->lock);
 
-	return snprintf(buf, buf_sz, "<front_end_tcp can_accel=\"%u\" accel_mode=\"%d\" "
-			"accel_count=\"%d\" accel_limit=\"%d\"/>\n",
+	return snprintf(buf, buf_sz, "<front_end_tcp can_accel=\"%d\" accel_mode=\"%d\" decelerate_pending=\"%d\" no_action_seen_total=\"%d\" no_action_seen=\"%d\" no_action_seen_limit=\"%d\""
+				" driver_fail_total=\"%d\" driver_fail=\"%d\" driver_fail_limit=\"%d\" nss_nack_total=\"%d\" nss_nack=\"%d\" nss_nack_limit=\"%d\"/>\n",
 			can_accel,
 			accel_mode,
-			accel_count,
-			accel_limit);
-
+			stats.decelerate_pending,
+			stats.no_action_seen_total,
+			stats.no_action_seen,
+			stats.no_action_seen_limit,
+			stats.driver_fail_total,
+			stats.driver_fail,
+			stats.driver_fail_limit,
+			stats.nss_nack_total,
+			stats.nss_nack,
+			stats.nss_nack_limit);
 }
 
 /*
@@ -1378,7 +1373,9 @@ static struct ecm_front_end_ipv4_connection_tcp_instance *ecm_front_end_ipv4_con
 	fecti->accel_mode = ECM_CLASSIFIER_ACCELERATION_MODE_NO;
 	fecti->can_accel = can_accel;
 	spin_lock_bh(&ecm_front_end_ipv4_lock);
-	fecti->accel_limit = ecm_front_end_ipv4_accel_limit_default;
+	fecti->base.stats.no_action_seen_limit = ecm_front_end_ipv4_no_action_limit_default;
+	fecti->base.stats.driver_fail_limit = ecm_front_end_ipv4_driver_fail_limit_default;
+	fecti->base.stats.nss_nack_limit = ecm_front_end_ipv4_nack_limit_default;
 	spin_unlock_bh(&ecm_front_end_ipv4_lock);
 
 	/*
@@ -2179,8 +2176,7 @@ static int ecm_front_end_ipv4_connection_udp_front_end_xml_state_get(struct ecm_
 {
 	bool can_accel;
 	ecm_classifier_acceleration_mode_t accel_mode;
-	int accel_count;
-	int accel_limit;
+	struct ecm_front_end_connection_mode_stats stats;
 	struct ecm_front_end_ipv4_connection_udp_instance *fecui = (struct ecm_front_end_ipv4_connection_udp_instance *)feci;
 
 	DEBUG_CHECK_MAGIC(fecui, ECM_FRONT_END_IPV4_CONNECTION_UDP_INSTANCE_MAGIC, "%p: magic failed", fecui);
@@ -2188,16 +2184,23 @@ static int ecm_front_end_ipv4_connection_udp_front_end_xml_state_get(struct ecm_
 	spin_lock_bh(&fecui->lock);
 	can_accel = fecui->can_accel;
 	accel_mode = fecui->accel_mode;
-	accel_count = fecui->accel_count;
-	accel_limit = fecui->accel_limit;
+	memcpy(&stats, &feci->stats, sizeof(struct ecm_front_end_connection_mode_stats));
 	spin_unlock_bh(&fecui->lock);
 
-	return snprintf(buf, buf_sz, "<front_end_udp can_accel=\"%u\" accel_mode=\"%d\" "
-			"accel_count=\"%d\" accel_limit=\"%d\"/>\n",
+	return snprintf(buf, buf_sz, "<front_end_udp can_accel=\"%d\" accel_mode=\"%d\" decelerate_pending=\"%d\" no_action_seen_total=\"%d\" no_action_seen=\"%d\" no_action_seen_limit=\"%d\""
+				" driver_fail_total=\"%d\" driver_fail=\"%d\" driver_fail_limit=\"%d\" nss_nack_total=\"%d\" nss_nack=\"%d\" nss_nack_limit=\"%d\"/>\n",
 			can_accel,
 			accel_mode,
-			accel_count,
-			accel_limit);
+			stats.decelerate_pending,
+			stats.no_action_seen_total,
+			stats.no_action_seen,
+			stats.no_action_seen_limit,
+			stats.driver_fail_total,
+			stats.driver_fail,
+			stats.driver_fail_limit,
+			stats.nss_nack_total,
+			stats.nss_nack,
+			stats.nss_nack_limit);
 
 }
 
@@ -2229,7 +2232,9 @@ static struct ecm_front_end_ipv4_connection_udp_instance *ecm_front_end_ipv4_con
 	fecui->can_accel = can_accel;
 	fecui->accel_mode = ECM_CLASSIFIER_ACCELERATION_MODE_NO;
 	spin_lock_bh(&ecm_front_end_ipv4_lock);
-	fecui->accel_limit = ecm_front_end_ipv4_accel_limit_default;
+	fecui->base.stats.no_action_seen_limit = ecm_front_end_ipv4_no_action_limit_default;
+	fecui->base.stats.driver_fail_limit = ecm_front_end_ipv4_driver_fail_limit_default;
+	fecui->base.stats.nss_nack_limit = ecm_front_end_ipv4_nack_limit_default;
 	spin_unlock_bh(&ecm_front_end_ipv4_lock);
 
 	/*
@@ -3034,8 +3039,7 @@ static int ecm_front_end_ipv4_connection_non_ported_front_end_xml_state_get(stru
 {
 	bool can_accel;
 	ecm_classifier_acceleration_mode_t accel_mode;
-	int accel_count;
-	int accel_limit;
+	struct ecm_front_end_connection_mode_stats stats;
 	struct ecm_front_end_ipv4_connection_non_ported_instance *fecnpi = (struct ecm_front_end_ipv4_connection_non_ported_instance *)feci;
 
 	DEBUG_CHECK_MAGIC(fecnpi, ECM_FRONT_END_IPV4_CONNECTION_NON_PORTED_INSTANCE_MAGIC, "%p: magic failed", fecnpi);
@@ -3043,17 +3047,23 @@ static int ecm_front_end_ipv4_connection_non_ported_front_end_xml_state_get(stru
 	spin_lock_bh(&fecnpi->lock);
 	can_accel = fecnpi->can_accel;
 	accel_mode = fecnpi->accel_mode;
-	accel_count = fecnpi->accel_count;
-	accel_limit = fecnpi->accel_limit;
+	memcpy(&stats, &feci->stats, sizeof(struct ecm_front_end_connection_mode_stats));
 	spin_unlock_bh(&fecnpi->lock);
 
-	return snprintf(buf, buf_sz, "<front_end_non_ported can_accel=\"%u\" accel_mode=\"%d\" "
-			"accel_count=\"%d\" accel_limit=\"%d\"/>\n",
+	return snprintf(buf, buf_sz, "<front_end_non_ported can_accel=\"%d\" accel_mode=\"%d\" decelerate_pending=\"%d\" no_action_seen_total=\"%d\" no_action_seen=\"%d\" no_action_seen_limit=\"%d\""
+				" driver_fail_total=\"%d\" driver_fail=\"%d\" driver_fail_limit=\"%d\" nss_nack_total=\"%d\" nss_nack=\"%d\" nss_nack_limit=\"%d\"/>\n",
 			can_accel,
 			accel_mode,
-			accel_count,
-			accel_limit);
-
+			stats.decelerate_pending,
+			stats.no_action_seen_total,
+			stats.no_action_seen,
+			stats.no_action_seen_limit,
+			stats.driver_fail_total,
+			stats.driver_fail,
+			stats.driver_fail_limit,
+			stats.nss_nack_total,
+			stats.nss_nack,
+			stats.nss_nack_limit);
 }
 
 /*
@@ -3084,7 +3094,9 @@ static struct ecm_front_end_ipv4_connection_non_ported_instance *ecm_front_end_i
 	fecnpi->can_accel = can_accel;
 	fecnpi->accel_mode = ECM_CLASSIFIER_ACCELERATION_MODE_NO;
 	spin_lock_bh(&ecm_front_end_ipv4_lock);
-	fecnpi->accel_limit = ecm_front_end_ipv4_accel_limit_default;
+	fecnpi->base.stats.no_action_seen_limit = ecm_front_end_ipv4_no_action_limit_default;
+	fecnpi->base.stats.driver_fail_limit = ecm_front_end_ipv4_driver_fail_limit_default;
+	fecnpi->base.stats.nss_nack_limit = ecm_front_end_ipv4_nack_limit_default;
 	spin_unlock_bh(&ecm_front_end_ipv4_lock);
 
 	/*
@@ -6213,13 +6225,251 @@ static ssize_t ecm_front_end_ipv4_set_stop(struct sys_device *dev,
 }
 
 /*
- * SysFS attributes for the default classifier itself.
+ * ecm_front_end_ipv4_get_udp_accelerated_count()
  */
-static SYSDEV_ATTR(stop, 0644, ecm_front_end_ipv4_get_stop, ecm_front_end_ipv4_set_stop);
+static ssize_t ecm_front_end_ipv4_get_udp_accelerated_count(struct sys_device *dev,
+				  struct sysdev_attribute *attr,
+				  char *buf)
+{
+	ssize_t count;
+	int num;
+
+	/*
+	 * Operate under our locks
+	 */
+	spin_lock_bh(&ecm_front_end_ipv4_lock);
+	num = ecm_front_end_ipv4_udp_accelerated_count;
+	spin_unlock_bh(&ecm_front_end_ipv4_lock);
+
+	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", num);
+	return count;
+}
 
 /*
- * SysFS class of the ubicom default classifier
- * SysFS control points can be found at /sys/devices/system/ecm_front_end/ecm_front_endX/
+ * ecm_front_end_ipv4_get_tcp_accelerated_count()
+ */
+static ssize_t ecm_front_end_ipv4_get_tcp_accelerated_count(struct sys_device *dev,
+				  struct sysdev_attribute *attr,
+				  char *buf)
+{
+	ssize_t count;
+	int num;
+
+	/*
+	 * Operate under our locks
+	 */
+	spin_lock_bh(&ecm_front_end_ipv4_lock);
+	num = ecm_front_end_ipv4_tcp_accelerated_count;
+	spin_unlock_bh(&ecm_front_end_ipv4_lock);
+
+	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", num);
+	return count;
+}
+
+/*
+ * ecm_front_end_ipv4_get_non_ported_accelerated_count()
+ */
+static ssize_t ecm_front_end_ipv4_get_non_ported_accelerated_count(struct sys_device *dev,
+				  struct sysdev_attribute *attr,
+				  char *buf)
+{
+	ssize_t count;
+	int num;
+
+	/*
+	 * Operate under our locks
+	 */
+	spin_lock_bh(&ecm_front_end_ipv4_lock);
+	num = ecm_front_end_ipv4_non_ported_accelerated_count;
+	spin_unlock_bh(&ecm_front_end_ipv4_lock);
+
+	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", num);
+	return count;
+}
+
+/*
+ * ecm_front_end_ipv4_get_accelerated_count()
+ */
+static ssize_t ecm_front_end_ipv4_get_accelerated_count(struct sys_device *dev,
+				  struct sysdev_attribute *attr,
+				  char *buf)
+{
+	ssize_t count;
+	int num;
+
+	/*
+	 * Operate under our locks
+	 */
+	spin_lock_bh(&ecm_front_end_ipv4_lock);
+	num = ecm_front_end_ipv4_accelerated_count;
+	spin_unlock_bh(&ecm_front_end_ipv4_lock);
+
+	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", num);
+	return count;
+}
+
+/*
+ * ecm_front_end_ipv4_get_no_action_limit_default()
+ */
+static ssize_t ecm_front_end_ipv4_get_no_action_limit_default(struct sys_device *dev,
+				  struct sysdev_attribute *attr,
+				  char *buf)
+{
+	ssize_t count;
+	int num;
+
+	/*
+	 * Operate under our locks
+	 */
+	spin_lock_bh(&ecm_front_end_ipv4_lock);
+	num = ecm_front_end_ipv4_no_action_limit_default;
+	spin_unlock_bh(&ecm_front_end_ipv4_lock);
+
+	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", num);
+	return count;
+}
+
+/*
+ * ecm_front_end_ipv4_set_no_action_limit_default()
+ */
+static ssize_t ecm_front_end_ipv4_set_no_action_limit_default(struct sys_device *dev,
+				  struct sysdev_attribute *attr,
+				  const char *buf, size_t count)
+{
+	char num_buf[12];
+	int num;
+
+	/*
+	 * Get the number from buf into a properly z-termed number buffer
+	 */
+	if (count > 11) {
+		return 0;
+	}
+	memcpy(num_buf, buf, count);
+	num_buf[count] = '\0';
+	sscanf(num_buf, "%d", &num);
+	DEBUG_TRACE("ecm_front_end_ipv4_no_action_limit_default = %d\n", num);
+
+	spin_lock_bh(&ecm_front_end_ipv4_lock);
+	ecm_front_end_ipv4_no_action_limit_default = num;
+	spin_unlock_bh(&ecm_front_end_ipv4_lock);
+
+	return count;
+}
+
+/*
+ * ecm_front_end_ipv4_get_driver_fail_limit_default()
+ */
+static ssize_t ecm_front_end_ipv4_get_driver_fail_limit_default(struct sys_device *dev,
+				  struct sysdev_attribute *attr,
+				  char *buf)
+{
+	ssize_t count;
+	int num;
+
+	/*
+	 * Operate under our locks
+	 */
+	spin_lock_bh(&ecm_front_end_ipv4_lock);
+	num = ecm_front_end_ipv4_driver_fail_limit_default;
+	spin_unlock_bh(&ecm_front_end_ipv4_lock);
+
+	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", num);
+	return count;
+}
+
+/*
+ * ecm_front_end_ipv4_set_driver_fail_limit_default()
+ */
+static ssize_t ecm_front_end_ipv4_set_driver_fail_limit_default(struct sys_device *dev,
+				  struct sysdev_attribute *attr,
+				  const char *buf, size_t count)
+{
+	char num_buf[12];
+	int num;
+
+	/*
+	 * Get the number from buf into a properly z-termed number buffer
+	 */
+	if (count > 11) {
+		return 0;
+	}
+	memcpy(num_buf, buf, count);
+	num_buf[count] = '\0';
+	sscanf(num_buf, "%d", &num);
+	DEBUG_TRACE("ecm_front_end_ipv4_driver_fail_limit_default = %d\n", num);
+
+	spin_lock_bh(&ecm_front_end_ipv4_lock);
+	ecm_front_end_ipv4_driver_fail_limit_default = num;
+	spin_unlock_bh(&ecm_front_end_ipv4_lock);
+
+	return count;
+}
+
+/*
+ * ecm_front_end_ipv4_get_nack_limit_default()
+ */
+static ssize_t ecm_front_end_ipv4_get_nack_limit_default(struct sys_device *dev,
+				  struct sysdev_attribute *attr,
+				  char *buf)
+{
+	ssize_t count;
+	int num;
+
+	/*
+	 * Operate under our locks
+	 */
+	spin_lock_bh(&ecm_front_end_ipv4_lock);
+	num = ecm_front_end_ipv4_nack_limit_default;
+	spin_unlock_bh(&ecm_front_end_ipv4_lock);
+
+	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", num);
+	return count;
+}
+
+/*
+ * ecm_front_end_ipv4_set_nack_limit_default()
+ */
+static ssize_t ecm_front_end_ipv4_set_nack_limit_default(struct sys_device *dev,
+				  struct sysdev_attribute *attr,
+				  const char *buf, size_t count)
+{
+	char num_buf[12];
+	int num;
+
+	/*
+	 * Get the number from buf into a properly z-termed number buffer
+	 */
+	if (count > 11) {
+		return 0;
+	}
+	memcpy(num_buf, buf, count);
+	num_buf[count] = '\0';
+	sscanf(num_buf, "%d", &num);
+	DEBUG_TRACE("ecm_front_end_ipv4_nack_limit_default = %d\n", num);
+
+	spin_lock_bh(&ecm_front_end_ipv4_lock);
+	ecm_front_end_ipv4_nack_limit_default = num;
+	spin_unlock_bh(&ecm_front_end_ipv4_lock);
+
+	return count;
+}
+
+/*
+ * SysFS attributes
+ */
+static SYSDEV_ATTR(stop, 0644, ecm_front_end_ipv4_get_stop, ecm_front_end_ipv4_set_stop);
+static SYSDEV_ATTR(no_action_limit_default, 0644, ecm_front_end_ipv4_get_no_action_limit_default, ecm_front_end_ipv4_set_no_action_limit_default);
+static SYSDEV_ATTR(driver_fail_limit_default, 0644, ecm_front_end_ipv4_get_driver_fail_limit_default, ecm_front_end_ipv4_set_driver_fail_limit_default);
+static SYSDEV_ATTR(nack_limit_default, 0644, ecm_front_end_ipv4_get_nack_limit_default, ecm_front_end_ipv4_set_nack_limit_default);
+static SYSDEV_ATTR(udp_accelerated_count, 0444, ecm_front_end_ipv4_get_udp_accelerated_count, NULL);
+static SYSDEV_ATTR(tcp_accelerated_count, 0444, ecm_front_end_ipv4_get_tcp_accelerated_count, NULL);
+static SYSDEV_ATTR(non_ported_accelerated_count, 0444, ecm_front_end_ipv4_get_non_ported_accelerated_count, NULL);
+static SYSDEV_ATTR(accelerated_count, 0444, ecm_front_end_ipv4_get_accelerated_count, NULL);
+
+/*
+ * SysFS class of the front end
+ * SysFS control points can be found at /sys/devices/system/ecm_front_end_ipv4/ecm_front_end_ipv4X/
  */
 static struct sysdev_class ecm_front_end_ipv4_sysclass = {
 	.name = "ecm_front_end_ipv4",
@@ -6265,6 +6515,41 @@ int ecm_front_end_ipv4_init(void)
 	result = sysdev_create_file(&ecm_front_end_ipv4_sys_dev, &attr_stop);
 	if (result) {
 		DEBUG_ERROR("Failed to register stop file %d\n", result);
+		goto task_cleanup_2;
+	}
+	result = sysdev_create_file(&ecm_front_end_ipv4_sys_dev, &attr_no_action_limit_default);
+	if (result) {
+		DEBUG_ERROR("Failed to register no_action_limit_default file %d\n", result);
+		goto task_cleanup_2;
+	}
+	result = sysdev_create_file(&ecm_front_end_ipv4_sys_dev, &attr_driver_fail_limit_default);
+	if (result) {
+		DEBUG_ERROR("Failed to register driver_fail_limit_default file %d\n", result);
+		goto task_cleanup_2;
+	}
+	result = sysdev_create_file(&ecm_front_end_ipv4_sys_dev, &attr_nack_limit_default);
+	if (result) {
+		DEBUG_ERROR("Failed to register nack_limit_default file %d\n", result);
+		goto task_cleanup_2;
+	}
+	result = sysdev_create_file(&ecm_front_end_ipv4_sys_dev, &attr_udp_accelerated_count);
+	if (result) {
+		DEBUG_ERROR("Failed to register udp_accelerated_count file %d\n", result);
+		goto task_cleanup_2;
+	}
+	result = sysdev_create_file(&ecm_front_end_ipv4_sys_dev, &attr_tcp_accelerated_count);
+	if (result) {
+		DEBUG_ERROR("Failed to register tcp_accelerated_count file %d\n", result);
+		goto task_cleanup_2;
+	}
+	result = sysdev_create_file(&ecm_front_end_ipv4_sys_dev, &attr_non_ported_accelerated_count);
+	if (result) {
+		DEBUG_ERROR("Failed to register non_ported_accelerated_count file %d\n", result);
+		goto task_cleanup_2;
+	}
+	result = sysdev_create_file(&ecm_front_end_ipv4_sys_dev, &attr_accelerated_count);
+	if (result) {
+		DEBUG_ERROR("Failed to register accelerated_count file %d\n", result);
 		goto task_cleanup_2;
 	}
 
