@@ -650,44 +650,37 @@ static void ecm_classifier_nl_process(struct ecm_classifier_instance *aci, ecm_t
  * ecm_classifier_nl_sync_to_v4()
  *	Front end is pushing NSS state to us
  */
-static void
-ecm_classifier_nl_sync_to_v4(struct ecm_classifier_instance *aci,
-			     struct nss_ipv4_cb_params *params)
+static void ecm_classifier_nl_sync_to_v4(struct ecm_classifier_instance *aci, struct nss_ipv4_conn_sync *sync)
 {
 	int accel_ok;
-	struct nss_ipv4_sync *sync;
 	struct ecm_classifier_nl_instance *cnli;
 
 	accel_ok = 0;
 
-	DEBUG_ASSERT(params->reason == NSS_IPV4_CB_REASON_SYNC,
-		     "sync_to_v4 callback issued for non-sync reason\n");
-
-	sync = &params->params.sync;
-
 	if (!(sync->flow_tx_packet_count || sync->return_tx_packet_count)) {
-		/* nothing to update.  we only care about flows that
-		   are actively being accelerated. */
+		/*
+		 * Nothing to update.
+		 * We only care about flows that are actively being accelerated.
+		 */
 		return;
 	}
 
 	cnli = (struct ecm_classifier_nl_instance *)aci;
-	DEBUG_CHECK_MAGIC(cnli, ECM_CLASSIFIER_NL_INSTANCE_MAGIC,
-			  "%p: magic failed", cnli);
+	DEBUG_CHECK_MAGIC(cnli, ECM_CLASSIFIER_NL_INSTANCE_MAGIC, "%p: magic failed", cnli);
 
 	switch(sync->reason) {
-	case NSS_IPV4_SYNC_REASON_FLUSH:
+	case NSS_IPV4_RULE_SYNC_REASON_FLUSH:
 		/* do nothing */
 		DEBUG_TRACE("%p: nl_sync_to_v4: SYNC_FLUSH\n", cnli);
 		break;
-	case NSS_IPV4_SYNC_REASON_EVICT:
+	case NSS_IPV4_RULE_SYNC_REASON_EVICT:
 		/* do nothing */
 		DEBUG_TRACE("%p: nl_sync_to_v4: SYNC_EVICT\n", cnli);
 		break;
-	case NSS_IPV4_SYNC_REASON_DESTROY:
+	case NSS_IPV4_RULE_SYNC_REASON_DESTROY:
 		DEBUG_TRACE("%p: nl_sync_to_v4: SYNC_DESTROY\n", cnli);
 		break;
-	case NSS_IPV4_SYNC_REASON_STATS:
+	case NSS_IPV4_RULE_SYNC_REASON_STATS:
 		DEBUG_TRACE("%p: nl_sync_to_v4: SYNC_STATS\n", cnli);
 		accel_ok = 1;
 		break;
@@ -705,7 +698,7 @@ ecm_classifier_nl_sync_to_v4(struct ecm_classifier_instance *aci,
  * ecm_classifier_nl_sync_from_v4()
  *	Front end is retrieving NSS state from us
  */
-static void ecm_classifier_nl_sync_from_v4(struct ecm_classifier_instance *aci, struct nss_ipv4_create *create)
+static void ecm_classifier_nl_sync_from_v4(struct ecm_classifier_instance *aci, struct nss_ipv4_rule_create_msg *nircm)
 {
 	struct ecm_classifier_nl_instance *cnli;
 

@@ -62,7 +62,7 @@ typedef void (*ecm_front_end_connection_decelerate_method_t)(struct ecm_front_en
 typedef ecm_front_end_acceleration_mode_t (*ecm_front_end_connection_accel_state_get_method_t)(struct ecm_front_end_connection_instance *feci);
 typedef void (*ecm_front_end_connection_ref_method_t)(struct ecm_front_end_connection_instance *feci);
 typedef int (*ecm_front_end_connection_deref_callback_t)(struct ecm_front_end_connection_instance *feci);
-typedef void (*ecm_front_end_connection_accel_count_reset_method_t)(struct ecm_front_end_connection_instance *feci);
+typedef void (*ecm_front_end_connection_action_seen_method_t)(struct ecm_front_end_connection_instance *feci);
 typedef void (*ecm_front_end_connection_accel_ceased_method_t)(struct ecm_front_end_connection_instance *feci);
 typedef int (*ecm_front_end_connection_xml_state_get_callback_t)(struct ecm_front_end_connection_instance *feci, char *buf, int buf_sz);
 											/* Get XML state output, buf has buf_sz bytes available.  Returns number of bytes written.
@@ -95,7 +95,7 @@ struct ecm_front_end_connection_instance {
 	ecm_front_end_connection_deref_callback_t deref;			/* Deref the instance */
 	ecm_front_end_connection_decelerate_method_t decelerate;		/* Decelerate a connection */
 	ecm_front_end_connection_accel_state_get_method_t accel_state_get;	/* Get the acceleration state */
-	ecm_front_end_connection_accel_count_reset_method_t accel_count_reset;	/* Reset acceleration count */
+	ecm_front_end_connection_action_seen_method_t action_seen;		/* Acceleration action has occurred */
 	ecm_front_end_connection_accel_ceased_method_t accel_ceased;		/* Acceleration has stopped */
 	ecm_front_end_connection_xml_state_get_callback_t xml_state_get;	/* Obtain XML formatted state for this object */
 

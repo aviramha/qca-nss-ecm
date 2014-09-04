@@ -1898,7 +1898,7 @@ static struct ecm_front_end_ipv6_connection_tcp_instance *ecm_front_end_ipv6_con
 	fecti->base.deref = ecm_front_end_ipv6_connection_tcp_front_end_deref;
 	fecti->base.decelerate = ecm_front_end_ipv6_connection_tcp_front_end_decelerate;
 	fecti->base.accel_state_get = ecm_front_end_ipv6_connection_tcp_front_end_accel_state_get;
-	fecti->base.accel_count_reset = ecm_front_end_ipv6_connection_tcp_front_end_accel_count_reset;
+	fecti->base.action_seen = ecm_front_end_ipv6_connection_tcp_front_end_accel_count_reset;
 	fecti->base.accel_ceased = ecm_front_end_ipv6_connection_tcp_front_end_accel_ceased;
 	fecti->base.xml_state_get = ecm_front_end_ipv6_connection_tcp_front_end_xml_state_get;
 
@@ -2691,7 +2691,7 @@ static struct ecm_front_end_ipv6_connection_udp_instance *ecm_front_end_ipv6_con
 	fecui->base.deref = ecm_front_end_ipv6_connection_udp_front_end_deref;
 	fecui->base.decelerate = ecm_front_end_ipv6_connection_udp_front_end_decelerate;
 	fecui->base.accel_state_get = ecm_front_end_ipv6_connection_udp_front_end_accel_state_get;
-	fecui->base.accel_count_reset = ecm_front_end_ipv6_connection_udp_front_end_accel_count_reset;
+	fecui->base.action_seen = ecm_front_end_ipv6_connection_udp_front_end_accel_count_reset;
 	fecui->base.accel_ceased = ecm_front_end_ipv6_connection_udp_front_end_accel_ceased;
 	fecui->base.xml_state_get = ecm_front_end_ipv6_connection_udp_front_end_xml_state_get;
 
@@ -3497,7 +3497,7 @@ static struct ecm_front_end_ipv6_connection_non_ported_instance *ecm_front_end_i
 	fecnpi->base.deref = ecm_front_end_ipv6_connection_non_ported_front_end_deref;
 	fecnpi->base.decelerate = ecm_front_end_ipv6_connection_non_ported_front_end_decelerate;
 	fecnpi->base.accel_state_get = ecm_front_end_ipv6_connection_non_ported_front_end_accel_state_get;
-	fecnpi->base.accel_count_reset = ecm_front_end_ipv6_connection_non_ported_front_end_accel_count_reset;
+	fecnpi->base.action_seen = ecm_front_end_ipv6_connection_non_ported_front_end_accel_count_reset;
 	fecnpi->base.accel_ceased = ecm_front_end_ipv6_connection_non_ported_front_end_accel_ceased;
 	fecnpi->base.xml_state_get = ecm_front_end_ipv6_connection_non_ported_front_end_xml_state_get;
 
@@ -5635,9 +5635,9 @@ static void ecm_front_end_ipv6_ipv6_net_dev_callback(struct nss_ipv6_cb_params *
 		ecm_db_connection_data_totals_update(ci, false, sync->return_rx_byte_count, sync->return_rx_packet_count);
 
 		/*
-		 * As packets have been accelerated we reset the accel count for the connection
+		 * As packets have been accelerated we have seen some action.
 		 */
-		feci->accel_count_reset(feci);
+		feci->action_seen(feci);
 
 		/*
 		 * Update interface statistics

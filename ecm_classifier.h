@@ -97,9 +97,9 @@ typedef void (*ecm_classifier_ref_method_t)(struct ecm_classifier_instance *ci);
 typedef int (*ecm_classifier_deref_callback_t)(struct ecm_classifier_instance *ci);
 typedef void (*ecm_classifier_process_callback_t)(struct ecm_classifier_instance *ci, ecm_tracker_sender_type_t sender, struct ecm_tracker_ip_header *ip_hdr, struct sk_buff *skb, struct ecm_classifier_process_response *process_response);
 											/* Process new data for connection, process_response is populated with the response of processing */
-typedef void (*ecm_classifier_sync_from_v4_callback_t)(struct ecm_classifier_instance *ci, struct nss_ipv4_create *params);
+typedef void (*ecm_classifier_sync_from_v4_callback_t)(struct ecm_classifier_instance *ci, struct nss_ipv4_rule_create_msg *nircm);
 											/* Sync the NSS state with state from the classifier */
-typedef void (*ecm_classifier_sync_to_v4_callback_t)(struct ecm_classifier_instance *ci, struct nss_ipv4_cb_params *params);
+typedef void (*ecm_classifier_sync_to_v4_callback_t)(struct ecm_classifier_instance *ci, struct nss_ipv4_conn_sync *sync);
 											/* Sync the classifier state with current NSS state */
 typedef void (*ecm_classifier_sync_from_v6_callback_t)(struct ecm_classifier_instance *ci, struct nss_ipv6_create *params);
 											/* Sync the NSS state with state from the classifier */
