@@ -7566,9 +7566,18 @@ void ecm_front_end_ipv6_exit(void)
 	ecm_front_end_ipv6_terminate_pending = true;
 	spin_unlock_bh(&ecm_front_end_ipv6_lock);
 
+	/*
+	 * Stop the network stack hooks
+	 */
 	nf_unregister_hooks(ecm_front_end_ipv6_netfilter_hooks,
 			    ARRAY_SIZE(ecm_front_end_ipv6_netfilter_hooks));
+
+	/*
+	 * Unregister from the Linux NSS Network driver
+	 */
+	nss_ipv6_notify_unregister();
 	nss_unregister_ipv6_mgr();
+
 	sysdev_unregister(&ecm_front_end_ipv6_sys_dev);
 	sysdev_class_unregister(&ecm_front_end_ipv6_sysclass);
 }

@@ -7593,8 +7593,9 @@ void ecm_front_end_ipv4_exit(void)
 			    ARRAY_SIZE(ecm_front_end_ipv4_netfilter_hooks));
 
 	/*
-	 * Unregister from the na
+	 * Unregister from the Linux NSS Network driver
 	 */
+	nss_ipv4_notify_unregister();
 	nss_unregister_ipv4_mgr();
 
 	sysdev_unregister(&ecm_front_end_ipv4_sys_dev);
