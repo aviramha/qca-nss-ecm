@@ -1075,6 +1075,7 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_accelerate(struct ecm_fr
 	 */
 	nircm->qos_rule.flow_qos_tag = (uint32_t)pr->flow_qos_tag;
 	nircm->qos_rule.return_qos_tag = (uint32_t)pr->return_qos_tag;
+	nircm->valid_flags |= NSS_IPV4_RULE_CREATE_QOS_VALID;
 
 	/*
 	 * DSCP information?
@@ -1177,8 +1178,9 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_accelerate(struct ecm_fr
 			nircm->rule_flags |= NSS_IPV4_RULE_CREATE_FLAG_NO_SEQ_CHECK;
 		}
 		spin_unlock_bh(&ct->lock);
-		nircm->valid_flags |= NSS_IPV4_RULE_CREATE_TCP_VALID;
 	}
+
+	nircm->valid_flags |= NSS_IPV4_RULE_CREATE_TCP_VALID;
 
 	/*
 	 * Sync our creation command from the assigned classifiers to get specific additional creation rules.
@@ -2302,6 +2304,7 @@ static void ecm_front_end_ipv4_connection_udp_front_end_accelerate(struct ecm_fr
 	 */
 	nircm->qos_rule.flow_qos_tag = (uint32_t)pr->flow_qos_tag;
 	nircm->qos_rule.return_qos_tag = (uint32_t)pr->return_qos_tag;
+	nircm->valid_flags |= NSS_IPV4_RULE_CREATE_QOS_VALID;
 
 	/*
 	 * DSCP information?
@@ -3498,6 +3501,7 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_accelerate(struct
 	 */
 	nircm->qos_rule.flow_qos_tag = (uint32_t)pr->flow_qos_tag;
 	nircm->qos_rule.return_qos_tag = (uint32_t)pr->return_qos_tag;
+	nircm->valid_flags |= NSS_IPV4_RULE_CREATE_QOS_VALID;
 
 	/*
 	 * DSCP information?
