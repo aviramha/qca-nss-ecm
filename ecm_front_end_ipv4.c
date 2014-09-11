@@ -97,6 +97,7 @@ struct ecm_front_end_ipv4_connection_tcp_instance {
 	struct ecm_front_end_connection_instance base;		/* Base class */
 	struct ecm_db_connection_instance *ci;			/* RO: The connection instance relating to this instance. */
 	bool can_accel;						/* RO: True when the connection can be accelerated */
+	bool is_defunct;					/* True if the connection has become defunct */
 	ecm_front_end_acceleration_mode_t accel_mode;		/* Indicates  the type of acceleration being applied to a connection, if any. */
 	spinlock_t lock;					/* Lock for structure data */
 	int refs;						/* Integer to trap we never go negative */
@@ -113,6 +114,7 @@ struct ecm_front_end_ipv4_connection_udp_instance {
 	struct ecm_front_end_connection_instance base;		/* Base class */
 	struct ecm_db_connection_instance *ci;			/* RO: The connection instance relating to this instance. */
 	bool can_accel;						/* RO: True when the connection can be accelerated */
+	bool is_defunct;					/* True if the connection has become defunct */
 	ecm_front_end_acceleration_mode_t accel_mode;		/* Indicates the type of acceleration being applied to a connection, if any. */
 	spinlock_t lock;					/* Lock for structure data */
 	int refs;						/* Integer to trap we never go negative */
@@ -129,6 +131,7 @@ struct ecm_front_end_ipv4_connection_non_ported_instance {
 	struct ecm_front_end_connection_instance base;		/* Base class */
 	struct ecm_db_connection_instance *ci;			/* RO: The connection instance relating to this instance. */
 	bool can_accel;						/* RO: True when the connection can be accelerated */
+	bool is_defunct;					/* True if the connection has become defunct */
 	ecm_front_end_acceleration_mode_t accel_mode;		/* Indicates the type of acceleration being applied to a connection, if any. */
 	spinlock_t lock;					/* Lock for structure data */
 	int refs;						/* Integer to trap we never go negative */
@@ -571,7 +574,18 @@ static void ecm_front_end_ipv4_connection_tcp_callback(void *app_data, struct ns
 		 * Clear any decelerate pending flag since we aren't accelerated anyway we can just clear this whether it is set or not
 		 */
 		fecti->base.stats.decelerate_pending = false;
-		spin_unlock_bh(&fecti->lock);
+
+		/*
+		 * If we have defunct flag set for this connection, set the accel mode and
+		 * release the extra connection reference.
+		 */
+		if (!fecti->is_defunct) {
+			spin_unlock_bh(&fecti->lock);
+		} else {
+			fecti->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DEFUNCT;
+			spin_unlock_bh(&fecti->lock);
+			ecm_db_connection_deref(ci);
+		}
 
 		/*
 		 * Release the connection.
@@ -1380,7 +1394,18 @@ static void ecm_front_end_ipv4_connection_tcp_destroy_callback(void *app_data, s
 	} else {
 		fecti->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_DECEL;
 	}
-	spin_unlock_bh(&fecti->lock);
+
+	/*
+	 * If we have defunct flag set for this connection, set the accel mode and
+	 * release the extra connection reference.
+	 */
+	if (!fecti->is_defunct) {
+		spin_unlock_bh(&fecti->lock);
+	} else {
+		fecti->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DEFUNCT;
+		spin_unlock_bh(&fecti->lock);
+		ecm_db_connection_deref(ci);
+	}
 
 	/*
 	 * TCP acceleration ends
@@ -1497,6 +1522,57 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_decelerate(struct ecm_fr
 		fecti->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DRIVER;
 	}
 	spin_unlock_bh(&fecti->lock);
+}
+
+/*
+ * ecm_front_end_ipv4_connection_tcp_defunct_callback()
+ *	Callback to be called when a TCP connection is defuncted.
+ */
+static void ecm_front_end_ipv4_connection_tcp_defunct_callback(void *arg)
+{
+	struct ecm_front_end_connection_instance *feci = (struct ecm_front_end_connection_instance *)arg;
+	struct ecm_front_end_ipv4_connection_tcp_instance *fecti = (struct ecm_front_end_ipv4_connection_tcp_instance *)feci;
+
+	DEBUG_CHECK_MAGIC(fecti, ECM_FRONT_END_IPV4_CONNECTION_TCP_INSTANCE_MAGIC, "%p: magic failed", fecti);
+
+	spin_lock_bh(&fecti->lock);
+
+	/*
+	 * If connection has already become defunct, do nothing.
+	 */
+	if (fecti->is_defunct) {
+		spin_unlock_bh(&fecti->lock);
+		return;
+	}
+	fecti->is_defunct = true;
+
+	/*
+	 * If the connection is already in one of the fail modes, do nothing, keep the current accel_mode.
+	 */
+	if (ECM_FRONT_END_ACCELERATION_FAILED(fecti->accel_mode)) {
+		spin_unlock_bh(&fecti->lock);
+		return;
+	}
+
+	/*
+	 * If the connection is not in decel or decel pending mode, we don't need to defunct the connection.
+	 * Just mark the connection mode to fail defunct.
+	 */
+	if ((fecti->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_DECEL)
+			|| (fecti->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_DECEL_PENDING)) {
+		fecti->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DEFUNCT;
+		spin_unlock_bh(&fecti->lock);
+		return;
+	}
+
+	/*
+	 * If none of the cases mathes above, this means the connection is in one of the
+	 * accel modes (accel or accel_pending), ref the connection instance before decelerating
+	 * to keep it in the database until we get the deceleration response.
+	 */
+	spin_unlock_bh(&fecti->lock);
+	ecm_db_connection_ref(fecti->ci);
+	ecm_front_end_ipv4_connection_tcp_front_end_decelerate(feci);
 }
 
 /*
@@ -1800,7 +1876,18 @@ static void ecm_front_end_ipv4_connection_udp_callback(void *app_data, struct ns
 		 * Clear any decelerate pending flag since we aren't accelerated anyway we can just clear this whether it is set or not
 		 */
 		fecui->base.stats.decelerate_pending = false;
-		spin_unlock_bh(&fecui->lock);
+
+		/*
+		 * If we have defunct flag set for this connection, set the accel mode and
+		 * release the extra connection reference.
+		 */
+		if (!fecui->is_defunct) {
+			spin_unlock_bh(&fecui->lock);
+		} else {
+			fecui->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DEFUNCT;
+			spin_unlock_bh(&fecui->lock);
+			ecm_db_connection_deref(ci);
+		}
 
 		/*
 		 * Release the connection.
@@ -2562,14 +2649,26 @@ static void ecm_front_end_ipv4_connection_udp_destroy_callback(void *app_data, s
 	}
 
 	/*
+	 * If we have defunct flag set for this connection, set the accel mode and
+	 * release the extra connection reference.
+	 */
+	if (!fecui->is_defunct) {
+		spin_unlock_bh(&fecui->lock);
+	} else {
+		fecui->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DEFUNCT;
+		spin_unlock_bh(&fecui->lock);
+		ecm_db_connection_deref(ci);
+	}
+
+	/*
 	 * UDP acceleration ends
 	 */
+	spin_lock_bh(&ecm_front_end_ipv4_lock);
 	ecm_front_end_ipv4_udp_accelerated_count--;	/* Protocol specific counter */
 	DEBUG_ASSERT(ecm_front_end_ipv4_udp_accelerated_count >= 0, "Bad udp accel counter\n");
 	ecm_front_end_ipv4_accelerated_count--;		/* General running counter */
 	DEBUG_ASSERT(ecm_front_end_ipv4_accelerated_count >= 0, "Bad accel counter\n");
-
-	spin_unlock_bh(&fecui->lock);
+	spin_unlock_bh(&ecm_front_end_ipv4_lock);
 
 	/*
 	 * Release the connections.
@@ -2676,6 +2775,57 @@ static void ecm_front_end_ipv4_connection_udp_front_end_decelerate(struct ecm_fr
 		fecui->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DRIVER;
 	}
 	spin_unlock_bh(&fecui->lock);
+}
+
+/*
+ * ecm_front_end_ipv4_connection_udp_defunct_callback()
+ *	Callback to be called when a UDP connection is defuncted.
+ */
+static void ecm_front_end_ipv4_connection_udp_defunct_callback(void *arg)
+{
+	struct ecm_front_end_connection_instance *feci = (struct ecm_front_end_connection_instance *)arg;
+	struct ecm_front_end_ipv4_connection_udp_instance *fecui = (struct ecm_front_end_ipv4_connection_udp_instance *)feci;
+
+	DEBUG_CHECK_MAGIC(fecui, ECM_FRONT_END_IPV4_CONNECTION_UDP_INSTANCE_MAGIC, "%p: magic failed", fecui);
+
+	spin_lock_bh(&fecui->lock);
+
+	/*
+	 * If connection has already become defunct, do nothing.
+	 */
+	if (fecui->is_defunct) {
+		spin_unlock_bh(&fecui->lock);
+		return;
+	}
+	fecui->is_defunct = true;
+
+	/*
+	 * If the connection is already in one of the fail modes, do nothing, keep the current accel_mode.
+	 */
+	if (ECM_FRONT_END_ACCELERATION_FAILED(fecui->accel_mode)) {
+		spin_unlock_bh(&fecui->lock);
+		return;
+	}
+
+	/*
+	 * If the connection is not in decel or decel pending mode, we don't need to defunct the connection.
+	 * Just mark the connection mode to fail defunct.
+	 */
+	if ((fecui->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_DECEL)
+			|| (fecui->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_DECEL_PENDING)) {
+		fecui->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DEFUNCT;
+		spin_unlock_bh(&fecui->lock);
+		return;
+	}
+
+	/*
+	 * If none of the cases mathes above, this means the connection is in one of the
+	 * accel modes (accel or accel_pending), ref the connection instance before decelerating
+	 * to keep it in the database until we get the deceleration response.
+	 */
+	spin_unlock_bh(&fecui->lock);
+	ecm_db_connection_ref(fecui->ci);
+	ecm_front_end_ipv4_connection_udp_front_end_decelerate(feci);
 }
 
 /*
@@ -2980,7 +3130,18 @@ static void ecm_front_end_ipv4_connection_non_ported_callback(void *app_data, st
 		 * Clear any decelerate pending flag since we aren't accelerated anyway we can just clear this whether it is set or not
 		 */
 		fecnpi->base.stats.decelerate_pending = false;
-		spin_unlock_bh(&fecnpi->lock);
+
+		/*
+		 * If we have defunct flag set for this connection, set the accel mode and
+		 * release the extra connection reference.
+		 */
+		if (!fecnpi->is_defunct) {
+			spin_unlock_bh(&fecnpi->lock);
+		} else {
+			fecnpi->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DEFUNCT;
+			spin_unlock_bh(&fecnpi->lock);
+			ecm_db_connection_deref(ci);
+		}
 
 		/*
 		 * Release the connection.
@@ -3758,14 +3919,26 @@ static void ecm_front_end_ipv4_connection_non_ported_destroy_callback(void *app_
 	}
 
 	/*
+	 * If we have defunct flag set for this connection, set the accel mode and
+	 * release the extra connection reference.
+	 */
+	if (!fecnpi->is_defunct) {
+		spin_unlock_bh(&fecnpi->lock);
+	} else {
+		fecnpi->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DEFUNCT;
+		spin_unlock_bh(&fecnpi->lock);
+		ecm_db_connection_deref(ci);
+	}
+
+	/*
 	 * NON_PORTED acceleration ends
 	 */
+	spin_lock_bh(&ecm_front_end_ipv4_lock);
 	ecm_front_end_ipv4_non_ported_accelerated_count--;	/* Protocol specific counter */
 	DEBUG_ASSERT(ecm_front_end_ipv4_non_ported_accelerated_count >= 0, "Bad non_ported accel counter\n");
 	ecm_front_end_ipv4_accelerated_count--;		/* General running counter */
 	DEBUG_ASSERT(ecm_front_end_ipv4_accelerated_count >= 0, "Bad accel counter\n");
-
-	spin_unlock_bh(&fecnpi->lock);
+	spin_unlock_bh(&ecm_front_end_ipv4_lock);
 
 	/*
 	 * Release the connections.
@@ -3883,6 +4056,57 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_decelerate(struct
 		fecnpi->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DRIVER;
 	}
 	spin_unlock_bh(&fecnpi->lock);
+}
+
+/*
+ * ecm_front_end_ipv4_connection_non_ported_defunct_callback()
+ *	Callback to be called when a non-ported connection is defuncted.
+ */
+static void ecm_front_end_ipv4_connection_non_ported_defunct_callback(void *arg)
+{
+	struct ecm_front_end_connection_instance *feci = (struct ecm_front_end_connection_instance *)arg;
+	struct ecm_front_end_ipv4_connection_non_ported_instance *fecnpi = (struct ecm_front_end_ipv4_connection_non_ported_instance *)feci;
+
+	DEBUG_CHECK_MAGIC(fecnpi, ECM_FRONT_END_IPV4_CONNECTION_NON_PORTED_INSTANCE_MAGIC, "%p: magic failed", fecnpi);
+
+	spin_lock_bh(&fecnpi->lock);
+
+	/*
+	 * If connection has already become defunct, do nothing.
+	 */
+	if (fecnpi->is_defunct) {
+		spin_unlock_bh(&fecnpi->lock);
+		return;
+	}
+	fecnpi->is_defunct = true;
+
+	/*
+	 * If the connection is already in one of the fail modes, do nothing, keep the current accel_mode.
+	 */
+	if (ECM_FRONT_END_ACCELERATION_FAILED(fecnpi->accel_mode)) {
+		spin_unlock_bh(&fecnpi->lock);
+		return;
+	}
+
+	/*
+	 * If the connection is not in decel or decel pending mode, we don't need to defunct the connection.
+	 * Just mark the connection mode to fail defunct.
+	 */
+	if ((fecnpi->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_DECEL)
+			|| (fecnpi->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_DECEL_PENDING)) {
+		fecnpi->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DEFUNCT;
+		spin_unlock_bh(&fecnpi->lock);
+		return;
+	}
+
+	/*
+	 * If none of the cases mathes above, this means the connection is in one of the
+	 * accel modes (accel or accel_pending), ref the connection instance before decelerating
+	 * to keep it in the database until we get the deceleration response.
+	 */
+	spin_unlock_bh(&fecnpi->lock);
+	ecm_db_connection_ref(fecnpi->ci);
+	ecm_front_end_ipv4_connection_non_ported_front_end_decelerate(feci);
 }
 
 /*
@@ -4577,6 +4801,7 @@ static unsigned int ecm_front_end_ipv4_tcp_process(struct net_device *out_dev, s
 					src_mi, dest_mi, src_nat_mi, dest_nat_mi,
 					IPPROTO_TCP, ecm_dir,
 					NULL /* final callback */,
+					ecm_front_end_ipv4_connection_tcp_defunct_callback,
 					tg, is_routed, nci);
 
 			spin_unlock_bh(&ecm_front_end_ipv4_lock);
@@ -5222,6 +5447,7 @@ static unsigned int ecm_front_end_ipv4_udp_process(struct net_device *out_dev, s
 					src_mi, dest_mi, src_nat_mi, dest_nat_mi,
 					IPPROTO_UDP, ecm_dir,
 					NULL /* final callback */,
+					ecm_front_end_ipv4_connection_udp_defunct_callback,
 					tg, is_routed, nci);
 
 			spin_unlock_bh(&ecm_front_end_ipv4_lock);
@@ -5818,6 +6044,7 @@ static unsigned int ecm_front_end_ipv4_non_ported_process(struct net_device *out
 					src_mi, dest_mi, src_nat_mi, dest_nat_mi,
 					protocol, ecm_dir,
 					NULL /* final callback */,
+					ecm_front_end_ipv4_connection_non_ported_defunct_callback,
 					tg, is_routed, nci);
 
 			spin_unlock_bh(&ecm_front_end_ipv4_lock);
