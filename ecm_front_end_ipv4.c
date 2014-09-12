@@ -1319,7 +1319,7 @@ tcp_accel_bad_rule:
  */
 static void ecm_front_end_ipv4_connection_tcp_destroy_callback(void *app_data, struct nss_ipv4_msg *nim)
 {
-	struct nss_ipv4_rule_create_msg *nircm = &nim->msg.rule_create;
+	struct nss_ipv4_rule_destroy_msg *nirdm = &nim->msg.rule_destroy;
 	uint32_t serial = (uint32_t)app_data;
 	struct ecm_db_connection_instance *ci;
 	struct ecm_front_end_connection_instance *feci;
@@ -1353,10 +1353,9 @@ static void ecm_front_end_ipv4_connection_tcp_destroy_callback(void *app_data, s
 	 * Dump some useful trace information.
 	 */
 	DEBUG_TRACE("%p: decelerate response for connection: %p\n", fecti, fecti->ci);
-	DEBUG_TRACE("%p: rule_flags: %x, valid_flags: %x\n", fecti, nircm->rule_flags, nircm->valid_flags);
-	DEBUG_TRACE("%p: flow_ip: %pI4h:%d\n", fecti, &nircm->tuple.flow_ip, nircm->tuple.flow_ident);
-	DEBUG_TRACE("%p: return_ip: %pI4h:%d\n", fecti, &nircm->tuple.return_ip, nircm->tuple.return_ident);
-	DEBUG_TRACE("%p: protocol: %d\n", fecti, nircm->tuple.protocol);
+	DEBUG_TRACE("%p: flow_ip: %pI4h:%d\n", fecti, &nirdm->tuple.flow_ip, nirdm->tuple.flow_ident);
+	DEBUG_TRACE("%p: return_ip: %pI4h:%d\n", fecti, &nirdm->tuple.return_ip, nirdm->tuple.return_ident);
+	DEBUG_TRACE("%p: protocol: %d\n", fecti, nirdm->tuple.protocol);
 
 	spin_lock_bh(&fecti->lock);
 
@@ -2500,7 +2499,7 @@ udp_accel_bad_rule:
  */
 static void ecm_front_end_ipv4_connection_udp_destroy_callback(void *app_data, struct nss_ipv4_msg *nim)
 {
-	struct nss_ipv4_rule_create_msg *nircm = &nim->msg.rule_create;
+	struct nss_ipv4_rule_destroy_msg *nirdm = &nim->msg.rule_destroy;
 	uint32_t serial = (uint32_t)app_data;
 	struct ecm_db_connection_instance *ci;
 	struct ecm_front_end_connection_instance *feci;
@@ -2534,10 +2533,9 @@ static void ecm_front_end_ipv4_connection_udp_destroy_callback(void *app_data, s
 	 * Dump some useful trace information.
 	 */
 	DEBUG_TRACE("%p: decelerate response for connection: %p\n", fecui, fecui->ci);
-	DEBUG_TRACE("%p: rule_flags: %x, valid_flags: %x\n", fecui, nircm->rule_flags, nircm->valid_flags);
-	DEBUG_TRACE("%p: flow_ip: %pI4h:%d\n", fecui, &nircm->tuple.flow_ip, nircm->tuple.flow_ident);
-	DEBUG_TRACE("%p: return_ip: %pI4h:%d\n", fecui, &nircm->tuple.return_ip, nircm->tuple.return_ident);
-	DEBUG_TRACE("%p: protocol: %d\n", fecui, nircm->tuple.protocol);
+	DEBUG_TRACE("%p: flow_ip: %pI4h:%d\n", fecui, &nirdm->tuple.flow_ip, nirdm->tuple.flow_ident);
+	DEBUG_TRACE("%p: return_ip: %pI4h:%d\n", fecui, &nirdm->tuple.return_ip, nirdm->tuple.return_ident);
+	DEBUG_TRACE("%p: protocol: %d\n", fecui, nirdm->tuple.protocol);
 
 	spin_lock_bh(&fecui->lock);
 
@@ -3697,7 +3695,7 @@ non_ported_accel_bad_rule:
  */
 static void ecm_front_end_ipv4_connection_non_ported_destroy_callback(void *app_data, struct nss_ipv4_msg *nim)
 {
-	struct nss_ipv4_rule_create_msg *nircm = &nim->msg.rule_create;
+	struct nss_ipv4_rule_destroy_msg *nirdm = &nim->msg.rule_destroy;
 	uint32_t serial = (uint32_t)app_data;
 	struct ecm_db_connection_instance *ci;
 	struct ecm_front_end_connection_instance *feci;
@@ -3731,10 +3729,9 @@ static void ecm_front_end_ipv4_connection_non_ported_destroy_callback(void *app_
 	 * Dump some useful trace information.
 	 */
 	DEBUG_TRACE("%p: decelerate response for connection: %p\n", fecnpi, fecnpi->ci);
-	DEBUG_TRACE("%p: rule_flags: %x, valid_flags: %x\n", fecnpi, nircm->rule_flags, nircm->valid_flags);
-	DEBUG_TRACE("%p: flow_ip: %pI4h:%d\n", fecnpi, &nircm->tuple.flow_ip, nircm->tuple.flow_ident);
-	DEBUG_TRACE("%p: return_ip: %pI4h:%d\n", fecnpi, &nircm->tuple.return_ip, nircm->tuple.return_ident);
-	DEBUG_TRACE("%p: protocol: %d\n", fecnpi, nircm->tuple.protocol);
+	DEBUG_TRACE("%p: flow_ip: %pI4h:%d\n", fecnpi, &nirdm->tuple.flow_ip, nirdm->tuple.flow_ident);
+	DEBUG_TRACE("%p: return_ip: %pI4h:%d\n", fecnpi, &nirdm->tuple.return_ip, nirdm->tuple.return_ident);
+	DEBUG_TRACE("%p: protocol: %d\n", fecnpi, nirdm->tuple.protocol);
 
 	spin_lock_bh(&fecnpi->lock);
 

@@ -1862,7 +1862,7 @@ tcp_accel_bad_rule:
  */
 static void ecm_front_end_ipv6_connection_tcp_destroy_callback(void *app_data, struct nss_ipv6_msg *nim)
 {
-	struct nss_ipv6_rule_create_msg *nircm = &nim->msg.rule_create;
+	struct nss_ipv6_rule_destroy_msg *nirdm = &nim->msg.rule_destroy;
 	uint32_t serial = (uint32_t)app_data;
 	struct ecm_db_connection_instance *ci;
 	struct ecm_front_end_connection_instance *feci;
@@ -1894,17 +1894,16 @@ static void ecm_front_end_ipv6_connection_tcp_destroy_callback(void *app_data, s
 	fecti = (struct ecm_front_end_ipv6_connection_tcp_instance *)feci;
 	DEBUG_CHECK_MAGIC(fecti, ECM_FRONT_END_IPV6_CONNECTION_TCP_INSTANCE_MAGIC, "%p: magic failed", fecti);
 
-	ECM_NSS_IPV6_ADDR_TO_IP_ADDR(flow_ip, nircm->tuple.flow_ip);
-	ECM_NSS_IPV6_ADDR_TO_IP_ADDR(return_ip, nircm->tuple.return_ip);
+	ECM_NSS_IPV6_ADDR_TO_IP_ADDR(flow_ip, nirdm->tuple.flow_ip);
+	ECM_NSS_IPV6_ADDR_TO_IP_ADDR(return_ip, nirdm->tuple.return_ip);
 
 	/*
 	 * Dump some useful trace information.
 	 */
 	DEBUG_TRACE("%p: decelerate response for connection: %p\n", fecti, fecti->ci);
-	DEBUG_TRACE("%p: rule_flags: %x, valid_flags: %x\n", fecti, nircm->rule_flags, nircm->valid_flags);
-	DEBUG_TRACE("%p: flow_ip: " ECM_IP_ADDR_OCTAL_FMT ":%d\n", fecti, ECM_IP_ADDR_TO_OCTAL(flow_ip), nircm->tuple.flow_ident);
-	DEBUG_TRACE("%p: return_ip: " ECM_IP_ADDR_OCTAL_FMT ":%d\n", fecti, ECM_IP_ADDR_TO_OCTAL(return_ip), nircm->tuple.return_ident);
-	DEBUG_TRACE("%p: protocol: %d\n", fecti, nircm->tuple.protocol);
+	DEBUG_TRACE("%p: flow_ip: " ECM_IP_ADDR_OCTAL_FMT ":%d\n", fecti, ECM_IP_ADDR_TO_OCTAL(flow_ip), nirdm->tuple.flow_ident);
+	DEBUG_TRACE("%p: return_ip: " ECM_IP_ADDR_OCTAL_FMT ":%d\n", fecti, ECM_IP_ADDR_TO_OCTAL(return_ip), nirdm->tuple.return_ident);
+	DEBUG_TRACE("%p: protocol: %d\n", fecti, nirdm->tuple.protocol);
 
 	spin_lock_bh(&fecti->lock);
 
@@ -3035,7 +3034,7 @@ udp_accel_bad_rule:
  */
 static void ecm_front_end_ipv6_connection_udp_destroy_callback(void *app_data, struct nss_ipv6_msg *nim)
 {
-	struct nss_ipv6_rule_create_msg *nircm = &nim->msg.rule_create;
+	struct nss_ipv6_rule_destroy_msg *nirdm = &nim->msg.rule_destroy;
 	uint32_t serial = (uint32_t)app_data;
 	struct ecm_db_connection_instance *ci;
 	struct ecm_front_end_connection_instance *feci;
@@ -3067,17 +3066,16 @@ static void ecm_front_end_ipv6_connection_udp_destroy_callback(void *app_data, s
 	fecui = (struct ecm_front_end_ipv6_connection_udp_instance *)feci;
 	DEBUG_CHECK_MAGIC(fecui, ECM_FRONT_END_IPV6_CONNECTION_UDP_INSTANCE_MAGIC, "%p: magic failed", fecui);
 
-	ECM_NSS_IPV6_ADDR_TO_IP_ADDR(flow_ip, nircm->tuple.flow_ip);
-	ECM_NSS_IPV6_ADDR_TO_IP_ADDR(return_ip, nircm->tuple.return_ip);
+	ECM_NSS_IPV6_ADDR_TO_IP_ADDR(flow_ip, nirdm->tuple.flow_ip);
+	ECM_NSS_IPV6_ADDR_TO_IP_ADDR(return_ip, nirdm->tuple.return_ip);
 
 	/*
 	 * Dump some useful trace information.
 	 */
 	DEBUG_TRACE("%p: decelerate response for connection: %p\n", fecui, fecui->ci);
-	DEBUG_TRACE("%p: rule_flags: %x, valid_flags: %x\n", fecui, nircm->rule_flags, nircm->valid_flags);
-	DEBUG_TRACE("%p: flow_ip: " ECM_IP_ADDR_OCTAL_FMT ":%d\n", fecui, ECM_IP_ADDR_TO_OCTAL(flow_ip), nircm->tuple.flow_ident);
-	DEBUG_TRACE("%p: return_ip: " ECM_IP_ADDR_OCTAL_FMT ":%d\n", fecui, ECM_IP_ADDR_TO_OCTAL(return_ip), nircm->tuple.return_ident);
-	DEBUG_TRACE("%p: protocol: %d\n", fecui, nircm->tuple.protocol);
+	DEBUG_TRACE("%p: flow_ip: " ECM_IP_ADDR_OCTAL_FMT ":%d\n", fecui, ECM_IP_ADDR_TO_OCTAL(flow_ip), nirdm->tuple.flow_ident);
+	DEBUG_TRACE("%p: return_ip: " ECM_IP_ADDR_OCTAL_FMT ":%d\n", fecui, ECM_IP_ADDR_TO_OCTAL(return_ip), nirdm->tuple.return_ident);
+	DEBUG_TRACE("%p: protocol: %d\n", fecui, nirdm->tuple.protocol);
 
 	spin_lock_bh(&fecui->lock);
 
@@ -4225,7 +4223,7 @@ non_ported_accel_bad_rule:
  */
 static void ecm_front_end_ipv6_connection_non_ported_destroy_callback(void *app_data, struct nss_ipv6_msg *nim)
 {
-	struct nss_ipv6_rule_create_msg *nircm = &nim->msg.rule_create;
+	struct nss_ipv6_rule_destroy_msg *nirdm = &nim->msg.rule_destroy;
 	uint32_t serial = (uint32_t)app_data;
 	struct ecm_db_connection_instance *ci;
 	struct ecm_front_end_connection_instance *feci;
@@ -4257,17 +4255,16 @@ static void ecm_front_end_ipv6_connection_non_ported_destroy_callback(void *app_
 	fecnpi = (struct ecm_front_end_ipv6_connection_non_ported_instance *)feci;
 	DEBUG_CHECK_MAGIC(fecnpi, ECM_FRONT_END_IPV6_CONNECTION_NON_PORTED_INSTANCE_MAGIC, "%p: magic failed", fecnpi);
 
-	ECM_NSS_IPV6_ADDR_TO_IP_ADDR(flow_ip, nircm->tuple.flow_ip);
-	ECM_NSS_IPV6_ADDR_TO_IP_ADDR(return_ip, nircm->tuple.return_ip);
+	ECM_NSS_IPV6_ADDR_TO_IP_ADDR(flow_ip, nirdm->tuple.flow_ip);
+	ECM_NSS_IPV6_ADDR_TO_IP_ADDR(return_ip, nirdm->tuple.return_ip);
 
 	/*
 	 * Dump some useful trace information.
 	 */
 	DEBUG_TRACE("%p: decelerate response for connection: %p\n", fecnpi, fecnpi->ci);
-	DEBUG_TRACE("%p: rule_flags: %x, valid_flags: %x\n", fecnpi, nircm->rule_flags, nircm->valid_flags);
-	DEBUG_TRACE("%p: flow_ip: " ECM_IP_ADDR_OCTAL_FMT ":%d\n", fecnpi, ECM_IP_ADDR_TO_OCTAL(flow_ip), nircm->tuple.flow_ident);
-	DEBUG_TRACE("%p: return_ip: " ECM_IP_ADDR_OCTAL_FMT ":%d\n", fecnpi, ECM_IP_ADDR_TO_OCTAL(return_ip), nircm->tuple.return_ident);
-	DEBUG_TRACE("%p: protocol: %d\n", fecnpi, nircm->tuple.protocol);
+	DEBUG_TRACE("%p: flow_ip: " ECM_IP_ADDR_OCTAL_FMT ":%d\n", fecnpi, ECM_IP_ADDR_TO_OCTAL(flow_ip), nirdm->tuple.flow_ident);
+	DEBUG_TRACE("%p: return_ip: " ECM_IP_ADDR_OCTAL_FMT ":%d\n", fecnpi, ECM_IP_ADDR_TO_OCTAL(return_ip), nirdm->tuple.return_ident);
+	DEBUG_TRACE("%p: protocol: %d\n", fecnpi, nirdm->tuple.protocol);
 
 	spin_lock_bh(&fecnpi->lock);
 
