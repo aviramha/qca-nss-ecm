@@ -663,6 +663,8 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_accelerate(struct ecm_fr
 	int32_t list_index;
 	int32_t interface_type_counts[ECM_DB_IFACE_TYPE_COUNT];
 	bool rule_invalid;
+	uint8_t dest_mac_xlate[ETH_ALEN];
+	ecm_db_direction_t ecm_dir;
 
 	DEBUG_CHECK_MAGIC(fecti, ECM_FRONT_END_IPV4_CONNECTION_TCP_INSTANCE_MAGIC, "%p: magic failed", fecti);
 
@@ -1143,6 +1145,31 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_accelerate(struct ecm_fr
 	 * Essentially it is the MAC of node associated with create.dest_ip and this is "to nat" side.
 	 */
 	ecm_db_connection_to_nat_node_address_get(fecti->ci, (uint8_t *)nircm->conn_rule.return_mac);
+
+	/*
+	 * The dest_mac_xlate is the mac address to replace the pkt.dst_mac when a packet is sent to->from
+	 * For bridged connections this does not change.
+	 * For routed connections this is the mac of the 'to' node side of the connection.
+	 */
+	if (ecm_db_connection_is_routed_get(fecti->ci)) {
+		ecm_db_connection_to_node_address_get(fecti->ci, dest_mac_xlate);
+	} else {
+		/*
+		 * Bridge flows preserve the MAC addressing
+		 */
+		memcpy(dest_mac_xlate, (uint8_t *)nircm->conn_rule.return_mac, ETH_ALEN);
+	}
+
+	/*
+	 * Refer to the Example 2 and 3 in ecm_front_end_ipv4_ip_process() function for egress
+	 * and ingress NAT'ed cases. In these cases, the destination node is the one which has the
+	 * ip_dest_addr. So, above we get the mac address of this host and use that mac address
+	 * for the destination node address in NAT'ed cases.
+	 */
+	ecm_dir = ecm_db_connection_direction_get(fecti->ci);
+	if ((ecm_dir == ECM_DB_DIRECTION_INGRESS_NAT) || (ecm_dir == ECM_DB_DIRECTION_EGRESS_NAT)) {
+		memcpy(nircm->conn_rule.return_mac, dest_mac_xlate, ETH_ALEN);
+	}
 
 	/*
 	 * Get MTU information
@@ -1891,6 +1918,8 @@ static void ecm_front_end_ipv4_connection_udp_front_end_accelerate(struct ecm_fr
 	int32_t list_index;
 	int32_t interface_type_counts[ECM_DB_IFACE_TYPE_COUNT];
 	bool rule_invalid;
+	uint8_t dest_mac_xlate[ETH_ALEN];
+	ecm_db_direction_t ecm_dir;
 
 	DEBUG_CHECK_MAGIC(fecui, ECM_FRONT_END_IPV4_CONNECTION_UDP_INSTANCE_MAGIC, "%p: magic failed", fecui);
 
@@ -2371,6 +2400,31 @@ static void ecm_front_end_ipv4_connection_udp_front_end_accelerate(struct ecm_fr
 	 * Essentially it is the MAC of node associated with create.dest_ip and this is "to nat" side.
 	 */
 	ecm_db_connection_to_nat_node_address_get(fecui->ci, (uint8_t *)nircm->conn_rule.return_mac);
+
+	/*
+	 * The dest_mac_xlate is the mac address to replace the pkt.dst_mac when a packet is sent to->from
+	 * For bridged connections this does not change.
+	 * For routed connections this is the mac of the 'to' node side of the connection.
+	 */
+	if (ecm_db_connection_is_routed_get(fecui->ci)) {
+		ecm_db_connection_to_node_address_get(fecui->ci, dest_mac_xlate);
+	} else {
+		/*
+		 * Bridge flows preserve the MAC addressing
+		 */
+		memcpy(dest_mac_xlate, (uint8_t *)nircm->conn_rule.return_mac, ETH_ALEN);
+	}
+
+	/*
+	 * Refer to the Example 2 and 3 in ecm_front_end_ipv4_ip_process() function for egress
+	 * and ingress NAT'ed cases. In these cases, the destination node is the one which has the
+	 * ip_dest_addr. So, above we get the mac address of this host and use that mac address
+	 * for the destination node address in NAT'ed cases.
+	 */
+	ecm_dir = ecm_db_connection_direction_get(fecui->ci);
+	if ((ecm_dir == ECM_DB_DIRECTION_INGRESS_NAT) || (ecm_dir == ECM_DB_DIRECTION_EGRESS_NAT)) {
+		memcpy(nircm->conn_rule.return_mac, dest_mac_xlate, ETH_ALEN);
+	}
 
 	/*
 	 * Get MTU information
@@ -3072,6 +3126,8 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_accelerate(struct
 	int32_t list_index;
 	int32_t interface_type_counts[ECM_DB_IFACE_TYPE_COUNT];
 	bool rule_invalid;
+	uint8_t dest_mac_xlate[ETH_ALEN];
+	ecm_db_direction_t ecm_dir;
 
 	DEBUG_CHECK_MAGIC(fecnpi, ECM_FRONT_END_IPV4_CONNECTION_NON_PORTED_INSTANCE_MAGIC, "%p: magic failed", fecnpi);
 
@@ -3567,6 +3623,31 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_accelerate(struct
 	 * Essentially it is the MAC of node associated with create.dest_ip and this is "to nat" side.
 	 */
 	ecm_db_connection_to_nat_node_address_get(fecnpi->ci, (uint8_t *)nircm->conn_rule.return_mac);
+
+	/*
+	 * The dest_mac_xlate is the mac address to replace the pkt.dst_mac when a packet is sent to->from
+	 * For bridged connections this does not change.
+	 * For routed connections this is the mac of the 'to' node side of the connection.
+	 */
+	if (ecm_db_connection_is_routed_get(fecnpi->ci)) {
+		ecm_db_connection_to_node_address_get(fecnpi->ci, dest_mac_xlate);
+	} else {
+		/*
+		 * Bridge flows preserve the MAC addressing
+		 */
+		memcpy(dest_mac_xlate, (uint8_t *)nircm->conn_rule.return_mac, ETH_ALEN);
+	}
+
+	/*
+	 * Refer to the Example 2 and 3 in ecm_front_end_ipv4_ip_process() function for egress
+	 * and ingress NAT'ed cases. In these cases, the destination node is the one which has the
+	 * ip_dest_addr. So, above we get the mac address of this host and use that mac address
+	 * for the destination node address in NAT'ed cases.
+	 */
+	ecm_dir = ecm_db_connection_direction_get(fecnpi->ci);
+	if ((ecm_dir == ECM_DB_DIRECTION_INGRESS_NAT) || (ecm_dir == ECM_DB_DIRECTION_EGRESS_NAT)) {
+		memcpy(nircm->conn_rule.return_mac, dest_mac_xlate, ETH_ALEN);
+	}
 
 	/*
 	 * Get MTU information
