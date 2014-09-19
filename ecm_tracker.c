@@ -380,8 +380,8 @@ static char *ecm_tracker_connection_state_strings[] = {
  */
 bool ecm_tracker_ip_check_header_and_read(struct ecm_tracker_ip_header *ip_hdr, struct sk_buff *skb)
 {
-	struct iphdr *v4_hdr;
-	struct ipv6hdr *v6_hdr;
+	struct iphdr *v4_hdr = NULL;
+	struct ipv6hdr *v6_hdr = NULL;
 	int16_t this_header;
 	uint32_t offset;
 	uint16_t remain;
