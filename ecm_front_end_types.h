@@ -37,6 +37,7 @@
  * An acceleration mode less than zero indicates a connection that cannot be accelerated, maybe due to error.
  */
 enum ecm_front_end_acceleration_modes {
+	ECM_FRONT_END_ACCELERATION_MODE_FAIL_DEFUNCT = -7,	/* Acceleration has permanently failed due to the connection has become defunct */
 	ECM_FRONT_END_ACCELERATION_MODE_FAIL_DECEL = -6,	/* Acceleration has permanently failed due to deceleration malfunction */
 	ECM_FRONT_END_ACCELERATION_MODE_FAIL_NO_ACTION = -5,	/* Acceleration has permanently failed due to too many offloads that were rejected without any packets being offloaded */
 	ECM_FRONT_END_ACCELERATION_MODE_FAIL_NSS = -4,		/* Acceleration has permanently failed due to too many NSS NAK's */

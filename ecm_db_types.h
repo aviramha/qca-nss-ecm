@@ -178,7 +178,12 @@ typedef void (*ecm_db_connection_listener_removed_callback_t)(void *arg, struct 
 /*
  * Connection creator events
  */
-typedef void (*ecm_db_connection_final_callback_t)(void *arg);			/* Finaliser callback */
+typedef void (*ecm_db_connection_final_callback_t)(void *arg);		/* Finaliser callback */
+
+/*
+ * Connection defunct event
+ */
+typedef void (*ecm_db_connection_defunct_callback_t)(void *arg);	/* Defunct callback */
 
 /*
  * Device Type for IPSec Tunnel devices

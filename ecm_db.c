@@ -543,6 +543,7 @@ struct ecm_db_connection_instance {
 	uint16_t classifier_generation;				/* Used to detect when a re-evaluation of this connection is necessary */
 	struct ecm_front_end_connection_instance *feci;		/* Front end instance specific to this connection */
 
+	ecm_db_connection_defunct_callback_t defunct;		/* Callback to be called when connection has become defunct */
 	ecm_db_connection_final_callback_t final;		/* Callback to owner when object is destroyed */
 	void *arg;						/* Argument returned to owner in callbacks */
 
@@ -801,6 +802,11 @@ EXPORT_SYMBOL(ecm_db_connection_timer_group_get);
 void ecm_db_connection_make_defunct(struct ecm_db_connection_instance *ci)
 {
 	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed", ci);
+
+	if (ci->defunct) {
+		ci->defunct(ci->feci);
+	}
+
 	if (ecm_db_timer_group_entry_remove(&ci->defunct_timer)) {
 		ecm_db_connection_deref(ci);
 	}
@@ -5458,6 +5464,7 @@ void ecm_db_connection_add(struct ecm_db_connection_instance *ci,
 							struct ecm_db_mapping_instance *mapping_nat_from, struct ecm_db_mapping_instance *mapping_nat_to,
 							int protocol, ecm_db_direction_t dir,
 							ecm_db_connection_final_callback_t final,
+							ecm_db_connection_defunct_callback_t defunct,
 							ecm_db_timer_group_t tg, bool is_routed,
 							void *arg)
 {
@@ -5484,6 +5491,7 @@ void ecm_db_connection_add(struct ecm_db_connection_instance *ci,
 	 * Record owner arg and callbacks
 	 */
 	ci->final = final;
+	ci->defunct = defunct;
 	ci->arg = arg;
 
 	/*
