@@ -173,7 +173,6 @@ static bool ecm_front_end_ipv6_terminate_pending = false;		/* True when the user
 /*
  * NSS driver linkage
  */
-static void *ecm_front_end_ipv6_nss_ipv6_context = NULL;		/* Registration for IPv6 rules */
 static struct nss_ctx_instance *ecm_front_end_ipv6_nss_ipv6_mgr = NULL;
 
 /*
@@ -7945,8 +7944,7 @@ int ecm_front_end_ipv6_init(void)
 	/*
 	 * Register this module with the Linux NSS Network driver
 	 */
-	ecm_front_end_ipv6_nss_ipv6_context = nss_ipv6_notify_register(ecm_front_end_ipv6_net_dev_callback, NULL);
-	ecm_front_end_ipv6_nss_ipv6_mgr = nss_ipv6_get_mgr();
+	ecm_front_end_ipv6_nss_ipv6_mgr = nss_ipv6_notify_register(ecm_front_end_ipv6_net_dev_callback, NULL);
 
 	return 0;
 
@@ -7979,7 +7977,6 @@ void ecm_front_end_ipv6_exit(void)
 	 * Unregister from the Linux NSS Network driver
 	 */
 	nss_ipv6_notify_unregister();
-	nss_unregister_ipv6_mgr();
 
 	sysdev_unregister(&ecm_front_end_ipv6_sys_dev);
 	sysdev_class_unregister(&ecm_front_end_ipv6_sysclass);

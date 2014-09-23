@@ -171,7 +171,6 @@ static bool ecm_front_end_ipv4_terminate_pending = false;		/* True when the user
 /*
  * NSS driver linkage
  */
-static void *ecm_front_end_ipv4_nss_ipv4_context = NULL;		/* Registration for IPv4 rules */
 static struct nss_ctx_instance *ecm_front_end_ipv4_nss_ipv4_mgr = NULL;
 
 /*
@@ -8275,8 +8274,7 @@ int ecm_front_end_ipv4_init(void)
 	/*
 	 * Register this module with the Linux NSS Network driver
 	 */
-	ecm_front_end_ipv4_nss_ipv4_context = nss_ipv4_notify_register(ecm_front_end_ipv4_net_dev_callback, NULL);
-	ecm_front_end_ipv4_nss_ipv4_mgr = nss_ipv4_get_mgr();
+	ecm_front_end_ipv4_nss_ipv4_mgr = nss_ipv4_notify_register(ecm_front_end_ipv4_net_dev_callback, NULL);
 
 	return 0;
 
@@ -8309,7 +8307,6 @@ void ecm_front_end_ipv4_exit(void)
 	 * Unregister from the Linux NSS Network driver
 	 */
 	nss_ipv4_notify_unregister();
-	nss_unregister_ipv4_mgr();
 
 	sysdev_unregister(&ecm_front_end_ipv4_sys_dev);
 	sysdev_class_unregister(&ecm_front_end_ipv4_sysclass);
