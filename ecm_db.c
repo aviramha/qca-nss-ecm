@@ -254,11 +254,26 @@ struct ecm_db_iface_instance {
 struct ecm_db_node_instance {
 	struct ecm_db_node_instance *next;		/* Next instance in global list */
 	struct ecm_db_node_instance *prev;		/* Previous instance in global list */
-	struct ecm_db_node_instance *hash_next;		/* Next host in the chain of nodes */
-	struct ecm_db_node_instance *hash_prev;		/* previous host in the chain of nodes */
+	struct ecm_db_node_instance *hash_next;		/* Next node in the chain of nodes */
+	struct ecm_db_node_instance *hash_prev;		/* previous node in the chain of nodes */
 	uint8_t address[ETH_ALEN];			/* RO: MAC Address of this node */
-	struct ecm_db_host_instance *hosts;		/* Hosts associated with this node */
-	int host_count;					/* Number of hosts in the hosts list */
+
+	/*
+	 * For convenience nodes keep lists of connections that have been established from them and to them.
+	 * In fact the same connection could be listed as from & to on the same interface (think: WLAN<>WLAN AP function)
+	 * Nodes keep this information for rapid iteration of connections e.g. when a node 'goes down' we
+	 * can defunct all associated connections or destroy any NSS rules.
+	 */
+	struct ecm_db_connection_instance *from_connections;		/* list of connections made from this node */
+	struct ecm_db_connection_instance *to_connections;		/* list of connections made to this node */
+	int from_connections_count;					/* Number of connections in the from_connections list */
+	int to_connections_count;					/* Number of connections in the to_connections list */
+
+	struct ecm_db_connection_instance *from_nat_connections;	/* list of NAT connections made from this node */
+	struct ecm_db_connection_instance *to_nat_connections;		/* list of NAT connections made to this node */
+	int from_nat_connections_count;					/* Number of connections in the from_nat_connections list */
+	int to_nat_connections_count;					/* Number of connections in the to_nat_connections list */
+
 	uint32_t time_added;				/* RO: DB time stamp when the node was added into the database */
 
 	uint64_t from_data_total;			/* Total of data sent by this node */
@@ -302,9 +317,6 @@ struct ecm_db_host_instance {
 	struct ecm_db_mapping_instance *mappings;	/* Mappings made on this host */
 	int mapping_count;				/* Number of mappings in the mapping list */
 	uint32_t time_added;				/* RO: DB time stamp when the host was added into the database */
-	struct ecm_db_node_instance *node;		/* The node to which this host relates */
-	struct ecm_db_host_instance *host_next;		/* The next host within the nodes hosts list */
-	struct ecm_db_host_instance *host_prev;		/* The previous host within the nodes hosts list */
 
 	uint64_t from_data_total;			/* Total of data sent by this host */
 	uint64_t to_data_total;				/* Total of data sent to this host */
@@ -467,6 +479,7 @@ struct ecm_db_connection_instance {
 
 	/*
 	 * Connection endpoint interface
+	 * GGG TODO Deprecated - use interface lists instead.  To be removed.
 	 */
 	struct ecm_db_connection_instance *iface_from_next;	/* Next connection made from the same interface */
 	struct ecm_db_connection_instance *iface_from_prev;	/* Previous connection made from the same interface */
@@ -476,6 +489,7 @@ struct ecm_db_connection_instance {
 	/*
 	 * Connection endpoint interface for NAT purposes
 	 * NOTE: For non-NAT connections these would be identical to the endpoint interface.
+	 * GGG TODO Deprecated - use interface lists instead.  To be removed.
 	 */
 	struct ecm_db_connection_instance *iface_from_nat_next;	/* Next connection made from the same interface */
 	struct ecm_db_connection_instance *iface_from_nat_prev;	/* Previous connection made from the same interface */
@@ -498,6 +512,8 @@ struct ecm_db_connection_instance {
 
 	/*
 	 * From / To NAT interfaces list
+	 * GGG TODO Not sure if NAT interface lists are necessary or appropriate or practical.
+	 * Needs to be assessed if it gives any clear benefit and possibly remove these if not.
 	 */
 	struct ecm_db_iface_instance *from_nat_interfaces[ECM_DB_IFACE_HEIRARCHY_MAX];
 								/* The outermost to innnermost interface this connection is using in the from path.
@@ -509,6 +525,27 @@ struct ecm_db_connection_instance {
 								/* The outermost to innnermost interface this connection is using in the to path */
 	int32_t to_nat_interface_first;				/* The index of the first interface in the list */
 	bool to_nat_interface_set;				/* True when a list has been set - even if there is NO list, it's still deliberately set that way. */
+
+	/*
+	 * From / To Node
+	 */
+	struct ecm_db_node_instance *from_node;			/* Node from which this connection was established */
+	struct ecm_db_node_instance *to_node;			/* Node to which this connection was established */
+	struct ecm_db_connection_instance *node_from_next;	/* Next connection in the nodes from_connections list */
+	struct ecm_db_connection_instance *node_from_prev;	/* Prev connection in the nodes from_connections list */
+	struct ecm_db_connection_instance *node_to_next;	/* Next connection in the nodes to_connections list */
+	struct ecm_db_connection_instance *node_to_prev;	/* Prev connection in the nodes to_connections list */
+
+	/*
+	 * From / To Node (NAT)
+	 * GGG TODO Evaluate this, these may not be beneficial.  Added in for now for completeness.
+	 */
+	struct ecm_db_node_instance *from_nat_node;		/* Node from which this connection was established */
+	struct ecm_db_node_instance *to_nat_node;		/* Node to which this connection was established */
+	struct ecm_db_connection_instance *node_from_nat_next;	/* Next connection in the nodes from_nat_connections list */
+	struct ecm_db_connection_instance *node_from_nat_prev;	/* Prev connection in the nodes from_nat_connections list */
+	struct ecm_db_connection_instance *node_to_nat_next;	/* Next connection in the nodes to_nat_connections list */
+	struct ecm_db_connection_instance *node_to_nat_prev;	/* Prev connection in the nodes to_nat_connections list */
 
 	/*
 	 * Time values in seconds
@@ -830,33 +867,33 @@ void ecm_db_connection_data_totals_update(struct ecm_db_connection_instance *ci,
 		ci->from_data_total += size;
 		ci->mapping_from->from_data_total += size;
 		ci->mapping_from->host->from_data_total += size;
-		ci->mapping_from->host->node->from_data_total += size;
+		ci->from_node->from_data_total += size;
 		ci->from_packet_total += packets;
 		ci->mapping_from->from_packet_total += packets;
 		ci->mapping_from->host->from_packet_total += packets;
-		ci->mapping_from->host->node->from_packet_total += packets;
+		ci->from_node->from_packet_total += packets;
 
 		/*
 		 * Data from the host is essentially TO the interface on which the host is reachable
 		 */
-		ci->mapping_from->host->node->iface->to_data_total += size;
-		ci->mapping_from->host->node->iface->to_packet_total += packets;
+		ci->from_node->iface->to_data_total += size;
+		ci->from_node->iface->to_packet_total += packets;
 
 		/*
 		 * Update totals sent TO the other side of the connection
 		 */
 		ci->mapping_to->to_data_total += size;
 		ci->mapping_to->host->to_data_total += size;
-		ci->mapping_to->host->node->to_data_total += size;
+		ci->to_node->to_data_total += size;
 		ci->mapping_to->to_packet_total += packets;
 		ci->mapping_to->host->to_packet_total += packets;
-		ci->mapping_to->host->node->to_packet_total += packets;
+		ci->to_node->to_packet_total += packets;
 
 		/*
 		 * Sending to the other side means FROM the interface we reach that host
 		 */
-		ci->mapping_to->host->node->iface->from_data_total += size;
-		ci->mapping_to->host->node->iface->from_packet_total += packets;
+		ci->to_node->iface->from_data_total += size;
+		ci->to_node->iface->from_packet_total += packets;
 		spin_unlock_bh(&ecm_db_lock);
 		return;
 	}
@@ -867,33 +904,33 @@ void ecm_db_connection_data_totals_update(struct ecm_db_connection_instance *ci,
 	ci->to_data_total += size;
 	ci->mapping_to->from_data_total += size;
 	ci->mapping_to->host->from_data_total += size;
-	ci->mapping_to->host->node->from_data_total += size;
+	ci->to_node->from_data_total += size;
 	ci->to_packet_total += packets;
 	ci->mapping_to->from_packet_total += packets;
 	ci->mapping_to->host->from_packet_total += packets;
-	ci->mapping_to->host->node->from_packet_total += packets;
+	ci->to_node->from_packet_total += packets;
 
 	/*
 	 * Data from the host is essentially TO the interface on which the host is reachable
 	 */
-	ci->mapping_to->host->node->iface->to_data_total += size;
-	ci->mapping_to->host->node->iface->to_packet_total += packets;
+	ci->to_node->iface->to_data_total += size;
+	ci->to_node->iface->to_packet_total += packets;
 
 	/*
 	 * Update totals sent TO the other side of the connection
 	 */
 	ci->mapping_from->to_data_total += size;
 	ci->mapping_from->host->to_data_total += size;
-	ci->mapping_from->host->node->to_data_total += size;
+	ci->from_node->to_data_total += size;
 	ci->mapping_from->to_packet_total += packets;
 	ci->mapping_from->host->to_packet_total += packets;
-	ci->mapping_from->host->node->to_packet_total += packets;
+	ci->from_node->to_packet_total += packets;
 
 	/*
 	 * Sending to the other side means FROM the interface we reach that host
 	 */
-	ci->mapping_from->host->node->iface->from_data_total += size;
-	ci->mapping_from->host->node->iface->from_packet_total += packets;
+	ci->from_node->iface->from_data_total += size;
+	ci->from_node->iface->from_packet_total += packets;
 	spin_unlock_bh(&ecm_db_lock);
 }
 EXPORT_SYMBOL(ecm_db_connection_data_totals_update);
@@ -914,17 +951,17 @@ void ecm_db_connection_data_totals_update_dropped(struct ecm_db_connection_insta
 		ci->from_data_total_dropped += size;
 		ci->mapping_from->from_data_total_dropped += size;
 		ci->mapping_from->host->from_data_total_dropped += size;
-		ci->mapping_from->host->node->from_data_total_dropped += size;
+		ci->from_node->from_data_total_dropped += size;
 		ci->from_packet_total_dropped += packets;
 		ci->mapping_from->from_packet_total_dropped += packets;
 		ci->mapping_from->host->from_packet_total_dropped += packets;
-		ci->mapping_from->host->node->from_packet_total_dropped += packets;
+		ci->from_node->from_packet_total_dropped += packets;
 
 		/*
 		 * Data from the host is essentially TO the interface on which the host is reachable
 		 */
-		ci->mapping_from->host->node->iface->to_data_total_dropped += size;
-		ci->mapping_from->host->node->iface->to_packet_total_dropped += packets;
+		ci->from_node->iface->to_data_total_dropped += size;
+		ci->from_node->iface->to_packet_total_dropped += packets;
 		spin_unlock_bh(&ecm_db_lock);
 		return;
 	}
@@ -936,17 +973,17 @@ void ecm_db_connection_data_totals_update_dropped(struct ecm_db_connection_insta
 	ci->to_data_total_dropped += size;
 	ci->mapping_to->from_data_total_dropped += size;
 	ci->mapping_to->host->from_data_total_dropped += size;
-	ci->mapping_to->host->node->from_data_total_dropped += size;
+	ci->to_node->from_data_total_dropped += size;
 	ci->to_packet_total_dropped += packets;
 	ci->mapping_to->from_packet_total_dropped += packets;
 	ci->mapping_to->host->from_packet_total_dropped += packets;
-	ci->mapping_to->host->node->from_packet_total_dropped += packets;
+	ci->to_node->from_packet_total_dropped += packets;
 
 	/*
 	 * Data from the host is essentially TO the interface on which the host is reachable
 	 */
-	ci->mapping_to->host->node->iface->to_data_total_dropped += size;
-	ci->mapping_to->host->node->iface->to_packet_total_dropped += packets;
+	ci->to_node->iface->to_data_total_dropped += size;
+	ci->to_node->iface->to_packet_total_dropped += packets;
 	spin_unlock_bh(&ecm_db_lock);
 }
 EXPORT_SYMBOL(ecm_db_connection_data_totals_update_dropped);
@@ -1265,7 +1302,7 @@ EXPORT_SYMBOL(ecm_db_connection_from_port_nat_get);
 void ecm_db_connection_to_node_address_get(struct ecm_db_connection_instance *ci, uint8_t *address_buffer)
 {
 	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed", ci);
-	memcpy(address_buffer, ci->mapping_to->host->node->address, ETH_ALEN);
+	memcpy(address_buffer, ci->to_node->address, ETH_ALEN);
 }
 EXPORT_SYMBOL(ecm_db_connection_to_node_address_get);
 
@@ -1276,7 +1313,7 @@ EXPORT_SYMBOL(ecm_db_connection_to_node_address_get);
 void ecm_db_connection_from_node_address_get(struct ecm_db_connection_instance *ci, uint8_t *address_buffer)
 {
 	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed", ci);
-	memcpy(address_buffer, ci->mapping_from->host->node->address, ETH_ALEN);
+	memcpy(address_buffer, ci->from_node->address, ETH_ALEN);
 }
 EXPORT_SYMBOL(ecm_db_connection_from_node_address_get);
 
@@ -1287,7 +1324,7 @@ EXPORT_SYMBOL(ecm_db_connection_from_node_address_get);
 void ecm_db_connection_to_nat_node_address_get(struct ecm_db_connection_instance *ci, uint8_t *address_buffer)
 {
 	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed", ci);
-	memcpy(address_buffer, ci->mapping_nat_to->host->node->address, ETH_ALEN);
+	memcpy(address_buffer, ci->to_nat_node->address, ETH_ALEN);
 }
 EXPORT_SYMBOL(ecm_db_connection_to_nat_node_address_get);
 
@@ -1298,7 +1335,7 @@ EXPORT_SYMBOL(ecm_db_connection_to_nat_node_address_get);
 void ecm_db_connection_from_nat_node_address_get(struct ecm_db_connection_instance *ci, uint8_t *address_buffer)
 {
 	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed", ci);
-	memcpy(address_buffer, ci->mapping_nat_from->host->node->address, ETH_ALEN);
+	memcpy(address_buffer, ci->from_nat_node->address, ETH_ALEN);
 }
 EXPORT_SYMBOL(ecm_db_connection_from_nat_node_address_get);
 
@@ -1309,7 +1346,7 @@ EXPORT_SYMBOL(ecm_db_connection_from_nat_node_address_get);
 void ecm_db_connection_to_iface_name_get(struct ecm_db_connection_instance *ci, char *name_buffer)
 {
 	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed", ci);
-	strcpy(name_buffer, ci->mapping_to->host->node->iface->name);
+	strcpy(name_buffer, ci->to_node->iface->name);
 }
 EXPORT_SYMBOL(ecm_db_connection_to_iface_name_get);
 
@@ -1320,7 +1357,7 @@ EXPORT_SYMBOL(ecm_db_connection_to_iface_name_get);
 void ecm_db_connection_from_iface_name_get(struct ecm_db_connection_instance *ci, char *name_buffer)
 {
 	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed", ci);
-	strcpy(name_buffer, ci->mapping_from->host->node->iface->name);
+	strcpy(name_buffer, ci->from_node->iface->name);
 }
 EXPORT_SYMBOL(ecm_db_connection_from_iface_name_get);
 
@@ -1333,7 +1370,7 @@ int ecm_db_connection_to_iface_mtu_get(struct ecm_db_connection_instance *ci)
 	int mtu;
 	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed", ci);
 	spin_lock_bh(&ecm_db_lock);
-	mtu = ci->mapping_to->host->node->iface->mtu;
+	mtu = ci->to_node->iface->mtu;
 	spin_unlock_bh(&ecm_db_lock);
 	return mtu;
 }
@@ -1349,7 +1386,7 @@ ecm_db_iface_type_t ecm_db_connection_to_iface_type_get(struct ecm_db_connection
 
 	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed", ci);
 	spin_lock_bh(&ecm_db_lock);
-	type = ci->mapping_to->host->node->iface->type;
+	type = ci->to_node->iface->type;
 	spin_unlock_bh(&ecm_db_lock);
 	return type;
 }
@@ -1364,7 +1401,7 @@ int ecm_db_connection_from_iface_mtu_get(struct ecm_db_connection_instance *ci)
 	int mtu;
 	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed", ci);
 	spin_lock_bh(&ecm_db_lock);
-	mtu = ci->mapping_from->host->node->iface->mtu;
+	mtu = ci->from_node->iface->mtu;
 	spin_unlock_bh(&ecm_db_lock);
 	return mtu;
 }
@@ -1380,7 +1417,7 @@ ecm_db_iface_type_t ecm_db_connection_from_iface_type_get(struct ecm_db_connecti
 
 	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed", ci);
 	spin_lock_bh(&ecm_db_lock);
-	type = ci->mapping_from->host->node->iface->type;
+	type = ci->from_node->iface->type;
 	spin_unlock_bh(&ecm_db_lock);
 	return type;
 }
@@ -1543,17 +1580,6 @@ void ecm_db_host_address_get(struct ecm_db_host_instance *hi, ip_addr_t addr)
 	ECM_IP_ADDR_COPY(addr, hi->address);
 }
 EXPORT_SYMBOL(ecm_db_host_address_get);
-
-/*
- * ecm_db_host_node_address_get()
- *	Return node address of the host
- */
-void ecm_db_host_node_address_get(struct ecm_db_host_instance *hi, uint8_t *address_buffer)
-{
-	DEBUG_CHECK_MAGIC(hi, ECM_DB_HOST_INSTANCE_MAGIC, "%p: magic failed", hi);
-	memcpy(address_buffer, hi->node->address, ETH_ALEN);
-}
-EXPORT_SYMBOL(ecm_db_host_node_address_get);
 
 /*
  * ecm_db_host_on_link_get()
@@ -2290,8 +2316,9 @@ int ecm_db_connection_deref(struct ecm_db_connection_instance *ci)
 
 		/*
 		 * Remove connection from the "from" iface connection list
+		 * GGG TODO Deprecated. Interface lists will be used instead.  To be deleted.
 		 */
-		iface_from = ci->mapping_from->host->node->iface;
+		iface_from = ci->from_node->iface;
 		if (!ci->iface_from_prev) {
 			DEBUG_ASSERT(iface_from->from_connections == ci, "%p: iface from conn table bad\n", ci);
 			iface_from->from_connections = ci->iface_from_next;
@@ -2304,8 +2331,9 @@ int ecm_db_connection_deref(struct ecm_db_connection_instance *ci)
 
 		/*
 		 * Remove connection from the "to" iface connection list
+		 * GGG TODO Deprecated. Interface lists will be used instead.  To be deleted.
 		 */
-		iface_to = ci->mapping_to->host->node->iface;
+		iface_to = ci->to_node->iface;
 		if (!ci->iface_to_prev) {
 			DEBUG_ASSERT(iface_to->to_connections == ci, "%p: to conn table bad\n", ci);
 			iface_to->to_connections = ci->iface_to_next;
@@ -2318,8 +2346,9 @@ int ecm_db_connection_deref(struct ecm_db_connection_instance *ci)
 
 		/*
 		 * Remove connection from the "from" NAT iface connection list
+		 * GGG TODO Deprecated. Interface lists will be used instead.  To be deleted.
 		 */
-		iface_nat_from = ci->mapping_nat_from->host->node->iface;
+		iface_nat_from = ci->from_nat_node->iface;
 		if (!ci->iface_from_nat_prev) {
 			DEBUG_ASSERT(iface_nat_from->from_nat_connections == ci, "%p: nat from conn table bad\n", ci);
 			iface_nat_from->from_nat_connections = ci->iface_from_nat_next;
@@ -2332,8 +2361,9 @@ int ecm_db_connection_deref(struct ecm_db_connection_instance *ci)
 
 		/*
 		 * Remove connection from the "to" NAT iface connection list
+		 * GGG TODO Deprecated. Interface lists will be used instead.  To be deleted.
 		 */
-		iface_nat_to = ci->mapping_nat_to->host->node->iface;
+		iface_nat_to = ci->to_nat_node->iface;
 		if (!ci->iface_to_nat_prev) {
 			DEBUG_ASSERT(iface_nat_to->to_nat_connections == ci, "%p: nat to conn table bad\n", ci);
 			iface_nat_to->to_nat_connections = ci->iface_to_nat_next;
@@ -2343,6 +2373,66 @@ int ecm_db_connection_deref(struct ecm_db_connection_instance *ci)
 		if (ci->iface_to_nat_next) {
 			ci->iface_to_nat_next->iface_to_nat_prev = ci->iface_to_nat_prev;
 		}
+
+		/*
+		 * Remove connection from its "from node" node connection list
+		 */
+		if (!ci->node_from_prev) {
+			DEBUG_ASSERT(ci->from_node->from_connections == ci, "%p: from node conn table bad, got: %p\n", ci, ci->from_node->from_connections);
+			ci->from_node->from_connections = ci->node_from_next;
+		} else {
+			ci->node_from_prev->node_from_next = ci->node_from_next;
+		}
+		if (ci->node_from_next) {
+			ci->node_from_next->node_from_prev = ci->node_from_prev;
+		}
+		ci->from_node->from_connections_count--;
+		DEBUG_ASSERT(ci->from_node->from_connections_count >= 0, "%p: bad count\n", ci);
+
+		/*
+		 * Remove connection from its "to node" node connection list
+		 */
+		if (!ci->node_to_prev) {
+			DEBUG_ASSERT(ci->to_node->to_connections == ci, "%p: to node conn table bad, got: %p\n", ci, ci->to_node->to_connections);
+			ci->to_node->to_connections = ci->node_to_next;
+		} else {
+			ci->node_to_prev->node_to_next = ci->node_to_next;
+		}
+		if (ci->node_to_next) {
+			ci->node_to_next->node_to_prev = ci->node_to_prev;
+		}
+		ci->to_node->to_connections_count--;
+		DEBUG_ASSERT(ci->to_node->to_connections_count >= 0, "%p: bad count\n", ci);
+
+		/*
+		 * Remove connection from its "from nat node" node connection list
+		 */
+		if (!ci->node_from_nat_prev) {
+			DEBUG_ASSERT(ci->from_nat_node->from_nat_connections == ci, "%p: from nat node conn table bad, got: %p\n", ci, ci->from_nat_node->from_nat_connections);
+			ci->from_nat_node->from_nat_connections = ci->node_from_nat_next;
+		} else {
+			ci->node_from_nat_prev->node_from_nat_next = ci->node_from_nat_next;
+		}
+		if (ci->node_from_nat_next) {
+			ci->node_from_nat_next->node_from_nat_prev = ci->node_from_nat_prev;
+		}
+		ci->from_nat_node->from_nat_connections_count--;
+		DEBUG_ASSERT(ci->from_nat_node->from_nat_connections_count >= 0, "%p: bad count\n", ci);
+
+		/*
+		 * Remove connection from its "to nat node" node connection list
+		 */
+		if (!ci->node_to_nat_prev) {
+			DEBUG_ASSERT(ci->to_nat_node->to_nat_connections == ci, "%p: to nat node conn table bad, got: %p\n", ci, ci->to_nat_node->to_nat_connections);
+			ci->to_nat_node->to_nat_connections = ci->node_to_nat_next;
+		} else {
+			ci->node_to_nat_prev->node_to_nat_next = ci->node_to_nat_next;
+		}
+		if (ci->node_to_nat_next) {
+			ci->node_to_nat_next->node_to_nat_prev = ci->node_to_nat_prev;
+		}
+		ci->to_nat_node->to_nat_connections_count--;
+		DEBUG_ASSERT(ci->to_nat_node->to_nat_connections_count >= 0, "%p: bad count\n", ci);
 
 		/*
 		 * Update the counters in the mappings
@@ -2429,6 +2519,18 @@ int ecm_db_connection_deref(struct ecm_db_connection_instance *ci)
 	}
 	if (ci->feci) {
 		ci->feci->deref(ci->feci);
+	}
+	if (ci->from_node) {
+		ecm_db_node_deref(ci->from_node);
+	}
+	if (ci->to_node) {
+		ecm_db_node_deref(ci->to_node);
+	}
+	if (ci->from_nat_node) {
+		ecm_db_node_deref(ci->from_nat_node);
+	}
+	if (ci->to_nat_node) {
+		ecm_db_node_deref(ci->to_nat_node);
 	}
 
 	/*
@@ -2664,22 +2766,6 @@ int ecm_db_host_deref(struct ecm_db_host_instance *hi)
 		ecm_db_host_table_lengths[hi->hash_index]--;
 		DEBUG_ASSERT(ecm_db_host_table_lengths[hi->hash_index] >= 0, "%p: invalid table len %d\n", hi, ecm_db_host_table_lengths[hi->hash_index]);
 
-		/*
-		 * Unlink it from the node host list
-		 */
-		if (!hi->host_prev) {
-			DEBUG_ASSERT(hi->node->hosts == hi, "%p: hosts table bad\n", hi);
-			hi->node->hosts = hi->host_next;
-		} else {
-			hi->host_prev->host_next = hi->host_next;
-		}
-		if (hi->host_next) {
-			hi->host_next->host_prev = hi->host_prev;
-		}
-		hi->host_next = NULL;
-		hi->host_prev = NULL;
-
-		hi->node->host_count--;
 		spin_unlock_bh(&ecm_db_lock);
 
 		/*
@@ -2707,13 +2793,6 @@ int ecm_db_host_deref(struct ecm_db_host_instance *hi)
 	 */
 	if (hi->final) {
 		hi->final(hi->arg);
-	}
-
-	/*
-	 * Now release the node instance if the host had one
-	 */
-	if (hi->node) {
-		ecm_db_node_deref(hi->node);
 	}
 
 	/*
@@ -2753,7 +2832,10 @@ int ecm_db_node_deref(struct ecm_db_node_instance *ni)
 		return refs;
 	}
 
-	DEBUG_ASSERT((ni->hosts == NULL) && (ni->host_count == 0), "%p: hosts not null\n", ni);
+	DEBUG_ASSERT((ni->from_connections == NULL) && (ni->from_connections_count == 0), "%p: from_connections not null\n", ni);
+	DEBUG_ASSERT((ni->to_connections == NULL) && (ni->to_connections_count == 0), "%p: to_connections not null\n", ni);
+	DEBUG_ASSERT((ni->from_nat_connections == NULL) && (ni->from_nat_connections_count == 0), "%p: from_nat_connections not null\n", ni);
+	DEBUG_ASSERT((ni->to_nat_connections == NULL) && (ni->to_nat_connections_count == 0), "%p: to_nat_connections not null\n", ni);
 
 	/*
 	 * Remove from database if inserted
@@ -4092,7 +4174,7 @@ struct ecm_db_node_instance *ecm_db_connection_node_to_get_and_ref(struct ecm_db
 	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed\n", ci);
 
 	spin_lock_bh(&ecm_db_lock);
-	ni = ci->mapping_to->host->node;
+	ni = ci->to_node;
 	DEBUG_CHECK_MAGIC(ni, ECM_DB_NODE_INSTANCE_MAGIC, "%p: magic failed\n", ni);
 	_ecm_db_node_ref(ni);
 	spin_unlock_bh(&ecm_db_lock);
@@ -4353,27 +4435,6 @@ struct ecm_db_connection_instance *ecm_db_connection_iface_nat_to_get_and_ref_ne
 EXPORT_SYMBOL(ecm_db_connection_iface_nat_to_get_and_ref_next);
 
 /*
- * ecm_db_node_hosts_get_and_ref_first()
- *	Return a reference to the first host associated with this node
- */
-struct ecm_db_host_instance *ecm_db_node_hosts_get_and_ref_first(struct ecm_db_node_instance *ni)
-{
-	struct ecm_db_host_instance *hi;
-
-	DEBUG_CHECK_MAGIC(ni, ECM_DB_NODE_INSTANCE_MAGIC, "%p: magic failed", ni);
-
-	spin_lock_bh(&ecm_db_lock);
-	hi = ni->hosts;
-	if (hi) {
-		_ecm_db_host_ref(hi);
-	}
-	spin_unlock_bh(&ecm_db_lock);
-
-	return hi;
-}
-EXPORT_SYMBOL(ecm_db_node_hosts_get_and_ref_first);
-
-/*
  * ecm_db_iface_nodes_get_and_ref_first()
  *	Return a reference to the first node made from this iface
  */
@@ -4395,43 +4456,6 @@ struct ecm_db_node_instance *ecm_db_iface_nodes_get_and_ref_first(struct ecm_db_
 EXPORT_SYMBOL(ecm_db_iface_nodes_get_and_ref_first);
 
 /*
- * ecm_db_mapping_node_get_and_ref()
- */
-struct ecm_db_node_instance *ecm_db_mapping_node_get_and_ref(struct ecm_db_mapping_instance *mi)
-{
-	struct ecm_db_node_instance *ni;
-
-	DEBUG_CHECK_MAGIC(mi, ECM_DB_MAPPING_INSTANCE_MAGIC, "%p: magic failed\n", mi);
-
-	spin_lock_bh(&ecm_db_lock);
-	ni = mi->host->node;
-	DEBUG_CHECK_MAGIC(ni, ECM_DB_NODE_INSTANCE_MAGIC, "%p: magic failed\n", ni);
-	_ecm_db_node_ref(ni);
-	spin_unlock_bh(&ecm_db_lock);
-	return ni;
-}
-EXPORT_SYMBOL(ecm_db_mapping_node_get_and_ref);
-
-/*
- * ecm_db_mapping_iface_get_and_ref()
- *	Return a reference to the interface on which this mapping resides
- */
-struct ecm_db_iface_instance *ecm_db_mapping_iface_get_and_ref(struct ecm_db_mapping_instance *mi)
-{
-	struct ecm_db_iface_instance *ii;
-
-	DEBUG_CHECK_MAGIC(mi, ECM_DB_MAPPING_INSTANCE_MAGIC, "%p: magic failed\n", mi);
-
-	spin_lock_bh(&ecm_db_lock);
-	ii = mi->host->node->iface;
-	DEBUG_CHECK_MAGIC(ii, ECM_DB_IFACE_INSTANCE_MAGIC, "%p: magic failed\n", ii);
-	_ecm_db_iface_ref(ii);
-	spin_unlock_bh(&ecm_db_lock);
-	return ii;
-}
-EXPORT_SYMBOL(ecm_db_mapping_iface_get_and_ref);
-
-/*
  * ecm_db_mapping_host_get_and_ref()
  */
 struct ecm_db_host_instance *ecm_db_mapping_host_get_and_ref(struct ecm_db_mapping_instance *mi)
@@ -4446,20 +4470,6 @@ struct ecm_db_host_instance *ecm_db_mapping_host_get_and_ref(struct ecm_db_mappi
 EXPORT_SYMBOL(ecm_db_mapping_host_get_and_ref);
 
 /*
- * ecm_db_host_node_get_and_ref()
- */
-struct ecm_db_node_instance *ecm_db_host_node_get_and_ref(struct ecm_db_host_instance *hi)
-{
-	DEBUG_CHECK_MAGIC(hi, ECM_DB_HOST_INSTANCE_MAGIC, "%p: magic failed\n", hi);
-
-	spin_lock_bh(&ecm_db_lock);
-	_ecm_db_node_ref(hi->node);
-	spin_unlock_bh(&ecm_db_lock);
-	return hi->node;
-}
-EXPORT_SYMBOL(ecm_db_host_node_get_and_ref);
-
-/*
  * ecm_db_node_iface_get_and_ref()
  */
 struct ecm_db_iface_instance *ecm_db_node_iface_get_and_ref(struct ecm_db_node_instance *ni)
@@ -4472,23 +4482,6 @@ struct ecm_db_iface_instance *ecm_db_node_iface_get_and_ref(struct ecm_db_node_i
 	return ni->iface;
 }
 EXPORT_SYMBOL(ecm_db_node_iface_get_and_ref);
-
-/*
- * ecm_db_node_host_count_get()
- *	Return the number of hosts to this node
- */
-int ecm_db_node_host_count_get(struct ecm_db_node_instance *ni)
-{
-	int count;
-
-	DEBUG_CHECK_MAGIC(ni, ECM_DB_NODE_INSTANCE_MAGIC, "%p: magic failed\n", ni);
-
-	spin_lock_bh(&ecm_db_lock);
-	count = ni->host_count;
-	spin_unlock_bh(&ecm_db_lock);
-	return count;
-}
-EXPORT_SYMBOL(ecm_db_node_host_count_get);
 
 /*
  * ecm_db_iface_node_count_get()
@@ -4625,7 +4618,7 @@ struct ecm_db_node_instance *ecm_db_connection_node_from_get_and_ref(struct ecm_
 	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed\n", ci);
 
 	spin_lock_bh(&ecm_db_lock);
-	ni = ci->mapping_from->host->node;
+	ni = ci->from_node;
 	_ecm_db_node_ref(ni);
 	spin_unlock_bh(&ecm_db_lock);
 	return ni;
@@ -5462,6 +5455,8 @@ void ecm_db_connection_add(struct ecm_db_connection_instance *ci,
 							struct ecm_classifier_default_instance *dci,
 							struct ecm_db_mapping_instance *mapping_from, struct ecm_db_mapping_instance *mapping_to,
 							struct ecm_db_mapping_instance *mapping_nat_from, struct ecm_db_mapping_instance *mapping_nat_to,
+							struct ecm_db_node_instance *from_node, struct ecm_db_node_instance *to_node,
+							struct ecm_db_node_instance *from_nat_node, struct ecm_db_node_instance *to_nat_node,
 							int protocol, ecm_db_direction_t dir,
 							ecm_db_connection_final_callback_t final,
 							ecm_db_connection_defunct_callback_t defunct,
@@ -5481,6 +5476,10 @@ void ecm_db_connection_add(struct ecm_db_connection_instance *ci,
 	DEBUG_CHECK_MAGIC(mapping_to, ECM_DB_MAPPING_INSTANCE_MAGIC, "%p: magic failed\n", mapping_to);
 	DEBUG_CHECK_MAGIC(mapping_nat_from, ECM_DB_MAPPING_INSTANCE_MAGIC, "%p: magic failed\n", mapping_nat_from);
 	DEBUG_CHECK_MAGIC(mapping_nat_to, ECM_DB_MAPPING_INSTANCE_MAGIC, "%p: magic failed\n", mapping_nat_to);
+	DEBUG_CHECK_MAGIC(from_node, ECM_DB_NODE_INSTANCE_MAGIC, "%p: magic failed\n", from_node);
+	DEBUG_CHECK_MAGIC(to_node, ECM_DB_NODE_INSTANCE_MAGIC, "%p: magic failed\n", to_node);
+	DEBUG_CHECK_MAGIC(from_nat_node, ECM_DB_NODE_INSTANCE_MAGIC, "%p: magic failed\n", from_nat_node);
+	DEBUG_CHECK_MAGIC(to_nat_node, ECM_DB_NODE_INSTANCE_MAGIC, "%p: magic failed\n", to_nat_node);
 	DEBUG_ASSERT((protocol >= 0) && (protocol <= 255), "%p: invalid protocol number %d\n", ci, protocol);
 
 	spin_lock_bh(&ecm_db_lock);
@@ -5519,6 +5518,19 @@ void ecm_db_connection_add(struct ecm_db_connection_instance *ci,
 	ecm_db_mapping_ref(mapping_nat_to);
 	ci->mapping_nat_from = mapping_nat_from;
 	ci->mapping_nat_to = mapping_nat_to;
+
+	/*
+	 * Take references to the nodes
+	 */
+	ci->from_node = from_node;
+	ecm_db_node_ref(from_node);
+	ci->to_node = to_node;
+	ecm_db_node_ref(to_node);
+
+	ci->from_nat_node = from_nat_node;
+	ecm_db_node_ref(from_nat_node);
+	ci->to_nat_node = to_nat_node;
+	ecm_db_node_ref(to_nat_node);
 
 	/*
 	 * Set the protocol and routed flag
@@ -5599,6 +5611,54 @@ void ecm_db_connection_add(struct ecm_db_connection_instance *ci,
 	DEBUG_ASSERT(ecm_db_connection_serial_table_lengths[serial_hash_index] > 0, "%p: invalid table len %d\n", ci, ecm_db_connection_serial_table_lengths[serial_hash_index]);
 
 	/*
+	 * Add this connection into the FROM node
+	 */
+	ci->node_from_prev = NULL;
+	ci->node_from_next = from_node->from_connections;
+	if (from_node->from_connections) {
+		from_node->from_connections->node_from_prev = ci;
+	}
+	from_node->from_connections = ci;
+	from_node->from_connections_count++;
+	DEBUG_ASSERT(from_node->from_connections_count > 0, "%p: invalid count\n", ci);
+
+	/*
+	 * Add this connection into the TO node
+	 */
+	ci->node_to_prev = NULL;
+	ci->node_to_next = to_node->to_connections;
+	if (to_node->to_connections) {
+		to_node->to_connections->node_to_prev = ci;
+	}
+	to_node->to_connections = ci;
+	to_node->to_connections_count++;
+	DEBUG_ASSERT(to_node->to_connections_count > 0, "%p: invalid count\n", ci);
+
+	/*
+	 * Add this connection into the FROM NAT node
+	 */
+	ci->node_from_nat_prev = NULL;
+	ci->node_from_nat_next = from_nat_node->from_nat_connections;
+	if (from_nat_node->from_nat_connections) {
+		from_nat_node->from_nat_connections->node_from_nat_prev = ci;
+	}
+	from_nat_node->from_nat_connections = ci;
+	from_nat_node->from_nat_connections_count++;
+	DEBUG_ASSERT(from_nat_node->from_nat_connections_count > 0, "%p: invalid count\n", ci);
+
+	/*
+	 * Add this connection into the TO NAT node
+	 */
+	ci->node_to_nat_prev = NULL;
+	ci->node_to_nat_next = to_nat_node->to_nat_connections;
+	if (to_nat_node->to_nat_connections) {
+		to_nat_node->to_nat_connections->node_to_nat_prev = ci;
+	}
+	to_nat_node->to_nat_connections = ci;
+	to_nat_node->to_nat_connections_count++;
+	DEBUG_ASSERT(to_nat_node->to_nat_connections_count > 0, "%p: invalid count\n", ci);
+
+	/*
 	 * Add this connection into the FROM mapping
 	 */
 	ci->from_prev = NULL;
@@ -5643,7 +5703,7 @@ void ecm_db_connection_add(struct ecm_db_connection_instance *ci,
 	 * NOTE: There is no need to ref the iface because it will exist for as long as this connection exists
 	 * due to the heirarchy of dependencies being kept by the database.
 	 */
-	iface_from = mapping_from->host->node->iface;
+	iface_from = from_node->iface;
 	ci->iface_from_prev = NULL;
 	ci->iface_from_next = iface_from->from_connections;
 	if (iface_from->from_connections) {
@@ -5656,7 +5716,7 @@ void ecm_db_connection_add(struct ecm_db_connection_instance *ci,
 	 * NOTE: There is no need to ref the iface because it will exist for as long as this connection exists
 	 * due to the heirarchy of dependencies being kept by the database.
 	 */
-	iface_to = mapping_to->host->node->iface;
+	iface_to = to_node->iface;
 	ci->iface_to_prev = NULL;
 	ci->iface_to_next = iface_to->to_connections;
 	if (iface_to->to_connections) {
@@ -5669,7 +5729,7 @@ void ecm_db_connection_add(struct ecm_db_connection_instance *ci,
 	 * NOTE: There is no need to ref the iface because it will exist for as long as this connection exists
 	 * due to the heirarchy of dependencies being kept by the database.
 	 */
-	iface_nat_from = mapping_nat_from->host->node->iface;
+	iface_nat_from = from_nat_node->iface;
 	ci->iface_from_nat_prev = NULL;
 	ci->iface_from_nat_next = iface_nat_from->from_nat_connections;
 	if (iface_nat_from->from_nat_connections) {
@@ -5682,13 +5742,14 @@ void ecm_db_connection_add(struct ecm_db_connection_instance *ci,
 	 * NOTE: There is no need to ref the iface because it will exist for as long as this connection exists
 	 * due to the heirarchy of dependencies being kept by the database.
 	 */
-	iface_nat_to = mapping_nat_to->host->node->iface;
+	iface_nat_to = to_nat_node->iface;
 	ci->iface_to_nat_prev = NULL;
 	ci->iface_to_nat_next = iface_nat_to->to_nat_connections;
 	if (iface_nat_to->to_nat_connections) {
 		iface_nat_to->to_nat_connections->iface_to_nat_prev = ci;
 	}
 	iface_nat_to->to_nat_connections = ci;
+
 
 	/*
 	 * NOTE: The interface heirarchy lists are deliberately left empty - these are completed
@@ -5860,17 +5921,14 @@ EXPORT_SYMBOL(ecm_db_mapping_add);
  * ecm_db_host_add()
  *	Add a host instance into the database
  */
-void ecm_db_host_add(struct ecm_db_host_instance *hi, struct ecm_db_node_instance *ni, ip_addr_t address, bool on_link,
-					ecm_db_host_final_callback_t final, void *arg)
+void ecm_db_host_add(struct ecm_db_host_instance *hi, ip_addr_t address, bool on_link, ecm_db_host_final_callback_t final, void *arg)
 {
 	ecm_db_host_hash_t hash_index;
 	struct ecm_db_listener_instance *li;
 
 	spin_lock_bh(&ecm_db_lock);
 	DEBUG_CHECK_MAGIC(hi, ECM_DB_HOST_INSTANCE_MAGIC, "%p: magic failed\n", hi);
-	DEBUG_CHECK_MAGIC(ni, ECM_DB_NODE_INSTANCE_MAGIC, "%p: magic failed\n", ni);
 	DEBUG_ASSERT((hi->mappings == NULL) && (hi->mapping_count == 0), "%p: mappings not null\n", hi);
-	DEBUG_ASSERT((hi->node == NULL), "%p: node not null\n", hi);
 	DEBUG_ASSERT(!(hi->flags & ECM_DB_HOST_FLAGS_INSERTED), "%p: inserted\n", hi);
 	spin_unlock_bh(&ecm_db_lock);
 
@@ -5884,12 +5942,6 @@ void ecm_db_host_add(struct ecm_db_host_instance *hi, struct ecm_db_node_instanc
 	 */
 	hash_index = ecm_db_host_generate_hash_index(address);
 	hi->hash_index = hash_index;
-
-	/*
-	 * Host takes a ref to the node
-	 */
-	ecm_db_node_ref(ni);
-	hi->node = ni;
 
 	/*
 	 * Add into the global list
@@ -5918,17 +5970,6 @@ void ecm_db_host_add(struct ecm_db_host_instance *hi, struct ecm_db_node_instanc
 	 * Set time of add
 	 */
 	hi->time_added = ecm_db_time;
-
-	/*
-	 * Insert host into the node hosts list
-	 */
-	hi->host_prev = NULL;
-	hi->host_next = ni->hosts;
-	if (ni->hosts) {
-		ni->hosts->host_prev = hi;
-	}
-	ni->hosts = hi;
-	ni->host_count++;
 	spin_unlock_bh(&ecm_db_lock);
 
 	/*
@@ -5966,7 +6007,10 @@ void ecm_db_node_add(struct ecm_db_node_instance *ni, struct ecm_db_iface_instan
 	DEBUG_CHECK_MAGIC(ni, ECM_DB_NODE_INSTANCE_MAGIC, "%p: magic failed\n", ni);
 	DEBUG_CHECK_MAGIC(ii, ECM_DB_IFACE_INSTANCE_MAGIC, "%p: magic failed\n", ii);
 	DEBUG_ASSERT(address, "%p: address null\n", ni);
-	DEBUG_ASSERT((ni->hosts == NULL) && (ni->host_count == 0), "%p: hosts not null\n", ni);
+	DEBUG_ASSERT((ni->from_connections == NULL) && (ni->from_connections_count == 0), "%p: from_connections not null\n", ni);
+	DEBUG_ASSERT((ni->to_connections == NULL) && (ni->to_connections_count == 0), "%p: to_connections not null\n", ni);
+	DEBUG_ASSERT((ni->from_nat_connections == NULL) && (ni->from_nat_connections_count == 0), "%p: from_nat_connections not null\n", ni);
+	DEBUG_ASSERT((ni->to_nat_connections == NULL) && (ni->to_nat_connections_count == 0), "%p: to_nat_connections not null\n", ni);
 	DEBUG_ASSERT((ni->iface == NULL), "%p: iface not null\n", ni);
 	DEBUG_ASSERT(!(ni->flags & ECM_DB_NODE_FLAGS_INSERTED), "%p: inserted\n", ni);
 	spin_unlock_bh(&ecm_db_lock);
@@ -8147,6 +8191,7 @@ static bool ecm_db_char_dev_conn_msg_prep(struct ecm_db_state_file_instance *sfi
 	uint64_t from_packet_total_dropped;
 	uint64_t to_packet_total_dropped;
 	struct ecm_db_host_instance *hi;
+	struct ecm_db_node_instance *ni;
 	int aci_index;
 	int aci_count;
 	struct ecm_front_end_connection_instance *feci;
@@ -8180,21 +8225,23 @@ static bool ecm_db_char_dev_conn_msg_prep(struct ecm_db_state_file_instance *sfi
 
 	hi = sfi->ci->mapping_to->host;
 	ecm_ip_addr_to_string(dip_address, hi->address);
-	sprintf(dnode_address, "%pM", hi->node->address);
+	ni = sfi->ci->to_node;
+	sprintf(dnode_address, "%pM", ni->address);
 	hi = sfi->ci->mapping_nat_to->host;
 	ecm_ip_addr_to_string(dip_address_nat, hi->address);
 
 	hi = sfi->ci->mapping_from->host;
 	ecm_ip_addr_to_string(sip_address, hi->address);
-	sprintf(snode_address, "%pM", hi->node->address);
+	ni = sfi->ci->from_node;
+	sprintf(snode_address, "%pM", ni->address);
 	hi = sfi->ci->mapping_nat_from->host;
 	ecm_ip_addr_to_string(sip_address_nat, hi->address);
 
-	hi = sfi->ci->mapping_nat_to->host;
-	sprintf(dnode_address_nat, "%pM", hi->node->address);
+	ni = sfi->ci->to_nat_node;
+	sprintf(dnode_address_nat, "%pM", ni->address);
 
-	hi = sfi->ci->mapping_nat_from->host;
-	sprintf(snode_address_nat, "%pM", hi->node->address);
+	ni = sfi->ci->from_nat_node;
+	sprintf(snode_address_nat, "%pM", ni->address);
 
 	direction = sfi->ci->direction;
 	protocol = sfi->ci->protocol;
@@ -8366,7 +8413,6 @@ static bool ecm_db_char_dev_mapping_msg_prep(struct ecm_db_state_file_instance *
 	uint64_t to_data_total_dropped;
 	uint64_t from_packet_total_dropped;
 	uint64_t to_packet_total_dropped;
-	char node_address[25];
 	struct ecm_db_host_instance *hi;
 
 	DEBUG_TRACE("%p: Prep mapping msg for %p\n", sfi, sfi->mi);
@@ -8385,7 +8431,6 @@ static bool ecm_db_char_dev_mapping_msg_prep(struct ecm_db_state_file_instance *
 			&from_packet_total_dropped, &to_packet_total_dropped);
 	hi = sfi->mi->host;
 	ecm_ip_addr_to_string(address, hi->address);
-	sprintf(node_address, "%pM", hi->node->address);
 
 	/*
 	 * Use fresh buffer
@@ -8400,7 +8445,7 @@ static bool ecm_db_char_dev_mapping_msg_prep(struct ecm_db_state_file_instance *
 			" nat_from=\"%d\" nat_to=\"%d\" tcp_nat_from=\"%d\" tcp_nat_to=\"%d\" udp_nat_from=\"%d\" udp_nat_to=\"%d\""
 			" from_data_total=\"%llu\" to_data_total=\"%llu\" from_packet_total=\"%llu\" to_packet_total=\"%llu\""
 			" from_data_total_dropped=\"%llu\" to_data_total_dropped=\"%llu\" from_packet_total_dropped=\"%llu\" to_packet_total_dropped=\"%llu\""
-			" time_added=\"%u\" node_address=\"%s\"/>\n",
+			" time_added=\"%u\"/>\n",
 			address,
 			port,
 			from,
@@ -8423,8 +8468,7 @@ static bool ecm_db_char_dev_mapping_msg_prep(struct ecm_db_state_file_instance *
 			to_data_total_dropped,
 			from_packet_total_dropped,
 			to_packet_total_dropped,
-			time_added,
-			node_address);
+			time_added);
 
 	if ((msg_len <= 0) || (msg_len >= ECM_DB_STATE_FILE_BUFFER_SIZE)) {
 		return false;
@@ -8453,7 +8497,6 @@ static bool ecm_db_char_dev_host_msg_prep(struct ecm_db_state_file_instance *sfi
 	uint64_t to_data_total_dropped;
 	uint64_t from_packet_total_dropped;
 	uint64_t to_packet_total_dropped;
-	char node_address[25];
 	bool on_link;
 
 	DEBUG_TRACE("%p: Prep host msg for %p\n", sfi, sfi->hi);
@@ -8469,7 +8512,6 @@ static bool ecm_db_char_dev_host_msg_prep(struct ecm_db_state_file_instance *sfi
 			&from_packet_total, &to_packet_total,
 			&from_data_total_dropped, &to_data_total_dropped,
 			&from_packet_total_dropped, &to_packet_total_dropped);
-	sprintf(node_address, "%pM", sfi->hi->node->address);
 	on_link = sfi->hi->on_link;
 
 	/*
@@ -8481,13 +8523,12 @@ static bool ecm_db_char_dev_host_msg_prep(struct ecm_db_state_file_instance *sfi
 	 * Prep the message
 	 */
 	msg_len = snprintf(sfi->msgp, ECM_DB_STATE_FILE_BUFFER_SIZE,
-		"<host address=\"%s\" mappings=\"%d\" time_added=\"%u\" node_address=\"%s\" on_link=\"%d\""
+		"<host address=\"%s\" mappings=\"%d\" time_added=\"%u\" on_link=\"%d\""
 		" from_data_total=\"%llu\" to_data_total=\"%llu\" from_packet_total=\"%llu\" to_packet_total=\"%llu\""
 		" from_data_total_dropped=\"%llu\" to_data_total_dropped=\"%llu\" from_packet_total_dropped=\"%llu\" to_packet_total_dropped=\"%llu\"/>\n",
 		address,
 		mapping_count,
 		time_added,
-		node_address,
 		on_link,
 		from_data_total,
 		to_data_total,
@@ -8515,7 +8556,10 @@ static bool ecm_db_char_dev_node_msg_prep(struct ecm_db_state_file_instance *sfi
 {
 	int msg_len;
 	char address[25];
-	int host_count;
+	int from_connections_count;
+	int to_connections_count;
+	int from_nat_connections_count;
+	int to_nat_connections_count;
 	uint32_t time_added;
 	uint64_t from_data_total;
 	uint64_t to_data_total;
@@ -8534,7 +8578,12 @@ static bool ecm_db_char_dev_node_msg_prep(struct ecm_db_state_file_instance *sfi
 	 *
 	 * Extract information from the node for inclusion into the message
 	 */
-	host_count = ecm_db_node_host_count_get(sfi->ni);
+	spin_lock_bh(&ecm_db_lock);
+	from_connections_count = sfi->ni->from_connections_count;
+	to_connections_count = sfi->ni->to_connections_count;
+	from_nat_connections_count = sfi->ni->from_nat_connections_count;
+	to_nat_connections_count = sfi->ni->to_nat_connections_count;
+	spin_unlock_bh(&ecm_db_lock);
 	time_added = sfi->ni->time_added;
 	ecm_db_node_data_stats_get(sfi->ni, &from_data_total, &to_data_total,
 			&from_packet_total, &to_packet_total,
@@ -8551,11 +8600,14 @@ static bool ecm_db_char_dev_node_msg_prep(struct ecm_db_state_file_instance *sfi
 	 * Prep the message
 	 */
 	msg_len = snprintf(sfi->msgp, ECM_DB_STATE_FILE_BUFFER_SIZE,
-		"<node address=\"%s\" mappings=\"%d\" time_added=\"%u\""
+		"<node address=\"%s\" from_connections_count=\"%d\" to_connections_count=\"%d\" from_nat_connections_count=\"%d\" to_nat_connections_count=\"%d\" time_added=\"%u\""
 		" from_data_total=\"%llu\" to_data_total=\"%llu\" from_packet_total=\"%llu\" to_packet_total=\"%llu\""
 		" from_data_total_dropped=\"%llu\" to_data_total_dropped=\"%llu\" from_packet_total_dropped=\"%llu\" to_packet_total_dropped=\"%llu\" />\n",
 		address,
-		host_count,
+		from_connections_count,
+		to_connections_count,
+		from_nat_connections_count,
+		to_nat_connections_count,
 		time_added,
 		from_data_total,
 		to_data_total,

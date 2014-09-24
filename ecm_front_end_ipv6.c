@@ -925,13 +925,10 @@ static struct ecm_db_node_instance *ecm_front_end_ipv6_node_establish_and_ref(st
  *
  * Returns NULL on failure.
  */
-static struct ecm_db_host_instance *ecm_front_end_ipv6_host_establish_and_ref(struct net_device *dev, ip_addr_t addr,
-						struct ecm_db_iface_instance *interface_list[], int32_t interface_list_first,
-						uint8_t *given_node_addr)
+static struct ecm_db_host_instance *ecm_front_end_ipv6_host_establish_and_ref(ip_addr_t addr)
 {
 	struct ecm_db_host_instance *hi;
 	struct ecm_db_host_instance *nhi;
-	struct ecm_db_node_instance *ni;
 
 	DEBUG_INFO("Establish host for " ECM_IP_ADDR_OCTAL_FMT "\n", ECM_IP_ADDR_TO_OCTAL(addr));
 
@@ -944,19 +941,12 @@ static struct ecm_db_host_instance *ecm_front_end_ipv6_host_establish_and_ref(st
 		return hi;
 	}
 
-	ni = ecm_front_end_ipv6_node_establish_and_ref(dev, addr, interface_list, interface_list_first, given_node_addr);
-	if (!ni) {
-		DEBUG_WARN("Failed to establish node\n");
-		return NULL;
-	}
-
 	/*
 	 * No host - create one
 	 */
 	nhi = ecm_db_host_alloc();
 	if (!nhi) {
 		DEBUG_WARN("Failed to establish host\n");
-		ecm_db_node_deref(ni);
 		return NULL;
 	}
 
@@ -968,18 +958,12 @@ static struct ecm_db_host_instance *ecm_front_end_ipv6_host_establish_and_ref(st
 	if (hi) {
 		spin_unlock_bh(&ecm_front_end_ipv6_lock);
 		ecm_db_host_deref(nhi);
-		ecm_db_node_deref(ni);
 		return hi;
 	}
 
-	ecm_db_host_add(nhi, ni, addr, true, NULL, nhi);
+	ecm_db_host_add(nhi, addr, true, NULL, nhi);
 
 	spin_unlock_bh(&ecm_front_end_ipv6_lock);
-
-	/*
-	 * Don't need node instance now
-	 */
-	ecm_db_node_deref(ni);
 
 	DEBUG_TRACE("%p: host established\n", nhi);
 	return nhi;
@@ -991,20 +975,18 @@ static struct ecm_db_host_instance *ecm_front_end_ipv6_host_establish_and_ref(st
  *
  * Returns NULL on failure.
  */
-static struct ecm_db_mapping_instance *ecm_front_end_ipv6_mapping_establish_and_ref(struct net_device *dev, ip_addr_t addr, int port,
-						struct ecm_db_iface_instance *interface_list[], int32_t interface_list_first,
-						uint8_t *given_node_addr)
+static struct ecm_db_mapping_instance *ecm_front_end_ipv6_mapping_establish_and_ref(ip_addr_t addr, int port)
 {
 	struct ecm_db_mapping_instance *mi;
 	struct ecm_db_mapping_instance *nmi;
 	struct ecm_db_host_instance *hi;
 
-	DEBUG_INFO("%p: Establish mapping for " ECM_IP_ADDR_OCTAL_FMT ":%u\n", dev, ECM_IP_ADDR_TO_OCTAL(addr), port);
+	DEBUG_INFO("Establish mapping for " ECM_IP_ADDR_OCTAL_FMT ":%u\n", ECM_IP_ADDR_TO_OCTAL(addr), port);
 
 	/*
 	 * No mapping - establish host existence
 	 */
-	hi = ecm_front_end_ipv6_host_establish_and_ref(dev, addr, interface_list, interface_list_first, given_node_addr);
+	hi = ecm_front_end_ipv6_host_establish_and_ref(addr);
 	if (!hi) {
 		DEBUG_WARN("Failed to establish host\n");
 		return NULL;
@@ -5079,6 +5061,8 @@ static unsigned int ecm_front_end_ipv6_tcp_process(struct net_device *out_dev,
 	if (unlikely(!ci)) {
 		struct ecm_db_mapping_instance *src_mi;
 		struct ecm_db_mapping_instance *dest_mi;
+		struct ecm_db_node_instance *src_ni;
+		struct ecm_db_node_instance *dest_ni;
 		struct ecm_classifier_default_instance *dci;
 		struct ecm_db_connection_instance *nci;
 		ecm_classifier_type_t classifier_type;
@@ -5143,10 +5127,19 @@ static unsigned int ecm_front_end_ipv6_tcp_process(struct net_device *out_dev,
 		}
 		ecm_db_connection_from_interfaces_reset(nci, from_list, from_list_first);
 
-		DEBUG_TRACE("%p: Create source mapping\n", nci);
-		src_mi = ecm_front_end_ipv6_mapping_establish_and_ref(in_dev, ip_src_addr, src_port, from_list, from_list_first, src_node_addr);
+		DEBUG_TRACE("%p: Create source node\n", nci);
+		src_ni = ecm_front_end_ipv6_node_establish_and_ref(in_dev, ip_src_addr, from_list, from_list_first, src_node_addr);
 		ecm_db_connection_interfaces_deref(from_list, from_list_first);
+		if (!src_ni) {
+			ecm_db_connection_deref(nci);
+			DEBUG_WARN("Failed to establish source node\n");
+			return NF_ACCEPT;
+		}
+
+		DEBUG_TRACE("%p: Create source mapping\n", nci);
+		src_mi = ecm_front_end_ipv6_mapping_establish_and_ref(ip_src_addr, src_port);
 		if (!src_mi) {
+			ecm_db_node_deref(src_ni);
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to establish src mapping\n");
 			return NF_ACCEPT;
@@ -5156,17 +5149,30 @@ static unsigned int ecm_front_end_ipv6_tcp_process(struct net_device *out_dev,
 		to_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, IPPROTO_TCP, out_dev, is_routed, in_dev, dest_node_addr, src_node_addr);
 		if (to_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_mapping_deref(src_mi);
+			ecm_db_node_deref(src_ni);
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to obtain 'to' heirarchy list\n");
 			return NF_ACCEPT;
 		}
 		ecm_db_connection_to_interfaces_reset(nci, to_list, to_list_first);
 
-		DEBUG_TRACE("%p: Create dest mapping\n", nci);
-		dest_mi = ecm_front_end_ipv6_mapping_establish_and_ref(out_dev, ip_dest_addr, dest_port, to_list, to_list_first, dest_node_addr);
+		DEBUG_TRACE("%p: Create dest node\n", nci);
+		dest_ni = ecm_front_end_ipv6_node_establish_and_ref(out_dev, ip_dest_addr, to_list, to_list_first, dest_node_addr);
 		ecm_db_connection_interfaces_deref(to_list, to_list_first);
-		if (!dest_mi) {
+		if (!dest_ni) {
 			ecm_db_mapping_deref(src_mi);
+			ecm_db_node_deref(src_ni);
+			ecm_db_connection_deref(nci);
+			DEBUG_WARN("Failed to establish dest node\n");
+			return NF_ACCEPT;
+		}
+
+		DEBUG_TRACE("%p: Create dest mapping\n", nci);
+		dest_mi = ecm_front_end_ipv6_mapping_establish_and_ref(ip_dest_addr, dest_port);
+		if (!dest_mi) {
+			ecm_db_node_deref(dest_ni);
+			ecm_db_mapping_deref(src_mi);
+			ecm_db_node_deref(src_ni);
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to establish dest mapping\n");
 			return NF_ACCEPT;
@@ -5178,7 +5184,9 @@ static unsigned int ecm_front_end_ipv6_tcp_process(struct net_device *out_dev,
 		feci = (struct ecm_front_end_connection_instance *)ecm_front_end_ipv6_connection_tcp_instance_alloc(nci, src_mi, dest_mi, can_accel);
 		if (!feci) {
 			ecm_db_mapping_deref(dest_mi);
+			ecm_db_node_deref(dest_ni);
 			ecm_db_mapping_deref(src_mi);
+			ecm_db_node_deref(src_ni);
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to allocate front end\n");
 			return NF_ACCEPT;
@@ -5191,7 +5199,9 @@ static unsigned int ecm_front_end_ipv6_tcp_process(struct net_device *out_dev,
 		if (!dci) {
 			feci->deref(feci);
 			ecm_db_mapping_deref(dest_mi);
+			ecm_db_node_deref(dest_ni);
 			ecm_db_mapping_deref(src_mi);
+			ecm_db_node_deref(src_ni);
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to allocate default classifier\n");
 			return NF_ACCEPT;
@@ -5209,7 +5219,9 @@ static unsigned int ecm_front_end_ipv6_tcp_process(struct net_device *out_dev,
 				dci->base.deref((struct ecm_classifier_instance *)dci);
 				feci->deref(feci);
 				ecm_db_mapping_deref(dest_mi);
+				ecm_db_node_deref(dest_ni);
 				ecm_db_mapping_deref(src_mi);
+				ecm_db_node_deref(src_ni);
 				ecm_db_connection_deref(nci);
 				DEBUG_WARN("Failed to allocate classifiers assignments\n");
 				return NF_ACCEPT;
@@ -5249,8 +5261,8 @@ static unsigned int ecm_front_end_ipv6_tcp_process(struct net_device *out_dev,
 			 * Add the new connection we created into the database
 			 * NOTE: assign to a short timer group for now - it is the assigned classifiers responsibility to do this
 			 */
-			ecm_db_connection_add(nci, feci, dci,
-					src_mi, dest_mi, src_mi, dest_mi,
+			ecm_db_connection_add(nci, feci, dci, src_mi, dest_mi, src_mi, dest_mi,
+					src_ni, dest_ni, src_ni, dest_ni,
 					IPPROTO_TCP, ecm_dir,
 					NULL /* final callback */,
 					ecm_front_end_ipv6_connection_tcp_defunct_callback,
@@ -5267,8 +5279,10 @@ static unsigned int ecm_front_end_ipv6_tcp_process(struct net_device *out_dev,
 		 */
 		feci->deref(feci);
 		dci->base.deref((struct ecm_classifier_instance *)dci);
-		ecm_db_mapping_deref(src_mi);
 		ecm_db_mapping_deref(dest_mi);
+		ecm_db_node_deref(dest_ni);
+		ecm_db_mapping_deref(src_mi);
+		ecm_db_node_deref(src_ni);
 	}
 
 	/*
@@ -5631,6 +5645,8 @@ static unsigned int ecm_front_end_ipv6_udp_process(struct net_device *out_dev,
 	if (unlikely(!ci)) {
 		struct ecm_db_mapping_instance *src_mi;
 		struct ecm_db_mapping_instance *dest_mi;
+		struct ecm_db_node_instance *src_ni;
+		struct ecm_db_node_instance *dest_ni;
 		struct ecm_classifier_default_instance *dci;
 		struct ecm_front_end_connection_instance *feci;
 		struct ecm_db_connection_instance *nci;
@@ -5682,10 +5698,19 @@ static unsigned int ecm_front_end_ipv6_udp_process(struct net_device *out_dev,
 		}
 		ecm_db_connection_from_interfaces_reset(nci, from_list, from_list_first);
 
-		DEBUG_TRACE("%p: Create source mapping\n", nci);
-		src_mi = ecm_front_end_ipv6_mapping_establish_and_ref(in_dev, ip_src_addr, src_port, from_list, from_list_first, src_node_addr);
+		DEBUG_TRACE("%p: Create source node\n", nci);
+		src_ni = ecm_front_end_ipv6_node_establish_and_ref(in_dev, ip_src_addr, from_list, from_list_first, src_node_addr);
 		ecm_db_connection_interfaces_deref(from_list, from_list_first);
+		if (!src_ni) {
+			ecm_db_connection_deref(nci);
+			DEBUG_WARN("Failed to establish source node\n");
+			return NF_ACCEPT;
+		}
+
+		DEBUG_TRACE("%p: Create source mapping\n", nci);
+		src_mi = ecm_front_end_ipv6_mapping_establish_and_ref(ip_src_addr, src_port);
 		if (!src_mi) {
+			ecm_db_node_deref(src_ni);
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to establish src mapping\n");
 			return NF_ACCEPT;
@@ -5695,17 +5720,30 @@ static unsigned int ecm_front_end_ipv6_udp_process(struct net_device *out_dev,
 		to_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, IPPROTO_UDP, out_dev, is_routed, in_dev, dest_node_addr, src_node_addr);
 		if (to_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_mapping_deref(src_mi);
+			ecm_db_node_deref(src_ni);
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to obtain 'to' heirarchy list\n");
 			return NF_ACCEPT;
 		}
 		ecm_db_connection_to_interfaces_reset(nci, to_list, to_list_first);
 
-		DEBUG_TRACE("%p: Create dest mapping\n", nci);
-		dest_mi = ecm_front_end_ipv6_mapping_establish_and_ref(out_dev, ip_dest_addr, dest_port, to_list, to_list_first, dest_node_addr);
+		DEBUG_TRACE("%p: Create dest node\n", nci);
+		dest_ni = ecm_front_end_ipv6_node_establish_and_ref(out_dev, ip_dest_addr, to_list, to_list_first, dest_node_addr);
 		ecm_db_connection_interfaces_deref(to_list, to_list_first);
-		if (!dest_mi) {
+		if (!dest_ni) {
 			ecm_db_mapping_deref(src_mi);
+			ecm_db_node_deref(src_ni);
+			ecm_db_connection_deref(nci);
+			DEBUG_WARN("Failed to establish dest node\n");
+			return NF_ACCEPT;
+		}
+
+		DEBUG_TRACE("%p: Create dest mapping\n", nci);
+		dest_mi = ecm_front_end_ipv6_mapping_establish_and_ref(ip_dest_addr, dest_port);
+		if (!dest_mi) {
+			ecm_db_node_deref(dest_ni);
+			ecm_db_mapping_deref(src_mi);
+			ecm_db_node_deref(src_ni);
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to establish dest mapping\n");
 			return NF_ACCEPT;
@@ -5717,7 +5755,9 @@ static unsigned int ecm_front_end_ipv6_udp_process(struct net_device *out_dev,
 		feci = (struct ecm_front_end_connection_instance *)ecm_front_end_ipv6_connection_udp_instance_alloc(nci, src_mi, dest_mi, can_accel);
 		if (!feci) {
 			ecm_db_mapping_deref(dest_mi);
+			ecm_db_node_deref(dest_ni);
 			ecm_db_mapping_deref(src_mi);
+			ecm_db_node_deref(src_ni);
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to allocate front end\n");
 			return NF_ACCEPT;
@@ -5730,7 +5770,9 @@ static unsigned int ecm_front_end_ipv6_udp_process(struct net_device *out_dev,
 		if (!dci) {
 			feci->deref(feci);
 			ecm_db_mapping_deref(dest_mi);
+			ecm_db_node_deref(dest_ni);
 			ecm_db_mapping_deref(src_mi);
+			ecm_db_node_deref(src_ni);
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to allocate default classifier\n");
 			return NF_ACCEPT;
@@ -5748,7 +5790,9 @@ static unsigned int ecm_front_end_ipv6_udp_process(struct net_device *out_dev,
 				dci->base.deref((struct ecm_classifier_instance *)dci);
 				feci->deref(feci);
 				ecm_db_mapping_deref(dest_mi);
+				ecm_db_node_deref(dest_ni);
 				ecm_db_mapping_deref(src_mi);
+				ecm_db_node_deref(src_ni);
 				ecm_db_connection_deref(nci);
 				DEBUG_WARN("Failed to allocate classifiers assignments\n");
 				return NF_ACCEPT;
@@ -5788,8 +5832,8 @@ static unsigned int ecm_front_end_ipv6_udp_process(struct net_device *out_dev,
 			 * Add the new connection we created into the database
 			 * NOTE: assign to a short timer group for now - it is the assigned classifiers responsibility to do this
 			 */
-			ecm_db_connection_add(nci, feci, dci,
-					src_mi, dest_mi, src_mi, dest_mi,
+			ecm_db_connection_add(nci, feci, dci, src_mi, dest_mi, src_mi, dest_mi,
+					src_ni, dest_ni, src_ni, dest_ni,
 					IPPROTO_UDP, ecm_dir,
 					NULL /* final callback */,
 					ecm_front_end_ipv6_connection_udp_defunct_callback,
@@ -5806,8 +5850,10 @@ static unsigned int ecm_front_end_ipv6_udp_process(struct net_device *out_dev,
 		 */
 		feci->deref(feci);
 		dci->base.deref((struct ecm_classifier_instance *)dci);
-		ecm_db_mapping_deref(src_mi);
 		ecm_db_mapping_deref(dest_mi);
+		ecm_db_node_deref(dest_ni);
+		ecm_db_mapping_deref(src_mi);
+		ecm_db_node_deref(src_ni);
 	}
 
 	/*
@@ -6127,6 +6173,8 @@ static unsigned int ecm_front_end_ipv6_non_ported_process(struct net_device *out
 	if (unlikely(!ci)) {
 		struct ecm_db_mapping_instance *src_mi;
 		struct ecm_db_mapping_instance *dest_mi;
+		struct ecm_db_node_instance *src_ni;
+		struct ecm_db_node_instance *dest_ni;
 		struct ecm_classifier_default_instance *dci;
 		struct ecm_front_end_connection_instance *feci;
 		struct ecm_db_connection_instance *nci;
@@ -6177,10 +6225,19 @@ static unsigned int ecm_front_end_ipv6_non_ported_process(struct net_device *out
 		}
 		ecm_db_connection_from_interfaces_reset(nci, from_list, from_list_first);
 
-		DEBUG_TRACE("%p: Create source mapping\n", nci);
-		src_mi = ecm_front_end_ipv6_mapping_establish_and_ref(in_dev, ip_src_addr, src_port, from_list, from_list_first, src_node_addr);
+		DEBUG_TRACE("%p: Create source node\n", nci);
+		src_ni = ecm_front_end_ipv6_node_establish_and_ref(in_dev, ip_src_addr, from_list, from_list_first, src_node_addr);
 		ecm_db_connection_interfaces_deref(from_list, from_list_first);
+		if (!src_ni) {
+			ecm_db_connection_deref(nci);
+			DEBUG_WARN("Failed to establish source node\n");
+			return NF_ACCEPT;
+		}
+
+		DEBUG_TRACE("%p: Create source mapping\n", nci);
+		src_mi = ecm_front_end_ipv6_mapping_establish_and_ref(ip_src_addr, src_port);
 		if (!src_mi) {
+			ecm_db_node_deref(src_ni);
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to establish src mapping\n");
 			return NF_ACCEPT;
@@ -6190,17 +6247,30 @@ static unsigned int ecm_front_end_ipv6_non_ported_process(struct net_device *out
 		to_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, protocol, out_dev, is_routed, in_dev, dest_node_addr, src_node_addr);
 		if (to_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_mapping_deref(src_mi);
+			ecm_db_node_deref(src_ni);
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to obtain 'to' heirarchy list\n");
 			return NF_ACCEPT;
 		}
 		ecm_db_connection_to_interfaces_reset(nci, to_list, to_list_first);
 
-		DEBUG_TRACE("%p: Create dest mapping\n", nci);
-		dest_mi = ecm_front_end_ipv6_mapping_establish_and_ref(out_dev, ip_dest_addr, dest_port, to_list, to_list_first, dest_node_addr);
+		DEBUG_TRACE("%p: Create dest node\n", nci);
+		dest_ni = ecm_front_end_ipv6_node_establish_and_ref(out_dev, ip_dest_addr, to_list, to_list_first, dest_node_addr);
 		ecm_db_connection_interfaces_deref(to_list, to_list_first);
-		if (!dest_mi) {
+		if (!dest_ni) {
 			ecm_db_mapping_deref(src_mi);
+			ecm_db_node_deref(src_ni);
+			ecm_db_connection_deref(nci);
+			DEBUG_WARN("Failed to establish dest node\n");
+			return NF_ACCEPT;
+		}
+
+		DEBUG_TRACE("%p: Create dest mapping\n", nci);
+		dest_mi = ecm_front_end_ipv6_mapping_establish_and_ref(ip_dest_addr, dest_port);
+		if (!dest_mi) {
+			ecm_db_node_deref(dest_ni);
+			ecm_db_mapping_deref(src_mi);
+			ecm_db_node_deref(src_ni);
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to establish dest mapping\n");
 			return NF_ACCEPT;
@@ -6212,7 +6282,9 @@ static unsigned int ecm_front_end_ipv6_non_ported_process(struct net_device *out
 		feci = (struct ecm_front_end_connection_instance *)ecm_front_end_ipv6_connection_non_ported_instance_alloc(nci, src_mi, dest_mi, can_accel);
 		if (!feci) {
 			ecm_db_mapping_deref(dest_mi);
+			ecm_db_node_deref(dest_ni);
 			ecm_db_mapping_deref(src_mi);
+			ecm_db_node_deref(src_ni);
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to allocate front end\n");
 			return NF_ACCEPT;
@@ -6225,7 +6297,9 @@ static unsigned int ecm_front_end_ipv6_non_ported_process(struct net_device *out
 		if (!dci) {
 			feci->deref(feci);
 			ecm_db_mapping_deref(dest_mi);
+			ecm_db_node_deref(dest_ni);
 			ecm_db_mapping_deref(src_mi);
+			ecm_db_node_deref(src_ni);
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to allocate default classifier\n");
 			return NF_ACCEPT;
@@ -6243,7 +6317,9 @@ static unsigned int ecm_front_end_ipv6_non_ported_process(struct net_device *out
 				dci->base.deref((struct ecm_classifier_instance *)dci);
 				feci->deref(feci);
 				ecm_db_mapping_deref(dest_mi);
+				ecm_db_node_deref(dest_ni);
 				ecm_db_mapping_deref(src_mi);
+				ecm_db_node_deref(src_ni);
 				ecm_db_connection_deref(nci);
 				DEBUG_WARN("Failed to allocate classifiers assignments\n");
 				return NF_ACCEPT;
@@ -6283,8 +6359,8 @@ static unsigned int ecm_front_end_ipv6_non_ported_process(struct net_device *out
 			 * Add the new connection we created into the database
 			 * NOTE: assign to a short timer group for now - it is the assigned classifiers responsibility to do this
 			 */
-			ecm_db_connection_add(nci, feci, dci,
-					src_mi, dest_mi, src_mi, dest_mi,
+			ecm_db_connection_add(nci, feci, dci, src_mi, dest_mi, src_mi, dest_mi,
+					src_ni, dest_ni, src_ni, dest_ni,
 					protocol, ecm_dir,
 					NULL /* final callback */,
 					ecm_front_end_ipv6_connection_non_ported_defunct_callback,
@@ -6301,8 +6377,10 @@ static unsigned int ecm_front_end_ipv6_non_ported_process(struct net_device *out
 		 */
 		feci->deref(feci);
 		dci->base.deref((struct ecm_classifier_instance *)dci);
-		ecm_db_mapping_deref(src_mi);
 		ecm_db_mapping_deref(dest_mi);
+		ecm_db_node_deref(dest_ni);
+		ecm_db_mapping_deref(src_mi);
+		ecm_db_node_deref(src_ni);
 	}
 
 	/*
