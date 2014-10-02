@@ -3085,6 +3085,79 @@ static struct ecm_front_end_ipv4_connection_udp_instance *ecm_front_end_ipv4_con
 	return fecui;
 }
 
+#ifdef CONFIG_IPV6_SIT_6RD
+/*
+ * ecm_front_end_ipv4_sit_set_peer()
+ *	It will set the tunnel's peer when the tunnel is a remote any tunnel.
+ */
+static void ecm_front_end_ipv4_sit_set_peer(struct ecm_front_end_ipv4_connection_non_ported_instance *fecnpi, struct sk_buff *skb)
+{
+	struct nss_tun6rd_msg tun6rdmsg;
+	struct nss_tun6rd_set_peer_msg *tun6rdpeer;
+	struct ecm_db_iface_instance *from_ifaces[ECM_DB_IFACE_HEIRARCHY_MAX];
+	struct ecm_db_iface_instance *from_nss_iface;
+	int32_t from_ifaces_first;
+	const struct ipv6hdr *iph6;
+	uint16_t interface_number;
+	ecm_db_iface_type_t ii_type;
+	ip_addr_t addr;
+	nss_tx_status_t nss_tx_status;
+
+	DEBUG_CHECK_MAGIC(fecnpi, ECM_FRONT_END_IPV4_CONNECTION_NON_PORTED_INSTANCE_MAGIC, "%p: magic failed", fecnpi);
+	from_ifaces_first = ecm_db_connection_from_interfaces_get_and_ref(fecnpi->ci, from_ifaces);
+	if (from_ifaces_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
+		DEBUG_WARN("%p: Accel attempt failed - no interfaces in from_interfaces list!\n", fecnpi);
+		return;
+	}
+
+	from_nss_iface = from_ifaces[from_ifaces_first];
+	ii_type = ecm_db_connection_iface_type_get(from_nss_iface);
+
+	/*
+	 * We handle SIT tunnel only here
+	 */
+	if (ii_type != ECM_DB_IFACE_TYPE_SIT) {
+		DEBUG_WARN("%p: This interface is not the sit tunnel\n", fecnpi);
+		ecm_db_connection_interfaces_deref(from_ifaces, from_ifaces_first);
+		return;
+	}
+
+	/*
+	 * We catch these packets in the tunnel which destination ip address is null
+	 */
+	if (!ecm_db_iface_sit_daddr_is_null(from_nss_iface)) {
+		ecm_db_connection_interfaces_deref(from_ifaces, from_ifaces_first);
+		return;
+	}
+	ecm_db_connection_to_address_get(fecnpi->ci, addr);
+
+	interface_number = ecm_db_iface_nss_interface_identifier_get(from_nss_iface);
+	nss_cmn_msg_init(&tun6rdmsg.cm, interface_number, NSS_TUN6RD_ADD_UPDATE_PEER,
+			sizeof(struct nss_tun6rd_set_peer_msg), NULL, NULL);
+
+	tun6rdpeer = &tun6rdmsg.msg.peer;
+	ECM_IP_ADDR_TO_NIN4_ADDR(tun6rdpeer->dest, addr);
+	iph6 = (struct ipv6hdr *)skb_transport_header(skb);
+	memcpy(tun6rdpeer->ipv6_address,&iph6->daddr, sizeof(struct  in6_addr));
+
+	nss_tx_status = nss_tun6rd_tx(nss_tun6rd_get_context(), &tun6rdmsg);
+	if (nss_tx_status != NSS_TX_SUCCESS) {
+		/*
+		 * Nothing to do when faild to xmit the message.
+		 */
+		DEBUG_WARN("SIT Accelerate set rule failed\n");
+		ecm_db_connection_interfaces_deref(from_ifaces, from_ifaces_first);
+		return;
+	}
+	DEBUG_TRACE("%p: SIT[%d] set peer\n"
+		   "ipv4 destination address:%x\n"
+		   "ipv6 destination address::"ECM_IP_ADDR_OCTAL_FMT"\n",
+		fecnpi, interface_number, tun6rdpeer->dest, ECM_IP_ADDR_TO_OCTAL(tun6rdpeer->ipv6_address));
+
+	ecm_db_connection_interfaces_deref(from_ifaces, from_ifaces_first);
+}
+#endif
+
 /*
  * ecm_front_end_ipv4_connection_non_ported_callback()
  *	Callback for handling create ack/nack calls.
@@ -6633,6 +6706,22 @@ static unsigned int ecm_front_end_ipv4_non_ported_process(struct net_device *out
 	skb->priority = prevalent_pr.flow_qos_tag;
 	DEBUG_TRACE("%p: skb priority: %u\n", ci, skb->priority);
 
+#ifdef CONFIG_IPV6_SIT_6RD
+	/*
+	 * SIT tunnel acceleration needs create a rule to the nss firmware if the
+	 *	tunnel's dest ip address is empty,it will get dest ip and the embedded ipv6's dest ip
+	 *	address in the packet and send them to the nss firmware to accelerate the
+	 *	traffic on the tun6rd interface.
+	 */
+	if (protocol == IPPROTO_IPV6
+			&& prevalent_pr.accel_mode == ECM_CLASSIFIER_ACCELERATION_MODE_ACCEL) {
+		struct ecm_front_end_connection_instance *feci;
+		DEBUG_TRACE("%p: accel\n", ci);
+		feci = ecm_db_connection_front_end_get_and_ref(ci);
+		ecm_front_end_ipv4_sit_set_peer((struct ecm_front_end_ipv4_connection_non_ported_instance *)feci, skb);
+		feci->deref(feci);
+	}
+#endif
 	/*
 	 * Accelerate?
 	 */
