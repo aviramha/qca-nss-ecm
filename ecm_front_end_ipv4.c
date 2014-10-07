@@ -478,10 +478,6 @@ static struct ecm_db_mapping_instance *ecm_front_end_ipv4_mapping_establish_and_
 /*
  * ecm_front_end_ipv4_connection_tcp_callback()
  *	Callback for handling create ack/nack calls.
- *
- * TODO: Since we don't want to hold data structure reference across multiple heterogenous
- * CPUs, we should use the app_data as the sequence # and do a fast look up rather than
- * a 5-tuple lookup.
  */
 static void ecm_front_end_ipv4_connection_tcp_callback(void *app_data, struct nss_ipv4_msg *nim)
 {
@@ -507,6 +503,13 @@ static void ecm_front_end_ipv4_connection_tcp_callback(void *app_data, struct ns
 		DEBUG_TRACE("%p: create callback, connection not found, serial: %u\n", nim, serial);
 		return;
 	}
+
+	/*
+	 * Release ref held for this ack/nack response.
+	 * NOTE: It's okay to do this here, ci won't go away, because the ci is held as
+	 * a result of the ecm_db_connection_serial_find_and_ref()
+	 */
+	ecm_db_connection_deref(ci);
 
 	/*
 	 * Get the front end instance
@@ -555,16 +558,12 @@ static void ecm_front_end_ipv4_connection_tcp_callback(void *app_data, struct ns
 		fecti->base.stats.decelerate_pending = false;
 
 		/*
-		 * If we have defunct flag set for this connection, set the accel mode and
-		 * release the extra connection reference.
+		 * If connection is now defunct then set mode to ensure no further accel attempts occur
 		 */
-		if (!fecti->is_defunct) {
-			spin_unlock_bh(&fecti->lock);
-		} else {
+		if (fecti->is_defunct) {
 			fecti->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DEFUNCT;
-			spin_unlock_bh(&fecti->lock);
-			ecm_db_connection_deref(ci);
 		}
+		spin_unlock_bh(&fecti->lock);
 
 		/*
 		 * Release the connection.
@@ -666,7 +665,7 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_accelerate(struct ecm_fr
 	 */
 	DEBUG_INFO("%p: Accel conn: %p\n", fecti, fecti->ci);
 	spin_lock_bh(&fecti->lock);
-	if (fecti->accel_mode <= ECM_FRONT_END_ACCELERATION_MODE_FAIL_DENIED) {
+	if (ECM_FRONT_END_ACCELERATION_FAILED(fecti->accel_mode)) {
 		spin_unlock_bh(&fecti->lock);
 		DEBUG_TRACE("%p: accel %p failed\n", fecti, fecti->ci);
 		return;
@@ -1295,6 +1294,14 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_accelerate(struct ecm_fr
 			nircm->dscp_rule.return_dscp);
 
 	/*
+	 * Ref the connection before issuing an NSS rule
+	 * This ensures that when the NSS responds to the command - which may even be immediately -
+	 * the callback function can trust the correct ref was taken for its purpose.
+	 * NOTE: remember that this will also implicitly hold the feci.
+	 */
+	ecm_db_connection_ref(fecti->ci);
+
+	/*
 	 * Call the rule create function
 	 */
 	nss_tx_status = nss_ipv4_tx(ecm_front_end_ipv4_nss_ipv4_mgr, &nim);
@@ -1305,6 +1312,11 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_accelerate(struct ecm_fr
 		spin_unlock_bh(&fecti->lock);
 		return;
 	}
+
+	/*
+	 * Release that ref!
+	 */
+	ecm_db_connection_deref(fecti->ci);
 
 	/*
 	 * TX failed
@@ -1335,7 +1347,7 @@ tcp_accel_bad_rule:
 
 /*
  * ecm_front_end_ipv4_connection_tcp_destroy_callback()
- *	Callback for handling create ack/nack calls.
+ *	Callback for handling destroy ack/nack calls.
  */
 static void ecm_front_end_ipv4_connection_tcp_destroy_callback(void *app_data, struct nss_ipv4_msg *nim)
 {
@@ -1361,6 +1373,13 @@ static void ecm_front_end_ipv4_connection_tcp_destroy_callback(void *app_data, s
 		DEBUG_TRACE("%p: destroy callback, connection not found, serial: %u\n", nim, serial);
 		return;
 	}
+
+	/*
+	 * Release ref held for this ack/nack response.
+	 * NOTE: It's okay to do this here, ci won't go away, because the ci is held as
+	 * a result of the ecm_db_connection_serial_find_and_ref()
+	 */
+	ecm_db_connection_deref(ci);
 
 	/*
 	 * Get the front end instance
@@ -1402,16 +1421,12 @@ static void ecm_front_end_ipv4_connection_tcp_destroy_callback(void *app_data, s
 	}
 
 	/*
-	 * If we have defunct flag set for this connection, set the accel mode and
-	 * release the extra connection reference.
+	 * If connection became defunct then set mode so that no further accel/decel attempts occur.
 	 */
-	if (!fecti->is_defunct) {
-		spin_unlock_bh(&fecti->lock);
-	} else {
+	if (fecti->is_defunct) {
 		fecti->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DEFUNCT;
-		spin_unlock_bh(&fecti->lock);
-		ecm_db_connection_deref(ci);
 	}
+	spin_unlock_bh(&fecti->lock);
 
 	/*
 	 * TCP acceleration ends
@@ -1507,6 +1522,12 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_decelerate(struct ecm_fr
 			&nirdm->tuple.return_ip, nirdm->tuple.return_ident);
 
 	/*
+	 * Take a ref to the feci->ci so that it will persist until we get a response from the NSS.
+	 * NOTE: This will implicitly hold the feci too.
+	 */
+	ecm_db_connection_ref(fecti->ci);
+
+	/*
 	 * Destroy the NSS connection cache entry.
 	 */
 	nss_tx_status = nss_ipv4_tx(ecm_front_end_ipv4_nss_ipv4_mgr, &nim);
@@ -1516,6 +1537,11 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_decelerate(struct ecm_fr
 		spin_unlock_bh(&fecti->lock);
 		return;
 	}
+
+	/*
+	 * Release the ref take, NSS driver did not accept our command.
+	 */
+	ecm_db_connection_deref(fecti->ci);
 
 	/*
 	 * TX failed
@@ -1532,7 +1558,7 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_decelerate(struct ecm_fr
 
 /*
  * ecm_front_end_ipv4_connection_tcp_defunct_callback()
- *	Callback to be called when a TCP connection is defuncted.
+ *	Callback to be called when a TCP connection has become defunct.
  */
 static void ecm_front_end_ipv4_connection_tcp_defunct_callback(void *arg)
 {
@@ -1561,23 +1587,28 @@ static void ecm_front_end_ipv4_connection_tcp_defunct_callback(void *arg)
 	}
 
 	/*
-	 * If the connection is not in decel or decel pending mode, we don't need to defunct the connection.
-	 * Just mark the connection mode to fail defunct.
+	 * If the connection is decel then ensure it will not attempt accel while defunct.
 	 */
-	if ((fecti->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_DECEL)
-			|| (fecti->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_DECEL_PENDING)) {
+	if (fecti->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_DECEL) {
 		fecti->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DEFUNCT;
 		spin_unlock_bh(&fecti->lock);
 		return;
 	}
 
 	/*
+	 * If the connection is decel pending then decel operation is in progress anyway.
+	 */
+	if (fecti->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_DECEL_PENDING) {
+		spin_unlock_bh(&fecti->lock);
+		return;
+	}
+
+	/*
 	 * If none of the cases mathes above, this means the connection is in one of the
-	 * accel modes (accel or accel_pending), ref the connection instance before decelerating
-	 * to keep it in the database until we get the deceleration response.
+	 * accel modes (accel or accel_pending) so we force a deceleration.
+	 * NOTE: If the mode is accel pending then the decel will be actioned when that is completed.
 	 */
 	spin_unlock_bh(&fecti->lock);
-	ecm_db_connection_ref(fecti->ci);
 	ecm_front_end_ipv4_connection_tcp_front_end_decelerate(feci);
 }
 
@@ -1807,10 +1838,6 @@ static struct ecm_front_end_ipv4_connection_tcp_instance *ecm_front_end_ipv4_con
 /*
  * ecm_front_end_ipv4_connection_udp_callback()
  *	Callback for handling create ack/nack calls.
- *
- * TODO: Since we don't want to hold data structure reference across multiple heterogenous
- * CPUs, we should use the app_data as the sequence # and do a fast look up rather than
- * a 5-tuple lookup.
  */
 static void ecm_front_end_ipv4_connection_udp_callback(void *app_data, struct nss_ipv4_msg *nim)
 {
@@ -1836,6 +1863,13 @@ static void ecm_front_end_ipv4_connection_udp_callback(void *app_data, struct ns
 		DEBUG_TRACE("%p: create callback, connection not found, serial: %u\n", nim, serial);
 		return;
 	}
+
+	/*
+	 * Release ref held for this ack/nack response.
+	 * NOTE: It's okay to do this here, ci won't go away, because the ci is held as
+	 * a result of the ecm_db_connection_serial_find_and_ref()
+	 */
+	ecm_db_connection_deref(ci);
 
 	/*
 	 * Get the front end instance
@@ -1884,16 +1918,12 @@ static void ecm_front_end_ipv4_connection_udp_callback(void *app_data, struct ns
 		fecui->base.stats.decelerate_pending = false;
 
 		/*
-		 * If we have defunct flag set for this connection, set the accel mode and
-		 * release the extra connection reference.
+		 * If connection is now defunct then set mode to ensure no further accel attempts occur
 		 */
-		if (!fecui->is_defunct) {
-			spin_unlock_bh(&fecui->lock);
-		} else {
+		if (fecui->is_defunct) {
 			fecui->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DEFUNCT;
-			spin_unlock_bh(&fecui->lock);
-			ecm_db_connection_deref(ci);
 		}
+		spin_unlock_bh(&fecui->lock);
 
 		/*
 		 * Release the connection.
@@ -1994,7 +2024,7 @@ static void ecm_front_end_ipv4_connection_udp_front_end_accelerate(struct ecm_fr
 	 */
 	DEBUG_INFO("%p: Accel conn: %p\n", fecui, fecui->ci);
 	spin_lock_bh(&fecui->lock);
-	if (fecui->accel_mode <= ECM_FRONT_END_ACCELERATION_MODE_FAIL_DENIED) {
+	if (ECM_FRONT_END_ACCELERATION_FAILED(fecui->accel_mode)) {
 		spin_unlock_bh(&fecui->lock);
 		DEBUG_TRACE("%p: accel %p failed\n", fecui, fecui->ci);
 		return;
@@ -2575,6 +2605,14 @@ static void ecm_front_end_ipv4_connection_udp_front_end_accelerate(struct ecm_fr
 			nircm->dscp_rule.return_dscp);
 
 	/*
+	 * Ref the connection before issuing an NSS rule
+	 * This ensures that when the NSS responds to the command - which may even be immediately -
+	 * the callback function can trust the correct ref was taken for its purpose.
+	 * NOTE: remember that this will also implicitly hold the feci.
+	 */
+	ecm_db_connection_ref(fecui->ci);
+
+	/*
 	 * Call the rule create function
 	 */
 	nss_tx_status = nss_ipv4_tx(ecm_front_end_ipv4_nss_ipv4_mgr, &nim);
@@ -2585,6 +2623,11 @@ static void ecm_front_end_ipv4_connection_udp_front_end_accelerate(struct ecm_fr
 		spin_unlock_bh(&fecui->lock);
 		return;
 	}
+
+	/*
+	 * Release that ref!
+	 */
+	ecm_db_connection_deref(fecui->ci);
 
 	/*
 	 * TX failed
@@ -2615,7 +2658,7 @@ udp_accel_bad_rule:
 
 /*
  * ecm_front_end_ipv4_connection_udp_destroy_callback()
- *	Callback for handling create ack/nack calls.
+ *	Callback for handling destroy ack/nack calls.
  */
 static void ecm_front_end_ipv4_connection_udp_destroy_callback(void *app_data, struct nss_ipv4_msg *nim)
 {
@@ -2641,6 +2684,13 @@ static void ecm_front_end_ipv4_connection_udp_destroy_callback(void *app_data, s
 		DEBUG_TRACE("%p: destroy callback, connection not found, serial: %u\n", nim, serial);
 		return;
 	}
+
+	/*
+	 * Release ref held for this ack/nack response.
+	 * NOTE: It's okay to do this here, ci won't go away, because the ci is held as
+	 * a result of the ecm_db_connection_serial_find_and_ref()
+	 */
+	ecm_db_connection_deref(ci);
 
 	/*
 	 * Get the front end instance
@@ -2682,16 +2732,12 @@ static void ecm_front_end_ipv4_connection_udp_destroy_callback(void *app_data, s
 	}
 
 	/*
-	 * If we have defunct flag set for this connection, set the accel mode and
-	 * release the extra connection reference.
+	 * If connection became defunct then set mode so that no further accel/decel attempts occur.
 	 */
-	if (!fecui->is_defunct) {
-		spin_unlock_bh(&fecui->lock);
-	} else {
+	if (fecui->is_defunct) {
 		fecui->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DEFUNCT;
-		spin_unlock_bh(&fecui->lock);
-		ecm_db_connection_deref(ci);
 	}
+	spin_unlock_bh(&fecui->lock);
 
 	/*
 	 * UDP acceleration ends
@@ -2787,6 +2833,12 @@ static void ecm_front_end_ipv4_connection_udp_front_end_decelerate(struct ecm_fr
 			&nirdm->tuple.return_ip, nirdm->tuple.return_ident);
 
 	/*
+	 * Take a ref to the feci->ci so that it will persist until we get a response from the NSS.
+	 * NOTE: This will implicitly hold the feci too.
+	 */
+	ecm_db_connection_ref(fecui->ci);
+
+	/*
 	 * Destroy the NSS connection cache entry.
 	 */
 	nss_tx_status = nss_ipv4_tx(ecm_front_end_ipv4_nss_ipv4_mgr, &nim);
@@ -2796,6 +2848,11 @@ static void ecm_front_end_ipv4_connection_udp_front_end_decelerate(struct ecm_fr
 		spin_unlock_bh(&fecui->lock);
 		return;
 	}
+
+	/*
+	 * Release the ref take, NSS driver did not accept our command.
+	 */
+	ecm_db_connection_deref(fecui->ci);
 
 	/*
 	 * TX failed
@@ -2812,7 +2869,7 @@ static void ecm_front_end_ipv4_connection_udp_front_end_decelerate(struct ecm_fr
 
 /*
  * ecm_front_end_ipv4_connection_udp_defunct_callback()
- *	Callback to be called when a UDP connection is defuncted.
+ *	Callback to be called when a UDP connection has become defunct.
  */
 static void ecm_front_end_ipv4_connection_udp_defunct_callback(void *arg)
 {
@@ -2841,23 +2898,28 @@ static void ecm_front_end_ipv4_connection_udp_defunct_callback(void *arg)
 	}
 
 	/*
-	 * If the connection is not in decel or decel pending mode, we don't need to defunct the connection.
-	 * Just mark the connection mode to fail defunct.
+	 * If the connection is decel then ensure it will not attempt accel while defunct.
 	 */
-	if ((fecui->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_DECEL)
-			|| (fecui->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_DECEL_PENDING)) {
+	if (fecui->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_DECEL) {
 		fecui->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DEFUNCT;
 		spin_unlock_bh(&fecui->lock);
 		return;
 	}
 
 	/*
+	 * If the connection is decel pending then decel operation is in progress anyway.
+	 */
+	if (fecui->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_DECEL_PENDING) {
+		spin_unlock_bh(&fecui->lock);
+		return;
+	}
+
+	/*
 	 * If none of the cases mathes above, this means the connection is in one of the
-	 * accel modes (accel or accel_pending), ref the connection instance before decelerating
-	 * to keep it in the database until we get the deceleration response.
+	 * accel modes (accel or accel_pending) so we force a deceleration.
+	 * NOTE: If the mode is accel pending then the decel will be actioned when that is completed.
 	 */
 	spin_unlock_bh(&fecui->lock);
-	ecm_db_connection_ref(fecui->ci);
 	ecm_front_end_ipv4_connection_udp_front_end_decelerate(feci);
 }
 
@@ -3161,10 +3223,6 @@ static void ecm_front_end_ipv4_sit_set_peer(struct ecm_front_end_ipv4_connection
 /*
  * ecm_front_end_ipv4_connection_non_ported_callback()
  *	Callback for handling create ack/nack calls.
- *
- * TODO: Since we don't want to hold data structure reference across multiple heterogenous
- * CPUs, we should use the app_data as the sequence # and do a fast look up rather than
- * a 5-tuple lookup.
  */
 static void ecm_front_end_ipv4_connection_non_ported_callback(void *app_data, struct nss_ipv4_msg *nim)
 {
@@ -3190,6 +3248,13 @@ static void ecm_front_end_ipv4_connection_non_ported_callback(void *app_data, st
 		DEBUG_TRACE("%p: create callback, connection not found, serial: %u\n", nim, serial);
 		return;
 	}
+
+	/*
+	 * Release ref held for this ack/nack response.
+	 * NOTE: It's okay to do this here, ci won't go away, because the ci is held as
+	 * a result of the ecm_db_connection_serial_find_and_ref()
+	 */
+	ecm_db_connection_deref(ci);
 
 	/*
 	 * Get the front end instance
@@ -3238,16 +3303,12 @@ static void ecm_front_end_ipv4_connection_non_ported_callback(void *app_data, st
 		fecnpi->base.stats.decelerate_pending = false;
 
 		/*
-		 * If we have defunct flag set for this connection, set the accel mode and
-		 * release the extra connection reference.
+		 * If connection is now defunct then set mode to ensure no further accel attempts occur
 		 */
-		if (!fecnpi->is_defunct) {
-			spin_unlock_bh(&fecnpi->lock);
-		} else {
+		if (fecnpi->is_defunct) {
 			fecnpi->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DEFUNCT;
-			spin_unlock_bh(&fecnpi->lock);
-			ecm_db_connection_deref(ci);
 		}
+		spin_unlock_bh(&fecnpi->lock);
 
 		/*
 		 * Release the connection.
@@ -3354,7 +3415,7 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_accelerate(struct
 	 */
 	DEBUG_INFO("%p: Accel conn: %p\n", fecnpi, fecnpi->ci);
 	spin_lock_bh(&fecnpi->lock);
-	if (fecnpi->accel_mode <= ECM_FRONT_END_ACCELERATION_MODE_FAIL_DENIED) {
+	if (ECM_FRONT_END_ACCELERATION_FAILED(fecnpi->accel_mode)) {
 		spin_unlock_bh(&fecnpi->lock);
 		DEBUG_TRACE("%p: accel %p denied\n", fecnpi, fecnpi->ci);
 		return;
@@ -3945,6 +4006,14 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_accelerate(struct
 			nircm->dscp_rule.return_dscp);
 
 	/*
+	 * Ref the connection before issuing an NSS rule
+	 * This ensures that when the NSS responds to the command - which may even be immediately -
+	 * the callback function can trust the correct ref was taken for its purpose.
+	 * NOTE: remember that this will also implicitly hold the feci.
+	 */
+	ecm_db_connection_ref(fecnpi->ci);
+
+	/*
 	 * Call the rule create function
 	 */
 	nss_tx_status = nss_ipv4_tx(ecm_front_end_ipv4_nss_ipv4_mgr, &nim);
@@ -3955,6 +4024,11 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_accelerate(struct
 		spin_unlock_bh(&fecnpi->lock);
 		return;
 	}
+
+	/*
+	 * Release that ref!
+	 */
+	ecm_db_connection_deref(fecnpi->ci);
 
 	/*
 	 * TX failed
@@ -3985,7 +4059,7 @@ non_ported_accel_bad_rule:
 
 /*
  * ecm_front_end_ipv4_connection_non_ported_destroy_callback()
- *	Callback for handling create ack/nack calls.
+ *	Callback for handling destroy ack/nack calls.
  */
 static void ecm_front_end_ipv4_connection_non_ported_destroy_callback(void *app_data, struct nss_ipv4_msg *nim)
 {
@@ -4011,6 +4085,13 @@ static void ecm_front_end_ipv4_connection_non_ported_destroy_callback(void *app_
 		DEBUG_TRACE("%p: destroy callback, connection not found, serial: %u\n", nim, serial);
 		return;
 	}
+
+	/*
+	 * Release ref held for this ack/nack response.
+	 * NOTE: It's okay to do this here, ci won't go away, because the ci is held as
+	 * a result of the ecm_db_connection_serial_find_and_ref()
+	 */
+	ecm_db_connection_deref(ci);
 
 	/*
 	 * Get the front end instance
@@ -4052,16 +4133,12 @@ static void ecm_front_end_ipv4_connection_non_ported_destroy_callback(void *app_
 	}
 
 	/*
-	 * If we have defunct flag set for this connection, set the accel mode and
-	 * release the extra connection reference.
+	 * If connection became defunct then set mode so that no further accel/decel attempts occur.
 	 */
-	if (!fecnpi->is_defunct) {
-		spin_unlock_bh(&fecnpi->lock);
-	} else {
+	if (fecnpi->is_defunct) {
 		fecnpi->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DEFUNCT;
-		spin_unlock_bh(&fecnpi->lock);
-		ecm_db_connection_deref(ci);
 	}
+	spin_unlock_bh(&fecnpi->lock);
 
 	/*
 	 * NON_PORTED acceleration ends
@@ -4168,6 +4245,12 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_decelerate(struct
 			&nirdm->tuple.return_ip, nirdm->tuple.return_ident);
 
 	/*
+	 * Take a ref to the feci->ci so that it will persist until we get a response from the NSS.
+	 * NOTE: This will implicitly hold the feci too.
+	 */
+	ecm_db_connection_ref(fecnpi->ci);
+
+	/*
 	 * Destroy the NSS connection cache entry.
 	 */
 	nss_tx_status = nss_ipv4_tx(ecm_front_end_ipv4_nss_ipv4_mgr, &nim);
@@ -4177,6 +4260,11 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_decelerate(struct
 		spin_unlock_bh(&fecnpi->lock);
 		return;
 	}
+
+	/*
+	 * Release the ref take, NSS driver did not accept our command.
+	 */
+	ecm_db_connection_deref(fecnpi->ci);
 
 	/*
 	 * TX failed
@@ -4193,7 +4281,7 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_decelerate(struct
 
 /*
  * ecm_front_end_ipv4_connection_non_ported_defunct_callback()
- *	Callback to be called when a non-ported connection is defuncted.
+ *	Callback to be called when a non-ported connection has become defunct.
  */
 static void ecm_front_end_ipv4_connection_non_ported_defunct_callback(void *arg)
 {
@@ -4222,23 +4310,28 @@ static void ecm_front_end_ipv4_connection_non_ported_defunct_callback(void *arg)
 	}
 
 	/*
-	 * If the connection is not in decel or decel pending mode, we don't need to defunct the connection.
-	 * Just mark the connection mode to fail defunct.
+	 * If the connection is decel then ensure it will not attempt accel while defunct.
 	 */
-	if ((fecnpi->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_DECEL)
-			|| (fecnpi->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_DECEL_PENDING)) {
+	if (fecnpi->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_DECEL) {
 		fecnpi->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DEFUNCT;
 		spin_unlock_bh(&fecnpi->lock);
 		return;
 	}
 
 	/*
+	 * If the connection is decel pending then decel operation is in progress anyway.
+	 */
+	if (fecnpi->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_DECEL_PENDING) {
+		spin_unlock_bh(&fecnpi->lock);
+		return;
+	}
+
+	/*
 	 * If none of the cases mathes above, this means the connection is in one of the
-	 * accel modes (accel or accel_pending), ref the connection instance before decelerating
-	 * to keep it in the database until we get the deceleration response.
+	 * accel modes (accel or accel_pending) so we force a deceleration.
+	 * NOTE: If the mode is accel pending then the decel will be actioned when that is completed.
 	 */
 	spin_unlock_bh(&fecnpi->lock);
-	ecm_db_connection_ref(fecnpi->ci);
 	ecm_front_end_ipv4_connection_non_ported_front_end_decelerate(feci);
 }
 
