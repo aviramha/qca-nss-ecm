@@ -640,9 +640,9 @@ struct ecm_classifier_dscp_instance *ecm_classifier_dscp_instance_alloc(struct e
 EXPORT_SYMBOL(ecm_classifier_dscp_instance_alloc);
 
 /*
- * ecm_classifier_dscp_rule_get_enabled()
+ * ecm_classifier_dscp_get_enabled()
  */
-static ssize_t ecm_classifier_dscp_rule_get_enabled(struct sys_device *dev,
+static ssize_t ecm_classifier_dscp_get_enabled(struct sys_device *dev,
 				  struct sysdev_attribute *attr,
 				  char *buf)
 {
@@ -662,9 +662,9 @@ static ssize_t ecm_classifier_dscp_rule_get_enabled(struct sys_device *dev,
 }
 
 /*
- * ecm_classifier_dscp_rule_set_enabled()
+ * ecm_classifier_dscp_set_enabled()
  */
-static ssize_t ecm_classifier_dscp_rule_set_enabled(struct sys_device *dev,
+static ssize_t ecm_classifier_dscp_set_enabled(struct sys_device *dev,
 				  struct sysdev_attribute *attr,
 				  const char *buf, size_t count)
 {
@@ -691,12 +691,12 @@ static ssize_t ecm_classifier_dscp_rule_set_enabled(struct sys_device *dev,
 }
 
 /*
- * SysFS attributes for the user_rule classifier itself.
+ * SysFS attributes for the dscp classifier itself.
  */
-static SYSDEV_ATTR(enabled, 0644, ecm_classifier_dscp_rule_get_enabled, ecm_classifier_dscp_rule_set_enabled);
+static SYSDEV_ATTR(enabled, 0644, ecm_classifier_dscp_get_enabled, ecm_classifier_dscp_set_enabled);
 
 /*
- * SysFS class of the ubicom user_rule classifier
+ * SysFS class of the ubicom dscp classifier
  * SysFS control points can be found at /sys/devices/system/ecm_classifier_dscp/ecm_classifier_dscpX/
  */
 static struct sysdev_class ecm_classifier_dscp_sysclass = {
@@ -704,9 +704,9 @@ static struct sysdev_class ecm_classifier_dscp_sysclass = {
 };
 
 /*
- * ecm_classifier_dscp_rules_init()
+ * ecm_classifier_dscp_init()
  */
-int ecm_classifier_dscp_rules_init(void)
+int ecm_classifier_dscp_init(void)
 {
 	int result;
 	DEBUG_INFO("DSCP classifier Module init\n");
@@ -752,12 +752,12 @@ classifier_task_cleanup_1:
 
 	return result;
 }
-EXPORT_SYMBOL(ecm_classifier_dscp_rules_init);
+EXPORT_SYMBOL(ecm_classifier_dscp_init);
 
 /*
- * ecm_classifier_dscp_rules_exit()
+ * ecm_classifier_dscp_exit()
  */
-void ecm_classifier_dscp_rules_exit(void)
+void ecm_classifier_dscp_exit(void)
 {
 	DEBUG_INFO("DSCP classifier Module exit\n");
 
@@ -768,4 +768,4 @@ void ecm_classifier_dscp_rules_exit(void)
 	sysdev_unregister(&ecm_classifier_dscp_sys_dev);
 	sysdev_class_unregister(&ecm_classifier_dscp_sysclass);
 }
-EXPORT_SYMBOL(ecm_classifier_dscp_rules_exit);
+EXPORT_SYMBOL(ecm_classifier_dscp_exit);

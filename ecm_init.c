@@ -62,6 +62,9 @@ extern int ecm_conntrack_notifier_init(void);
 extern void ecm_conntrack_notifier_stop(int);
 extern void ecm_conntrack_notifier_exit(void);
 
+extern int ecm_classifier_dscp_init(void);
+extern void ecm_classifier_dscp_exit(void);
+
 /*
  * ecm_init()
  */
@@ -112,6 +115,11 @@ static int __init ecm_init(void)
 	}
 #endif
 
+	ret = ecm_classifier_dscp_init();
+	if (0 != ret) {
+		goto err_cls_dscp;
+	}
+
 	ret = ecm_interface_init();
 	if (0 != ret) {
 		goto err_iface;
@@ -149,6 +157,8 @@ err_fe_ipv4:
 err_bond:
 	ecm_interface_exit();
 err_iface:
+	ecm_classifier_dscp_exit();
+err_cls_dscp:
 #ifdef ECM_CLASSIFIER_HYFI_ENABLE
 	ecm_classifier_hyfi_rules_exit();
 err_cls_hyfi:
@@ -203,6 +213,8 @@ static void __exit ecm_exit(void)
 	ecm_bond_notifier_exit();
 	printk(KERN_INFO "exit interface\n");
 	ecm_interface_exit();
+	printk(KERN_INFO "exit dscp classifier\n");
+	ecm_classifier_dscp_exit();
 #ifdef ECM_CLASSIFIER_HYFI_ENABLE
 	printk(KERN_INFO "exit hyfi classifier\n");
 	ecm_classifier_hyfi_rules_exit();
