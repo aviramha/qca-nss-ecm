@@ -481,7 +481,7 @@ static struct ecm_db_mapping_instance *ecm_front_end_ipv4_mapping_establish_and_
  */
 static void ecm_front_end_ipv4_connection_tcp_callback(void *app_data, struct nss_ipv4_msg *nim)
 {
-	struct nss_ipv4_rule_create_msg *nircm = &nim->msg.rule_create;
+	struct nss_ipv4_rule_create_msg * __attribute__((unused)) nircm = &nim->msg.rule_create;
 	uint32_t serial = (uint32_t)app_data;
 	struct ecm_db_connection_instance *ci;
 	struct ecm_front_end_connection_instance *feci;
@@ -1351,7 +1351,7 @@ tcp_accel_bad_rule:
  */
 static void ecm_front_end_ipv4_connection_tcp_destroy_callback(void *app_data, struct nss_ipv4_msg *nim)
 {
-	struct nss_ipv4_rule_destroy_msg *nirdm = &nim->msg.rule_destroy;
+	struct nss_ipv4_rule_destroy_msg * __attribute__((unused))nirdm = &nim->msg.rule_destroy;
 	uint32_t serial = (uint32_t)app_data;
 	struct ecm_db_connection_instance *ci;
 	struct ecm_front_end_connection_instance *feci;
@@ -1841,7 +1841,7 @@ static struct ecm_front_end_ipv4_connection_tcp_instance *ecm_front_end_ipv4_con
  */
 static void ecm_front_end_ipv4_connection_udp_callback(void *app_data, struct nss_ipv4_msg *nim)
 {
-	struct nss_ipv4_rule_create_msg *nircm = &nim->msg.rule_create;
+	struct nss_ipv4_rule_create_msg *__attribute__((unused))nircm = &nim->msg.rule_create;
 	uint32_t serial = (uint32_t)app_data;
 	struct ecm_db_connection_instance *ci;
 	struct ecm_front_end_connection_instance *feci;
@@ -2662,7 +2662,7 @@ udp_accel_bad_rule:
  */
 static void ecm_front_end_ipv4_connection_udp_destroy_callback(void *app_data, struct nss_ipv4_msg *nim)
 {
-	struct nss_ipv4_rule_destroy_msg *nirdm = &nim->msg.rule_destroy;
+	struct nss_ipv4_rule_destroy_msg *__attribute__((unused))nirdm = &nim->msg.rule_destroy;
 	uint32_t serial = (uint32_t)app_data;
 	struct ecm_db_connection_instance *ci;
 	struct ecm_front_end_connection_instance *feci;
@@ -3226,7 +3226,7 @@ static void ecm_front_end_ipv4_sit_set_peer(struct ecm_front_end_ipv4_connection
  */
 static void ecm_front_end_ipv4_connection_non_ported_callback(void *app_data, struct nss_ipv4_msg *nim)
 {
-	struct nss_ipv4_rule_create_msg *nircm = &nim->msg.rule_create;
+	struct nss_ipv4_rule_create_msg *__attribute__((unused))nircm = &nim->msg.rule_create;
 	uint32_t serial = (uint32_t)app_data;
 	struct ecm_db_connection_instance *ci;
 	struct ecm_front_end_connection_instance *feci;
@@ -4063,7 +4063,7 @@ non_ported_accel_bad_rule:
  */
 static void ecm_front_end_ipv4_connection_non_ported_destroy_callback(void *app_data, struct nss_ipv4_msg *nim)
 {
-	struct nss_ipv4_rule_destroy_msg *nirdm = &nim->msg.rule_destroy;
+	struct nss_ipv4_rule_destroy_msg *__attribute__((unused))nirdm = &nim->msg.rule_destroy;
 	uint32_t serial = (uint32_t)app_data;
 	struct ecm_db_connection_instance *ci;
 	struct ecm_front_end_connection_instance *feci;
@@ -5023,7 +5023,7 @@ static unsigned int ecm_front_end_ipv4_tcp_process(struct net_device *out_dev, s
 		}
 
 		/*
-		 * Every connection also needs a default classifier which is considered 'special'
+		 * Every connection also needs a default classifier which is considered 'special' to be assigned
 		 */
 		dci = ecm_classifier_default_instance_alloc(nci, IPPROTO_TCP, ecm_dir, src_port, dest_port);
 		if (!dci) {
@@ -5040,6 +5040,7 @@ static unsigned int ecm_front_end_ipv4_tcp_process(struct net_device *out_dev, s
 			DEBUG_WARN("Failed to allocate default classifier\n");
 			return NF_ACCEPT;
 		}
+		ecm_db_connection_classifier_assign(nci, (struct ecm_classifier_instance *)dci);
 
 		/*
 		 * Every connection starts with a full complement of classifiers assigned.
@@ -5099,7 +5100,7 @@ static unsigned int ecm_front_end_ipv4_tcp_process(struct net_device *out_dev, s
 			 * Add the new connection we created into the database
 			 * NOTE: assign to a short timer group for now - it is the assigned classifiers responsibility to do this
 			 */
-			ecm_db_connection_add(nci, feci, dci, src_mi, dest_mi, src_nat_mi, dest_nat_mi,
+			ecm_db_connection_add(nci, feci, src_mi, dest_mi, src_nat_mi, dest_nat_mi,
 					src_ni, dest_ni, src_nat_ni, dest_nat_ni,
 					IPPROTO_TCP, ecm_dir,
 					NULL /* final callback */,
@@ -5766,6 +5767,7 @@ static unsigned int ecm_front_end_ipv4_udp_process(struct net_device *out_dev, s
 			DEBUG_WARN("Failed to allocate default classifier\n");
 			return NF_ACCEPT;
 		}
+		ecm_db_connection_classifier_assign(nci, (struct ecm_classifier_instance *)dci);
 
 		/*
 		 * Every connection starts with a full complement of classifiers assigned.
@@ -5825,7 +5827,7 @@ static unsigned int ecm_front_end_ipv4_udp_process(struct net_device *out_dev, s
 			 * Add the new connection we created into the database
 			 * NOTE: assign to a short timer group for now - it is the assigned classifiers responsibility to do this
 			 */
-			ecm_db_connection_add(nci, feci, dci, src_mi, dest_mi, src_nat_mi, dest_nat_mi,
+			ecm_db_connection_add(nci, feci, src_mi, dest_mi, src_nat_mi, dest_nat_mi,
 					src_ni, dest_ni, src_nat_ni, dest_nat_ni,
 					IPPROTO_UDP, ecm_dir,
 					NULL /* final callback */,
@@ -6443,6 +6445,7 @@ static unsigned int ecm_front_end_ipv4_non_ported_process(struct net_device *out
 			DEBUG_WARN("Failed to allocate default classifier\n");
 			return NF_ACCEPT;
 		}
+		ecm_db_connection_classifier_assign(nci, (struct ecm_classifier_instance *)dci);
 
 		/*
 		 * Every connection starts with a full complement of classifiers assigned.
@@ -6502,7 +6505,7 @@ static unsigned int ecm_front_end_ipv4_non_ported_process(struct net_device *out
 			 * Add the new connection we created into the database
 			 * NOTE: assign to a short timer group for now - it is the assigned classifiers responsibility to do this
 			 */
-			ecm_db_connection_add(nci, feci, dci, src_mi, dest_mi, src_nat_mi, dest_nat_mi,
+			ecm_db_connection_add(nci, feci, src_mi, dest_mi, src_nat_mi, dest_nat_mi,
 					src_ni, dest_ni, src_nat_ni, dest_nat_ni,
 					protocol, ecm_dir,
 					NULL /* final callback */,

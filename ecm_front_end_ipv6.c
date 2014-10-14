@@ -5300,6 +5300,7 @@ static unsigned int ecm_front_end_ipv6_tcp_process(struct net_device *out_dev,
 			DEBUG_WARN("Failed to allocate default classifier\n");
 			return NF_ACCEPT;
 		}
+		ecm_db_connection_classifier_assign(nci, (struct ecm_classifier_instance *)dci);
 
 		/*
 		 * Every connection starts with a full complement of classifiers assigned.
@@ -5355,7 +5356,7 @@ static unsigned int ecm_front_end_ipv6_tcp_process(struct net_device *out_dev,
 			 * Add the new connection we created into the database
 			 * NOTE: assign to a short timer group for now - it is the assigned classifiers responsibility to do this
 			 */
-			ecm_db_connection_add(nci, feci, dci, src_mi, dest_mi, src_mi, dest_mi,
+			ecm_db_connection_add(nci, feci, src_mi, dest_mi, src_mi, dest_mi,
 					src_ni, dest_ni, src_ni, dest_ni,
 					IPPROTO_TCP, ecm_dir,
 					NULL /* final callback */,
@@ -5871,6 +5872,7 @@ static unsigned int ecm_front_end_ipv6_udp_process(struct net_device *out_dev,
 			DEBUG_WARN("Failed to allocate default classifier\n");
 			return NF_ACCEPT;
 		}
+		ecm_db_connection_classifier_assign(nci, (struct ecm_classifier_instance *)dci);
 
 		/*
 		 * Every connection starts with a full complement of classifiers assigned.
@@ -5926,7 +5928,7 @@ static unsigned int ecm_front_end_ipv6_udp_process(struct net_device *out_dev,
 			 * Add the new connection we created into the database
 			 * NOTE: assign to a short timer group for now - it is the assigned classifiers responsibility to do this
 			 */
-			ecm_db_connection_add(nci, feci, dci, src_mi, dest_mi, src_mi, dest_mi,
+			ecm_db_connection_add(nci, feci, src_mi, dest_mi, src_mi, dest_mi,
 					src_ni, dest_ni, src_ni, dest_ni,
 					IPPROTO_UDP, ecm_dir,
 					NULL /* final callback */,
@@ -6398,6 +6400,7 @@ static unsigned int ecm_front_end_ipv6_non_ported_process(struct net_device *out
 			DEBUG_WARN("Failed to allocate default classifier\n");
 			return NF_ACCEPT;
 		}
+		ecm_db_connection_classifier_assign(nci, (struct ecm_classifier_instance *)dci);
 
 		/*
 		 * Every connection starts with a full complement of classifiers assigned.
@@ -6453,7 +6456,7 @@ static unsigned int ecm_front_end_ipv6_non_ported_process(struct net_device *out
 			 * Add the new connection we created into the database
 			 * NOTE: assign to a short timer group for now - it is the assigned classifiers responsibility to do this
 			 */
-			ecm_db_connection_add(nci, feci, dci, src_mi, dest_mi, src_mi, dest_mi,
+			ecm_db_connection_add(nci, feci, src_mi, dest_mi, src_mi, dest_mi,
 					src_ni, dest_ni, src_ni, dest_ni,
 					protocol, ecm_dir,
 					NULL /* final callback */,
