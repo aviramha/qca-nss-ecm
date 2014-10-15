@@ -289,7 +289,7 @@ hyfi_classifier_out:
 	 * Compute the hash
 	 */
 	if (unlikely(hyfi_hash_skbuf(skb, &chfi->flow.hash, &chfi->flow.flag, &chfi->flow.priority, &chfi->flow.seq))) {
-		goto hyfi_classifier_out;
+		goto hyfi_classifier_done;
 	}
 
 	chfi->flow.ecm_serial = chfi->ci_serial;
@@ -423,7 +423,7 @@ static void ecm_classifier_hyfi_sync_to_v6(struct ecm_classifier_instance *aci, 
 	ret = hyfi_ecm_update_stats(&chfi->flow, num_bytes, num_packets);
 
 	if (ret < 0) {
-		printk("%s: Fatal error\n", __func__);
+		DEBUG_ERROR("%s: Fatal error\n", __func__);
 		return;
 	}
 
