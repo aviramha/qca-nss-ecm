@@ -77,6 +77,7 @@
 #define ECM_DB_NODE_INSTANCE_MAGIC 0x3312
 #define ECM_DB_IFACE_INSTANCE_MAGIC 0xAEF1
 #define ECM_DB_STATE_FILE_INSTANCE_MAGIC 0xB3FE
+#define ECM_DB_CLASSIFIER_TYPE_ASSIGNMENT_MAGIC 0xAEF4
 
 /*
  * Global lists.
@@ -98,7 +99,7 @@ static struct ecm_db_connection_instance *ecm_db_connection_table[ECM_DB_CONNECT
 static int ecm_db_connection_table_lengths[ECM_DB_CONNECTION_HASH_SLOTS];
 						/* Tracks how long each chain is */
 static int ecm_db_connection_count = 0;		/* Number of connections allocated */
-static int ecm_db_connection_serial = 0;		/* Serial number - ensures each connection has a unique serial number.
+static int ecm_db_connection_serial = 0;	/* Serial number - ensures each connection has a unique serial number.
 						 * Serial numbers are used mainly by classifiers that keep their own state
 						 * and can 'link' their state to the right connection using a serial number.
 						 * In the XML state files a key can be set up on serial for fast association between
@@ -436,6 +437,29 @@ static struct ecm_db_timer_group ecm_db_timer_groups[ECM_DB_TIMER_GROUPS_MAX];
 static struct timer_list ecm_db_timer;				/* Timer to drive timer groups */
 
 /*
+ * Classifier assignments
+ *
+ * Each connection has a list of classifier instances that are assigned to it.  Only one instance of each type may be assigned to a connection at any time.
+ * These structures store, in a list, all connections that are assigned to a TYPE of classifier.
+ * This allows iterating of all connections that are currently assigned to a classifier TYPE.
+ */
+struct ecm_db_connection_classifier_type_assignment {
+	struct ecm_db_connection_instance *next;	/* Next connection assigned to a classifier of this type */
+	struct ecm_db_connection_instance *prev;	/* Previous connection assigned to a classifier of this type */
+	int iteration_count;				/* >0 if something is examining this list entry and it may not be unlinked.  The connection will persist. */
+	bool pending_unassign;				/* True when the connection has been unassigned from the type, when iteration_count drops to 0 it may be removed from the list */
+#if (DEBUG_LEVEL > 0)
+	uint16_t magic;
+#endif
+};
+struct ecm_db_connection_classifier_type_assignment_list {
+	struct ecm_db_connection_instance *type_assignments_list;
+							/* Lists of connections assigned to this type of classifier */
+	int32_t type_assignment_count;			/* Number of connections in the list */
+} ecm_db_connection_classifier_type_assignments[ECM_CLASSIFIER_TYPES];
+							/* Each classifier type has a list of connections that are assigned to classifier instances of that type */
+
+/*
  * struct ecm_db_connection_instance
  */
 struct ecm_db_connection_instance {
@@ -567,7 +591,6 @@ struct ecm_db_connection_instance {
 	/*
 	 * Classifiers attached to this connection
 	 */
-	struct ecm_classifier_default_instance *dci;		/* The default classifier */
 	struct ecm_classifier_instance *assignments;		/* A list of all classifiers that are still assigned to this connection.
 								 * When a connection is created, instances of every type of classifier are assigned to the connection.
 								 * Classifiers are added in ascending order of priority - so the most important processes a packet last.
@@ -577,6 +600,9 @@ struct ecm_db_connection_instance {
 								/* All assignments are also recorded in this array, since there can be only one of each type, this array allows
 								 * rapid retrieval of a classifier type, saving having to iterate the assignments list.
 								 */
+	struct ecm_db_connection_classifier_type_assignment type_assignment[ECM_CLASSIFIER_TYPES];
+								/* Each classifier TYPE has a list of connections that have a classifier instance (of that type) assigned to it */
+
 	uint16_t classifier_generation;				/* Used to detect when a re-evaluation of this connection is necessary */
 	struct ecm_front_end_connection_instance *feci;		/* Front end instance specific to this connection */
 
@@ -584,7 +610,7 @@ struct ecm_db_connection_instance {
 	ecm_db_connection_final_callback_t final;		/* Callback to owner when object is destroyed */
 	void *arg;						/* Argument returned to owner in callbacks */
 
-	uint32_t serial;					/* Serial number for the connection - unique for run lifetime */
+	uint32_t serial;					/* RO: Serial number for the connection - unique for run lifetime */
 	uint32_t flags;
 	int refs;						/* Integer to trap we never go negative */
 #if (DEBUG_LEVEL > 0)
@@ -671,26 +697,38 @@ static int ecm_db_dev_major_id = 0;			/* Major ID of registered char dev from wh
 #define ECM_DB_STATE_FILE_OUTPUT_NODES_CHAIN 256
 #define ECM_DB_STATE_FILE_OUTPUT_INTERFACES_CHAIN 512
 #define ECM_DB_STATE_FILE_OUTPUT_PROTOCOL_COUNTS 1024
+#define ECM_DB_STATE_FILE_OUTPUT_CLASSIFIER_TYPE_ASSIGNMENTS 2048
+
+/*
+ * Assistive flags for classifier connection type assignments
+ */
+#define ECM_DB_STATE_FILE_CTA_FLAG_ELEMENT_START_UNWRITTEN 1
+#define ECM_DB_STATE_FILE_CTA_FLAG_CONTENT_UNWRITTEN 2
+#define ECM_DB_STATE_FILE_CTA_FLAG_ELEMENT_END_UNWRITTEN 4
 
 /*
  * struct ecm_db_state_file_instance
  *	Structure used as state per open instance of our db state file
  */
 struct ecm_db_state_file_instance {
-	int output_mask;
-	struct ecm_db_connection_instance *ci;
-	struct ecm_db_mapping_instance *mi;
-	struct ecm_db_host_instance *hi;
-	struct ecm_db_node_instance *ni;
-	struct ecm_db_iface_instance *ii;
-	int connection_hash_index;
-	int mapping_hash_index;
-	int host_hash_index;
-	int node_hash_index;
-	int iface_hash_index;
-	int protocol;
-	bool doc_start_written;
-	bool doc_end_written;
+	int output_mask;				/* The content types wanted by the user */
+	struct ecm_db_connection_instance *ci;		/* All connections list iterator */
+	struct ecm_db_mapping_instance *mi;		/* All mappings list iterator */
+	struct ecm_db_host_instance *hi;		/* All hosts list iterator */
+	struct ecm_db_node_instance *ni;		/* All nodes list iterator */
+	struct ecm_db_iface_instance *ii;		/* All interfaces list iterator */
+	struct ecm_db_connection_instance *classifier_type_assignments[ECM_CLASSIFIER_TYPES];
+							/* Classifier type connection assignments iterator, one for each classifier type */
+	int classifier_type_assignments_flags[ECM_CLASSIFIER_TYPES];
+							/* Classifier type connection assignments flags to assist the iteration */
+	int connection_hash_index;			/* Connection hash table lengths iterator */
+	int mapping_hash_index;				/* Mapping hash table lengths iterator */
+	int host_hash_index;				/* Host hash table lengths iterator */
+	int node_hash_index;				/* Node hash table lengths iterator */
+	int iface_hash_index;				/* Interface hash table lengths iterator */
+	int protocol;					/* Protocol connection count iterator */
+	bool doc_start_written;				/* Has xml doc opening element been written? */
+	bool doc_end_written;				/* Has xml doc closing element been written? */
 	char msg_buffer[ECM_DB_STATE_FILE_BUFFER_SIZE];	/* Used to hold the current state message being output */
 	char *msgp;					/* Points into the msg buffer as we output it piece by piece */
 	int msg_len;					/* Length of the buffer still to be written out */
@@ -1476,6 +1514,15 @@ bool ecm_db_connection_classifier_peek_generation_changed(struct ecm_db_connecti
 EXPORT_SYMBOL(ecm_db_connection_classifier_peek_generation_changed);
 
 /*
+ * _ecm_db_connection_classifier_generation_change()
+ *	Cause a specific connection to be re-generated
+ */
+static void _ecm_db_connection_classifier_generation_change(struct ecm_db_connection_instance *ci)
+{
+	ci->classifier_generation = ecm_db_classifier_generation - 1;
+}
+
+/*
  * ecm_db_connection_classifier_generation_change()
  *	Cause a specific connection to be re-generated
  */
@@ -1484,7 +1531,7 @@ void ecm_db_connection_classifier_generation_change(struct ecm_db_connection_ins
 	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed", ci);
 
 	spin_lock_bh(&ecm_db_lock);
-	ci->classifier_generation = ecm_db_classifier_generation - 1;
+	_ecm_db_connection_classifier_generation_change(ci);
 	spin_unlock_bh(&ecm_db_lock);
 }
 EXPORT_SYMBOL(ecm_db_connection_classifier_generation_change);
@@ -2187,6 +2234,51 @@ struct ecm_db_iface_instance *ecm_db_interface_get_and_ref_next(struct ecm_db_if
 EXPORT_SYMBOL(ecm_db_interface_get_and_ref_next);
 
 /*
+ * _ecm_db_classifier_type_assignment_remove()
+ *	Remove the connection from the classifier type assignment list (of the given type)
+ */
+static void _ecm_db_classifier_type_assignment_remove(struct ecm_db_connection_instance *ci, ecm_classifier_type_t ca_type)
+{
+	struct ecm_db_connection_classifier_type_assignment *ta;
+	struct ecm_db_connection_classifier_type_assignment_list *tal;
+
+	DEBUG_TRACE("%p: Classifier type assignment remove: %d\n", ci, ca_type);
+	ta = &ci->type_assignment[ca_type];
+	DEBUG_CHECK_MAGIC(ta, ECM_DB_CLASSIFIER_TYPE_ASSIGNMENT_MAGIC, "%p: magic failed, ci: %p\n", ta, ci);
+	DEBUG_ASSERT(ta->iteration_count == 0, "%p: iteration count: %d, type: %d\n", ci, ta->iteration_count, ca_type);
+
+	if (ta->next) {
+		struct ecm_db_connection_classifier_type_assignment *tan = &ta->next->type_assignment[ca_type];
+		DEBUG_ASSERT(tan->prev == ci, "Bad list, expecting: %p, got: %p\n", ci, tan->prev);
+		tan->prev = ta->prev;
+	}
+
+	tal = &ecm_db_connection_classifier_type_assignments[ca_type];
+	if (ta->prev) {
+		struct ecm_db_connection_classifier_type_assignment *tap = &ta->prev->type_assignment[ca_type];
+		DEBUG_ASSERT(tap->next == ci, "Bad list, expecting: %p, got: %p\n", ci, tap->next);
+		tap->next = ta->next;
+	} else {
+		/*
+		 * Set new head of list
+		 */
+		DEBUG_ASSERT(tal->type_assignments_list == ci, "Bad head, expecting %p, got %p, type: %d\n", ci, tal->type_assignments_list, ca_type);
+		tal->type_assignments_list = ta->next;
+	}
+	ta->next = NULL;
+	ta->prev = NULL;
+	ta->pending_unassign = false;
+
+	/*
+	 * Decrement assignment count
+	 */
+	tal->type_assignment_count--;
+	DEBUG_ASSERT(tal->type_assignment_count >= 0, "Bad type assignment count: %d, type: %d\n", tal->type_assignment_count, ca_type);
+
+	DEBUG_CLEAR_MAGIC(ta);
+}
+
+/*
  * ecm_db_connection_deref()
  *	Release reference to connection.  Connection is removed from database on final deref and destroyed.
  */
@@ -2218,6 +2310,7 @@ int ecm_db_connection_deref(struct ecm_db_connection_instance *ci)
 		struct ecm_db_iface_instance *iface_to;
 		struct ecm_db_iface_instance *iface_nat_from;
 		struct ecm_db_iface_instance *iface_nat_to;
+		ecm_classifier_type_t ca_type;
 
 		/*
 		 * Remove it from the connection hash table
@@ -2464,6 +2557,22 @@ int ecm_db_connection_deref(struct ecm_db_connection_instance *ci)
 		 */
 		ecm_db_connection_count_by_protocol[ci->protocol]--;
 		DEBUG_ASSERT(ecm_db_connection_count_by_protocol[ci->protocol] >= 0, "%p: Invalid protocol count %d\n", ci, ecm_db_connection_count_by_protocol[ci->protocol]);
+
+		/*
+		 * Unlink from the "assignments by classifier type" lists
+		 * NOTE: We know that the ci is not being iterated in any of these lists because otherwise
+		 * ci would be being held as part of iteration and so we would not be here!
+		 * Equally we know that if the assignments_by_type[] element is non-null then it must also be in the relevant list too.
+		 */
+		for (ca_type = 0; ca_type < ECM_CLASSIFIER_TYPES; ++ca_type) {
+			if (!ci->assignments_by_type[ca_type]) {
+				/*
+				 * No assignment of this type, so would not be in the classifier type assignments list
+				 */
+				continue;
+			}
+			_ecm_db_classifier_type_assignment_remove(ci, ca_type);
+		}
 		spin_unlock_bh(&ecm_db_lock);
 
 		/*
@@ -2502,9 +2611,6 @@ int ecm_db_connection_deref(struct ecm_db_connection_instance *ci)
 		classi->deref(classi);
 	}
 
-	if (ci->dci) {
-		ci->dci->base.deref((struct ecm_classifier_instance *)ci->dci);
-	}
 	if (ci->mapping_from) {
 		ecm_db_mapping_deref(ci->mapping_from);
 	}
@@ -4697,12 +4803,16 @@ static uint32_t ecm_db_timer_groups_check(uint32_t time_now)
  * Only assigned classifiers are in this list, allowing fast retrival of in-order current assignments, avoiding the need to skip over unassigned classifiers.
  * Because there is only one of each type of classifier the classifier is also recorded in an array, the position in which is its type value.
  * This allows fast lookup based on type too.
+ * Further, the connection is recorded in the classifier type assignment array too, this permits iterating of all connections that are assigned to a TYPE of classifier.
  */
 void ecm_db_connection_classifier_assign(struct ecm_db_connection_instance *ci, struct ecm_classifier_instance *new_ca)
 {
 	struct ecm_classifier_instance *ca;
 	struct ecm_classifier_instance *ca_prev;
 	ecm_classifier_type_t new_ca_type;
+	struct ecm_db_connection_classifier_type_assignment *ta;
+	struct ecm_db_connection_classifier_type_assignment_list *tal;
+
 	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed\n", ci);
 
 	/*
@@ -4758,6 +4868,61 @@ void ecm_db_connection_classifier_assign(struct ecm_db_connection_instance *ci, 
 			ci, new_ca_type, new_ca, ci->assignments_by_type[new_ca_type]);
 	ci->assignments_by_type[new_ca_type] = new_ca;
 
+	/*
+	 * Add the connection into the type assignment list too.
+	 */
+	ta = &ci->type_assignment[new_ca_type];
+	if (ta->pending_unassign) {
+		/*
+		 * The connection is pending unassignment / removal from list, but since it has been
+		 * re-assigned to the same type of classifier we can just clear the flag and avoid the removal.
+		 * NOTE: pending_unassign is only ever true if the iteration count is non-zero i.e. iteration is in progress.
+		 */
+		DEBUG_CHECK_MAGIC(ta, ECM_DB_CLASSIFIER_TYPE_ASSIGNMENT_MAGIC, "%p: magic failed, ci: %p", ta, ci);
+		DEBUG_ASSERT(ta->iteration_count != 0, "%p: Bad pending_unassign: type: %d, Iteration count zero\n", ci, new_ca_type);
+		ta->pending_unassign = false;
+		spin_unlock_bh(&ecm_db_lock);
+		return;
+	}
+
+	/*
+	 * iteration_count should be zero as there should not be a duplicate assignment of the same type.
+	 * This is because if iteration_count was non-zero then pending_unassign should have been true.
+	 */
+	DEBUG_ASSERT(ta->iteration_count == 0, "%p: Type: %d, Iteration count not zero: %d\n", ci, new_ca_type, ta->iteration_count);
+
+	/*
+	 * Insert the connection into the classifier type assignment list, at the head
+	 */
+	tal = &ecm_db_connection_classifier_type_assignments[new_ca_type];
+	ta->next = tal->type_assignments_list;
+	ta->prev = NULL;
+
+	/*
+	 * If there is an existing head, it is no longer the head
+	 */
+	if (tal->type_assignments_list) {
+		struct ecm_db_connection_classifier_type_assignment *talh;
+		talh = &tal->type_assignments_list->type_assignment[new_ca_type];
+		talh->prev = ci;
+	}
+
+	/*
+	 * Set new head
+	 */
+	tal->type_assignments_list = ci;
+
+	/*
+	 * Set magic
+	 */
+	DEBUG_SET_MAGIC(ta, ECM_DB_CLASSIFIER_TYPE_ASSIGNMENT_MAGIC);
+
+	/*
+	 * Increment assignment count
+	 */
+	tal->type_assignment_count++;
+	DEBUG_ASSERT(tal->type_assignment_count > 0, "Bad iteration count: %d\n", tal->type_assignment_count);
+
 	spin_unlock_bh(&ecm_db_lock);
 }
 EXPORT_SYMBOL(ecm_db_connection_classifier_assign);
@@ -4780,9 +4945,7 @@ int ecm_db_connection_classifier_assignments_get_and_ref(struct ecm_db_connectio
 	struct ecm_classifier_instance *aci;
 	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed\n", ci);
 
-	aci_count = 1;
-	assignments[0] = (struct ecm_classifier_instance *)ci->dci;
-	ci->dci->base.ref((struct ecm_classifier_instance *)ci->dci);
+	aci_count = 0;
 	spin_lock_bh(&ecm_db_lock);
 	aci = ci->assignments;
 	while (aci) {
@@ -4791,6 +4954,7 @@ int ecm_db_connection_classifier_assignments_get_and_ref(struct ecm_db_connectio
 		aci = aci->ca_next;
 	}
 	spin_unlock_bh(&ecm_db_lock);
+	DEBUG_ASSERT(aci_count >= 1, "%p: Must have at least default classifier!\n", ci);
 	return aci_count;
 }
 EXPORT_SYMBOL(ecm_db_connection_classifier_assignments_get_and_ref);
@@ -4832,10 +4996,14 @@ EXPORT_SYMBOL(ecm_db_connection_assigned_classifier_find_and_ref);
 /*
  * ecm_db_connection_classifier_unassign()
  *	Unassign a classifier
+ *
+ * The default classifier cannot be unassigned.
  */
 void ecm_db_connection_classifier_unassign(struct ecm_db_connection_instance *ci, struct ecm_classifier_instance *cci)
 {
 	ecm_classifier_type_t ca_type;
+	struct ecm_db_connection_classifier_type_assignment *ta;
+
 	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed\n", ci);
 
 	DEBUG_ASSERT(cci->type_get(cci) != ECM_CLASSIFIER_TYPE_DEFAULT, "%p: Cannot unassign default", ci);
@@ -4851,7 +5019,7 @@ void ecm_db_connection_classifier_unassign(struct ecm_db_connection_instance *ci
 
 	/*
 	 * Remove from assignments_by_type
-	 * NOTEL It is possible that in SMP this classifier has already been unassigned.
+	 * NOTE: It is possible that in SMP this classifier has already been unassigned.
 	 */
 	if (ci->assignments_by_type[ca_type] == NULL) {
 		spin_unlock_bh(&ecm_db_lock);
@@ -4872,6 +5040,29 @@ void ecm_db_connection_classifier_unassign(struct ecm_db_connection_instance *ci
 	if (cci->ca_next) {
 		cci->ca_next->ca_prev = cci->ca_prev;
 	}
+
+	/*
+	 * Remove from the classifier type assignment list
+	 */
+	ta = &ci->type_assignment[ca_type];
+	DEBUG_CHECK_MAGIC(ta, ECM_DB_CLASSIFIER_TYPE_ASSIGNMENT_MAGIC, "%p: magic failed, ci: %p", ta, ci);
+	if (ta->iteration_count > 0) {
+		/*
+		 * The list entry is being iterated outside of db lock being held.
+		 * We cannot remove this entry since it would mess up iteration.
+		 * Set the pending flag to be actioned another time
+		 */
+		ta->pending_unassign = true;
+		spin_unlock_bh(&ecm_db_lock);
+		cci->deref(cci);
+		return;
+	}
+
+	/*
+	 * Remove the list entry
+	 */
+	DEBUG_INFO("%p: Remove type assignment: %d\n", ci, ca_type);
+	_ecm_db_classifier_type_assignment_remove(ci, ca_type);
 	spin_unlock_bh(&ecm_db_lock);
 	cci->deref(cci);
 }
@@ -4883,15 +5074,195 @@ EXPORT_SYMBOL(ecm_db_connection_classifier_unassign);
  */
 struct ecm_classifier_default_instance *ecm_db_connection_classifier_default_get_and_ref(struct ecm_db_connection_instance *ci)
 {
+	struct ecm_classifier_default_instance *dci;
 	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed\n", ci);
 
 	/*
 	 * No need to lock this object - it cannot change
 	 */
-	ci->dci->base.ref((struct ecm_classifier_instance *)ci->dci);
-	return ci->dci;
+	dci = (struct ecm_classifier_default_instance *)ci->assignments_by_type[ECM_CLASSIFIER_TYPE_DEFAULT];
+	DEBUG_ASSERT(dci, "%p: No default classifier!\n", ci);
+	dci->base.ref((struct ecm_classifier_instance *)dci);
+	return dci;
 }
 EXPORT_SYMBOL(ecm_db_connection_classifier_default_get_and_ref);
+
+/*
+ * ecm_db_connection_by_classifier_type_assignment_get_and_ref_first()
+ *	Return a reference to the first connection for which a classifier of the given type is associated with
+ *
+ * WARNING: YOU MUST NOT USE ecm_db_connection_deref() to release the references taken using this API.
+ * YOU MUST use ecm_db_connection_by_classifier_type_assignment_deref(), this ensures type assignment list integrity.
+ */
+struct ecm_db_connection_instance *ecm_db_connection_by_classifier_type_assignment_get_and_ref_first(ecm_classifier_type_t ca_type)
+{
+	struct ecm_db_connection_classifier_type_assignment_list *tal;
+	struct ecm_db_connection_instance *ci;
+
+	DEBUG_ASSERT(ca_type < ECM_CLASSIFIER_TYPES, "Bad type: %d\n", ca_type);
+
+	DEBUG_TRACE("Get and ref first connection assigned with classifier type: %d\n", ca_type);
+
+	tal = &ecm_db_connection_classifier_type_assignments[ca_type];
+	spin_lock_bh(&ecm_db_lock);
+	ci = tal->type_assignments_list;
+	while (ci) {
+		struct ecm_db_connection_classifier_type_assignment *ta;
+		ta = &ci->type_assignment[ca_type];
+		DEBUG_CHECK_MAGIC(ta, ECM_DB_CLASSIFIER_TYPE_ASSIGNMENT_MAGIC, "%p: magic failed, ci: %p", ta, ci);
+
+		if (ta->pending_unassign) {
+			DEBUG_TRACE("Skip %p, pending unassign for type: %d\n", ci, ca_type);
+			ci = ta->next;
+			continue;
+		}
+
+		/*
+		 * Take reference to this connection.
+		 * NOTE: Hold both the connection and the assignment entry so that when we unlock both the connection
+		 * and the type assignment list entry maintains integrity.
+		 */
+		_ecm_db_connection_ref(ci);
+		ta->iteration_count++;
+		DEBUG_ASSERT(ta->iteration_count > 0, "Bad Iteration count: %d for type: %d, connection: %p\n", ta->iteration_count, ca_type, ci);
+		spin_unlock_bh(&ecm_db_lock);
+		return ci;
+	}
+	spin_unlock_bh(&ecm_db_lock);
+	return NULL;
+}
+EXPORT_SYMBOL(ecm_db_connection_by_classifier_type_assignment_get_and_ref_first);
+
+/*
+ * ecm_db_connection_by_classifier_type_assignment_get_and_ref_next()
+ *	Return a reference to the next connection for which a classifier of the given type is associated with.
+ *
+ * WARNING: YOU MUST NOT USE ecm_db_connection_deref() to release the references taken using this API.
+ * YOU MUST use ecm_db_connection_by_classifier_type_assignment_deref(), this ensures type assignment list integrity.
+ */
+struct ecm_db_connection_instance *ecm_db_connection_by_classifier_type_assignment_get_and_ref_next(struct ecm_db_connection_instance *ci, ecm_classifier_type_t ca_type)
+{
+	struct ecm_db_connection_classifier_type_assignment *ta;
+	struct ecm_db_connection_instance *cin;
+
+	DEBUG_ASSERT(ca_type < ECM_CLASSIFIER_TYPES, "Bad type: %d\n", ca_type);
+	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed\n", ci);
+
+	DEBUG_TRACE("Get and ref next connection assigned with classifier type: %d and ci: %p\n", ca_type, ci);
+
+	spin_lock_bh(&ecm_db_lock);
+	ta = &ci->type_assignment[ca_type];
+	cin = ta->next;
+	while (cin) {
+		struct ecm_db_connection_classifier_type_assignment *tan;
+
+		tan = &cin->type_assignment[ca_type];
+		DEBUG_CHECK_MAGIC(tan, ECM_DB_CLASSIFIER_TYPE_ASSIGNMENT_MAGIC, "%p: magic failed, ci: %p", tan, cin);
+
+		if (tan->pending_unassign) {
+			DEBUG_TRACE("Skip %p, pending unassign for type: %d\n", cin, ca_type);
+			cin = tan->next;
+			continue;
+		}
+
+		/*
+		 * Take reference to this connection.
+		 * NOTE: Hold both the connection and the assignment entry so that when we unlock both the connection
+		 * and the type assignment list entry maintains integrity.
+		 */
+		_ecm_db_connection_ref(cin);
+		tan->iteration_count++;
+		DEBUG_ASSERT(tan->iteration_count > 0, "Bad Iteration count: %d for type: %d, connection: %p\n", tan->iteration_count, ca_type, cin);
+		spin_unlock_bh(&ecm_db_lock);
+		return cin;
+	}
+	spin_unlock_bh(&ecm_db_lock);
+	return NULL;
+}
+EXPORT_SYMBOL(ecm_db_connection_by_classifier_type_assignment_get_and_ref_next);
+
+/*
+ * ecm_db_connection_by_classifier_type_assignment_deref()
+ *	Release a reference to a connection while iterating a classifier type assignment list
+ */
+void ecm_db_connection_by_classifier_type_assignment_deref(struct ecm_db_connection_instance *ci, ecm_classifier_type_t ca_type)
+{
+	struct ecm_db_connection_classifier_type_assignment_list *tal;
+	struct ecm_db_connection_classifier_type_assignment *ta;
+
+	DEBUG_ASSERT(ca_type < ECM_CLASSIFIER_TYPES, "Bad type: %d\n", ca_type);
+	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed\n", ci);
+
+	tal = &ecm_db_connection_classifier_type_assignments[ca_type];
+
+	/*
+	 * Drop the iteration count
+	 */
+	spin_lock_bh(&ecm_db_lock);
+	ta = &ci->type_assignment[ca_type];
+	DEBUG_CHECK_MAGIC(ta, ECM_DB_CLASSIFIER_TYPE_ASSIGNMENT_MAGIC, "%p: magic failed, ci: %p", ta, ci);
+	ta->iteration_count--;
+	DEBUG_ASSERT(ta->iteration_count >= 0, "Bad Iteration count: %d for type: %d, connection: %p\n", ta->iteration_count, ca_type, ci);
+
+	/*
+	 * If there are no more iterations on-going and this is pending unassign then we can remove it from the assignments list
+	 */
+	if (ta->pending_unassign && (ta->iteration_count == 0)) {
+		DEBUG_INFO("%p: Remove type assignment: %d\n", ci, ca_type);
+		_ecm_db_classifier_type_assignment_remove(ci, ca_type);
+	}
+	spin_unlock_bh(&ecm_db_lock);
+	ecm_db_connection_deref(ci);
+}
+EXPORT_SYMBOL(ecm_db_connection_by_classifier_type_assignment_deref);
+
+/*
+ * ecm_db_connection_make_defunct_by_assignment_type()
+ *	Make defunct all connections that are currently assigned to a classifier of the given type
+ */
+void ecm_db_connection_make_defunct_by_assignment_type(ecm_classifier_type_t ca_type)
+{
+	struct ecm_db_connection_instance *ci;
+
+	DEBUG_INFO("Make defunct all assigned to type: %d\n", ca_type);
+
+	ci = ecm_db_connection_by_classifier_type_assignment_get_and_ref_first(ca_type);
+	while (ci) {
+		struct ecm_db_connection_instance *cin;
+
+		DEBUG_TRACE("%p: Make defunct: %d\n", ci, ca_type);
+		ecm_db_connection_make_defunct(ci);
+
+		cin = ecm_db_connection_by_classifier_type_assignment_get_and_ref_next(ci, ca_type);
+		ecm_db_connection_by_classifier_type_assignment_deref(ci, ca_type);
+		ci = cin;
+	}
+}
+EXPORT_SYMBOL(ecm_db_connection_make_defunct_by_assignment_type);
+
+/*
+ * ecm_db_connection_regenerate_by_assignment_type()
+ *	Cause regeneration all connections that are currently assigned to a classifier of the given type
+ */
+void ecm_db_connection_regenerate_by_assignment_type(ecm_classifier_type_t ca_type)
+{
+	struct ecm_db_connection_instance *ci;
+
+	DEBUG_INFO("Regenerate all assigned to type: %d\n", ca_type);
+
+	ci = ecm_db_connection_by_classifier_type_assignment_get_and_ref_first(ca_type);
+	while (ci) {
+		struct ecm_db_connection_instance *cin;
+
+		DEBUG_TRACE("%p: Re-generate: %d\n", ci, ca_type);
+		ecm_db_connection_classifier_generation_change(ci);
+
+		cin = ecm_db_connection_by_classifier_type_assignment_get_and_ref_next(ci, ca_type);
+		ecm_db_connection_by_classifier_type_assignment_deref(ci, ca_type);
+		ci = cin;
+	}
+}
+EXPORT_SYMBOL(ecm_db_connection_regenerate_by_assignment_type);
 
 /*
  * ecm_db_connection_from_interfaces_get_and_ref()
@@ -5452,7 +5823,6 @@ EXPORT_SYMBOL(ecm_db_connection_to_nat_interfaces_clear);
  */
 void ecm_db_connection_add(struct ecm_db_connection_instance *ci,
 							struct ecm_front_end_connection_instance *feci,
-							struct ecm_classifier_default_instance *dci,
 							struct ecm_db_mapping_instance *mapping_from, struct ecm_db_mapping_instance *mapping_to,
 							struct ecm_db_mapping_instance *mapping_nat_from, struct ecm_db_mapping_instance *mapping_nat_to,
 							struct ecm_db_node_instance *from_node, struct ecm_db_node_instance *to_node,
@@ -5500,11 +5870,9 @@ void ecm_db_connection_add(struct ecm_db_connection_instance *ci,
 	ci->feci = feci;
 
 	/*
-	 * Take reference to the default classifier
+	 * Ensure default classifier has been assigned this is a must to ensure minimum level of classification
 	 */
-	dci->base.ref((struct ecm_classifier_instance *)dci);
-	ci->dci = dci;
-	ci->assignments_by_type[ECM_CLASSIFIER_TYPE_DEFAULT] = (struct ecm_classifier_instance *)dci;
+	DEBUG_ASSERT(ci->assignments_by_type[ECM_CLASSIFIER_TYPE_DEFAULT], "%p: No default classifier assigned\n", ci);
 
 	/*
 	 * Connection takes references to the mappings
@@ -8903,6 +9271,111 @@ static bool ecm_db_char_dev_protocol_count_msg_prep(struct ecm_db_state_file_ins
 }
 
 /*
+ * ecm_db_char_dev_cta_msg_prep()
+ *	Generate a classifier type assignment message
+ */
+static bool ecm_db_char_dev_cta_msg_prep(struct ecm_db_state_file_instance *sfi, ecm_classifier_type_t ca_type)
+{
+	int msg_len;
+	struct ecm_db_connection_instance *ci;
+	int flags;
+
+	DEBUG_TRACE("%p: Prep classifier type assignment msg: %d\n", sfi, ca_type);
+
+	/*
+	 * Use fresh buffer
+	 */
+	sfi->msgp = sfi->msg_buffer;
+
+	/*
+	 * Output message according to where we are with iteration.
+	 * Output element start?
+	 * We are producing an element like:
+	 * <classifier_conn_type_assignment ca_type="2">
+	 *	<connection serial="1625"/>
+	 *	...
+	 * </classifier_conn_type_assignment>
+	 */
+	flags = sfi->classifier_type_assignments_flags[ca_type];
+	if (flags & ECM_DB_STATE_FILE_CTA_FLAG_ELEMENT_START_UNWRITTEN) {
+		msg_len = snprintf(sfi->msgp, ECM_DB_STATE_FILE_BUFFER_SIZE,
+				"<classifier_conn_type_assignment ca_type=\"%d\">\n",
+				ca_type);
+		if ((msg_len <= 0) || (msg_len >= ECM_DB_STATE_FILE_BUFFER_SIZE)) {
+			return false;
+		}
+		sfi->msg_len = msg_len;
+		DEBUG_TRACE("%p: Prepped msg %s\n", sfi, sfi->msgp);
+
+		sfi->classifier_type_assignments_flags[ca_type] &= ~ECM_DB_STATE_FILE_CTA_FLAG_ELEMENT_START_UNWRITTEN;
+		return true;
+	}
+
+	/*
+	 * Output connection detail, if any further to output for this type.
+	 */
+	ci = sfi->classifier_type_assignments[ca_type];
+	if (ci) {
+		DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed", ci);
+		msg_len = snprintf(sfi->msgp, ECM_DB_STATE_FILE_BUFFER_SIZE,
+				"<connection serial=\"%u\"/>\n",
+				ci->serial);
+		if ((msg_len <= 0) || (msg_len >= ECM_DB_STATE_FILE_BUFFER_SIZE)) {
+			return false;
+		}
+		sfi->msg_len = msg_len;
+		DEBUG_TRACE("%p: Prepped msg %s\n", sfi, sfi->msgp);
+
+		/*
+		 * Prep next connection for when we are called again, releasing this one.
+		 */
+		if (!(sfi->classifier_type_assignments[ca_type] = ecm_db_connection_by_classifier_type_assignment_get_and_ref_next(ci, ca_type))) {
+			sfi->classifier_type_assignments_flags[ca_type] &= ~ECM_DB_STATE_FILE_CTA_FLAG_CONTENT_UNWRITTEN;
+		}
+		ecm_db_connection_by_classifier_type_assignment_deref(ci, ca_type);
+		return true;
+	}
+
+	/*
+	 * Output closing element?
+	 */
+	if (flags & ECM_DB_STATE_FILE_CTA_FLAG_ELEMENT_END_UNWRITTEN) {
+		msg_len = snprintf(sfi->msgp, ECM_DB_STATE_FILE_BUFFER_SIZE,
+				"</classifier_conn_type_assignment>\n");
+		if ((msg_len <= 0) || (msg_len >= ECM_DB_STATE_FILE_BUFFER_SIZE)) {
+			return false;
+		}
+		sfi->msg_len = msg_len;
+		DEBUG_TRACE("%p: Prepped msg %s\n", sfi, sfi->msgp);
+
+		sfi->classifier_type_assignments_flags[ca_type] &= ~ECM_DB_STATE_FILE_CTA_FLAG_ELEMENT_END_UNWRITTEN;
+		return true;
+	}
+
+	return true;
+}
+
+/*
+ * ecm_db_state_file_classifier_type_assignments_release()
+ *	Releases any uniterated classifier assignments
+ */
+static void ecm_db_state_file_classifier_type_assignments_release(struct ecm_db_state_file_instance *sfi)
+{
+	ecm_classifier_type_t ca_type;
+
+	for (ca_type = 0; ca_type < ECM_CLASSIFIER_TYPES; ++ca_type) {
+		struct ecm_db_connection_instance *ci;
+
+		ci = sfi->classifier_type_assignments[ca_type];
+		if (!ci) {
+			continue;
+		}
+
+		ecm_db_connection_by_classifier_type_assignment_deref(ci, ca_type);
+	}
+}
+
+/*
  * ecm_db_char_device_open()
  *	Opens the special char device file which we use to dump our state.
  *
@@ -8950,6 +9423,24 @@ static int ecm_db_char_device_open(struct inode *inode, struct file *file)
 	if (sfi->output_mask & ECM_DB_STATE_FILE_OUTPUT_INTERFACES) {
 		sfi->ii = ecm_db_interfaces_get_and_ref_first();
 	}
+	if (sfi->output_mask & ECM_DB_STATE_FILE_OUTPUT_CLASSIFIER_TYPE_ASSIGNMENTS) {
+		ecm_classifier_type_t ca_type;
+
+		/*
+		 * Iterate all classifier type assignments.
+		 * Hold the head of each list to start us off on our iterating process.
+		 */
+		for (ca_type = 0; ca_type < ECM_CLASSIFIER_TYPES; ++ca_type) {
+			if ((sfi->classifier_type_assignments[ca_type] = ecm_db_connection_by_classifier_type_assignment_get_and_ref_first(ca_type))) {
+				/*
+				 * There is some content to write for this ca_type
+				 */
+				sfi->classifier_type_assignments_flags[ca_type] =
+						ECM_DB_STATE_FILE_CTA_FLAG_ELEMENT_START_UNWRITTEN | ECM_DB_STATE_FILE_CTA_FLAG_CONTENT_UNWRITTEN | ECM_DB_STATE_FILE_CTA_FLAG_ELEMENT_END_UNWRITTEN;
+
+			}
+		}
+	}
 
 	/*
 	 * Cannot do this if the event processing thread is exiting
@@ -8973,6 +9464,7 @@ static int ecm_db_char_device_open(struct inode *inode, struct file *file)
 		if (sfi->ii) {
 			ecm_db_iface_deref(sfi->ii);
 		}
+		ecm_db_state_file_classifier_type_assignments_release(sfi);
 
 		kfree(sfi);
 		DEBUG_WARN("Terminating\n");
@@ -9015,6 +9507,8 @@ static int ecm_db_char_device_release(struct inode *inode, struct file *file)
 	if (sfi->ii) {
 		ecm_db_iface_deref(sfi->ii);
 	}
+	ecm_db_state_file_classifier_type_assignments_release(sfi);
+
 	DEBUG_CLEAR_MAGIC(sfi);
 	kfree(sfi);
 
@@ -9032,166 +9526,185 @@ static ssize_t ecm_db_char_device_read(struct file *file,	/* see include/linux/f
 {
 	struct ecm_db_state_file_instance *sfi;
 	int bytes_read = 0;						/* Number of bytes actually written to the buffer */
+	ecm_classifier_type_t ca_type;
 
 	sfi = (struct ecm_db_state_file_instance *)file->private_data;
 	DEBUG_CHECK_MAGIC(sfi, ECM_DB_STATE_FILE_INSTANCE_MAGIC, "%p: magic failed", sfi);
 	DEBUG_TRACE("%p: State read up to length %d bytes\n", sfi, length);
 
-	do {
-		/*
-		 * If there is still some message remaining to be output then complete that first
-		 */
-		if (sfi->msg_len) {
-			break;
-		}
 
-		if (!sfi->doc_start_written) {
-			sfi->msgp = sfi->msg_buffer;
-			sfi->msg_len = sprintf(sfi->msgp, "<ecm_db>\n");
-			sfi->doc_start_written = true;
-			break;
-		}
+	/*
+	 * If there is still some message remaining to be output then complete that first
+	 */
+	if (sfi->msg_len) {
+		goto char_device_read_output;
+	}
 
-		if (sfi->ci) {
-			struct ecm_db_connection_instance *cin;
-			if (!ecm_db_char_dev_conn_msg_prep(sfi)) {
-				return -EIO;
-			}
+	if (!sfi->doc_start_written) {
+		sfi->msgp = sfi->msg_buffer;
+		sfi->msg_len = sprintf(sfi->msgp, "<ecm_db>\n");
+		sfi->doc_start_written = true;
+		goto char_device_read_output;
+	}
 
-			/*
-			 * Next connection for when we return
-			 */
-			cin = ecm_db_connection_get_and_ref_next(sfi->ci);
-			ecm_db_connection_deref(sfi->ci);
-			sfi->ci = cin;
-
-			break;
-		}
-
-		if (sfi->mi) {
-			struct ecm_db_mapping_instance *min;
-			if (!ecm_db_char_dev_mapping_msg_prep(sfi)) {
-				return -EIO;
-			}
-
-			/*
-			 * Next mapping for when we return
-			 */
-			min = ecm_db_mapping_get_and_ref_next(sfi->mi);
-			ecm_db_mapping_deref(sfi->mi);
-			sfi->mi = min;
-
-			break;
-		}
-
-		if (sfi->hi) {
-			struct ecm_db_host_instance *hin;
-			if (!ecm_db_char_dev_host_msg_prep(sfi)) {
-				return -EIO;
-			}
-
-			/*
-			 * Next host for when we return
-			 */
-			hin = ecm_db_host_get_and_ref_next(sfi->hi);
-			ecm_db_host_deref(sfi->hi);
-			sfi->hi = hin;
-
-			break;
-		}
-
-		if (sfi->ni) {
-			struct ecm_db_node_instance *nin;
-			if (!ecm_db_char_dev_node_msg_prep(sfi)) {
-				return -EIO;
-			}
-
-			/*
-			 * Next node for when we return
-			 */
-			nin = ecm_db_node_get_and_ref_next(sfi->ni);
-			ecm_db_node_deref(sfi->ni);
-			sfi->ni = nin;
-
-			break;
-		}
-
-		if (sfi->ii) {
-			struct ecm_db_iface_instance *iin;
-			if (!ecm_db_char_dev_iface_msg_prep(sfi)) {
-				return -EIO;
-			}
-
-			/*
-			 * Next iface for when we return
-			 */
-			iin = ecm_db_interface_get_and_ref_next(sfi->ii);
-			ecm_db_iface_deref(sfi->ii);
-			sfi->ii = iin;
-
-			break;
-		}
-
-		if ((sfi->output_mask & ECM_DB_STATE_FILE_OUTPUT_CONNECTIONS_CHAIN) && (sfi->connection_hash_index < ECM_DB_CONNECTION_HASH_SLOTS)) {
-			if (!ecm_db_char_dev_conn_chain_msg_prep(sfi)) {
-				return -EIO;
-			}
-			sfi->connection_hash_index++;
-			break;
-		}
-
-		if ((sfi->output_mask & ECM_DB_STATE_FILE_OUTPUT_MAPPINGS_CHAIN) && (sfi->mapping_hash_index < ECM_DB_MAPPING_HASH_SLOTS)) {
-			if (!ecm_db_char_dev_mapping_chain_msg_prep(sfi)) {
-				return -EIO;
-			}
-			sfi->mapping_hash_index++;
-			break;
-		}
-
-		if ((sfi->output_mask & ECM_DB_STATE_FILE_OUTPUT_HOSTS_CHAIN) && (sfi->host_hash_index < ECM_DB_HOST_HASH_SLOTS)) {
-			if (!ecm_db_char_dev_host_chain_msg_prep(sfi)) {
-				return -EIO;
-			}
-			sfi->host_hash_index++;
-			break;
-		}
-
-		if ((sfi->output_mask & ECM_DB_STATE_FILE_OUTPUT_NODES_CHAIN) && (sfi->node_hash_index < ECM_DB_NODE_HASH_SLOTS)) {
-			if (!ecm_db_char_dev_node_chain_msg_prep(sfi)) {
-				return -EIO;
-			}
-			sfi->node_hash_index++;
-			break;
-		}
-
-		if ((sfi->output_mask & ECM_DB_STATE_FILE_OUTPUT_INTERFACES_CHAIN) && (sfi->iface_hash_index < ECM_DB_IFACE_HASH_SLOTS)) {
-			if (!ecm_db_char_dev_iface_chain_msg_prep(sfi)) {
-				return -EIO;
-			}
-			sfi->iface_hash_index++;
-			break;
-		}
-
-		if ((sfi->output_mask & ECM_DB_STATE_FILE_OUTPUT_PROTOCOL_COUNTS) && (sfi->protocol < 256)) {
-			if (!ecm_db_char_dev_protocol_count_msg_prep(sfi)) {
-				return -EIO;
-			}
-			sfi->protocol++;
-			break;
-		}
-
-		if (!sfi->doc_end_written) {
-			sfi->msgp = sfi->msg_buffer;
-			sfi->msg_len = sprintf(sfi->msgp, "</ecm_db>\n");
-			sfi->doc_end_written = true;
-			break;
+	if (sfi->ci) {
+		struct ecm_db_connection_instance *cin;
+		if (!ecm_db_char_dev_conn_msg_prep(sfi)) {
+			return -EIO;
 		}
 
 		/*
-		 * EOF
+		 * Next connection for when we return
 		 */
-		return 0;
-	} while (false);
+		cin = ecm_db_connection_get_and_ref_next(sfi->ci);
+		ecm_db_connection_deref(sfi->ci);
+		sfi->ci = cin;
+
+		goto char_device_read_output;
+	}
+
+	if (sfi->mi) {
+		struct ecm_db_mapping_instance *min;
+		if (!ecm_db_char_dev_mapping_msg_prep(sfi)) {
+			return -EIO;
+		}
+
+		/*
+		 * Next mapping for when we return
+		 */
+		min = ecm_db_mapping_get_and_ref_next(sfi->mi);
+		ecm_db_mapping_deref(sfi->mi);
+		sfi->mi = min;
+
+		goto char_device_read_output;
+	}
+
+	if (sfi->hi) {
+		struct ecm_db_host_instance *hin;
+		if (!ecm_db_char_dev_host_msg_prep(sfi)) {
+			return -EIO;
+		}
+
+		/*
+		 * Next host for when we return
+		 */
+		hin = ecm_db_host_get_and_ref_next(sfi->hi);
+		ecm_db_host_deref(sfi->hi);
+		sfi->hi = hin;
+
+		goto char_device_read_output;
+	}
+
+	if (sfi->ni) {
+		struct ecm_db_node_instance *nin;
+		if (!ecm_db_char_dev_node_msg_prep(sfi)) {
+			return -EIO;
+		}
+
+		/*
+		 * Next node for when we return
+		 */
+		nin = ecm_db_node_get_and_ref_next(sfi->ni);
+		ecm_db_node_deref(sfi->ni);
+		sfi->ni = nin;
+
+		goto char_device_read_output;
+	}
+
+	if (sfi->ii) {
+		struct ecm_db_iface_instance *iin;
+		if (!ecm_db_char_dev_iface_msg_prep(sfi)) {
+			return -EIO;
+		}
+
+		/*
+		 * Next iface for when we return
+		 */
+		iin = ecm_db_interface_get_and_ref_next(sfi->ii);
+		ecm_db_iface_deref(sfi->ii);
+		sfi->ii = iin;
+
+		goto char_device_read_output;
+	}
+
+	if ((sfi->output_mask & ECM_DB_STATE_FILE_OUTPUT_CONNECTIONS_CHAIN) && (sfi->connection_hash_index < ECM_DB_CONNECTION_HASH_SLOTS)) {
+		if (!ecm_db_char_dev_conn_chain_msg_prep(sfi)) {
+			return -EIO;
+		}
+		sfi->connection_hash_index++;
+		goto char_device_read_output;
+	}
+
+	if ((sfi->output_mask & ECM_DB_STATE_FILE_OUTPUT_MAPPINGS_CHAIN) && (sfi->mapping_hash_index < ECM_DB_MAPPING_HASH_SLOTS)) {
+		if (!ecm_db_char_dev_mapping_chain_msg_prep(sfi)) {
+			return -EIO;
+		}
+		sfi->mapping_hash_index++;
+		goto char_device_read_output;
+	}
+
+	if ((sfi->output_mask & ECM_DB_STATE_FILE_OUTPUT_HOSTS_CHAIN) && (sfi->host_hash_index < ECM_DB_HOST_HASH_SLOTS)) {
+		if (!ecm_db_char_dev_host_chain_msg_prep(sfi)) {
+			return -EIO;
+		}
+		sfi->host_hash_index++;
+		goto char_device_read_output;
+	}
+
+	if ((sfi->output_mask & ECM_DB_STATE_FILE_OUTPUT_NODES_CHAIN) && (sfi->node_hash_index < ECM_DB_NODE_HASH_SLOTS)) {
+		if (!ecm_db_char_dev_node_chain_msg_prep(sfi)) {
+			return -EIO;
+		}
+		sfi->node_hash_index++;
+		goto char_device_read_output;
+	}
+
+	if ((sfi->output_mask & ECM_DB_STATE_FILE_OUTPUT_INTERFACES_CHAIN) && (sfi->iface_hash_index < ECM_DB_IFACE_HASH_SLOTS)) {
+		if (!ecm_db_char_dev_iface_chain_msg_prep(sfi)) {
+			return -EIO;
+		}
+		sfi->iface_hash_index++;
+		goto char_device_read_output;
+	}
+
+	if ((sfi->output_mask & ECM_DB_STATE_FILE_OUTPUT_PROTOCOL_COUNTS) && (sfi->protocol < 256)) {
+		if (!ecm_db_char_dev_protocol_count_msg_prep(sfi)) {
+			return -EIO;
+		}
+		sfi->protocol++;
+		goto char_device_read_output;
+	}
+
+	for (ca_type = 0; ca_type < ECM_CLASSIFIER_TYPES; ++ca_type) {
+		int flags;
+
+		flags = sfi->classifier_type_assignments_flags[ca_type];
+
+		if (!flags) {
+			/*
+			 * Nothing further to write out for this ca_type
+			 */
+			continue;
+		}
+		if (!ecm_db_char_dev_cta_msg_prep(sfi, ca_type)) {
+			return -EIO;
+		}
+		goto char_device_read_output;
+	}
+
+	if (!sfi->doc_end_written) {
+		sfi->msgp = sfi->msg_buffer;
+		sfi->msg_len = sprintf(sfi->msgp, "</ecm_db>\n");
+		sfi->doc_end_written = true;
+		goto char_device_read_output;
+	}
+
+	/*
+	 * EOF
+	 */
+	return 0;
+
+char_device_read_output:
 
 	/*
 	 * If supplied buffer is small we limit what we output
@@ -9441,6 +9954,11 @@ int ecm_db_init(void)
 	 * Reset connection by protocol counters
 	 */
 	memset(ecm_db_connection_count_by_protocol, 0, sizeof(ecm_db_connection_count_by_protocol));
+
+	/*
+	 * Reset classifier type assignment lists
+	 */
+	memset(ecm_db_connection_classifier_type_assignments, 0, sizeof(ecm_db_connection_classifier_type_assignments));
 
 	return 0;
 

@@ -66,6 +66,9 @@ void ecm_db_connection_classifier_generation_change(struct ecm_db_connection_ins
 bool ecm_db_connection_classifier_generation_changed(struct ecm_db_connection_instance *ci);
 bool ecm_db_connection_classifier_peek_generation_changed(struct ecm_db_connection_instance *ci);
 
+void ecm_db_connection_regenerate_by_assignment_type(ecm_classifier_type_t ca_type);
+void ecm_db_connection_make_defunct_by_assignment_type(ecm_classifier_type_t ca_type);
+
 ecm_db_direction_t ecm_db_connection_direction_get(struct ecm_db_connection_instance *ci);
 
 void ecm_db_mapping_port_count_get(struct ecm_db_mapping_instance *mi, int *tcp_from, int *tcp_to, int *udp_from, int *udp_to, int *from, int *to, int *tcp_nat_from, int *tcp_nat_to, int *udp_nat_from, int *udp_nat_to, int *nat_from, int *nat_to);
@@ -213,7 +216,7 @@ void ecm_db_iface_add_tunipip6(struct ecm_db_iface_instance *ii, struct ecm_db_i
 void ecm_db_node_add(struct ecm_db_node_instance *ni, struct ecm_db_iface_instance *ii, uint8_t *address, ecm_db_node_final_callback_t final, void *arg);
 void ecm_db_host_add(struct ecm_db_host_instance *hi, ip_addr_t address, bool on_link, ecm_db_host_final_callback_t final, void *arg);
 void ecm_db_mapping_add(struct ecm_db_mapping_instance *mi, struct ecm_db_host_instance *hi, int port, ecm_db_mapping_final_callback_t final, void *arg);
-void ecm_db_connection_add(struct ecm_db_connection_instance *ci, struct ecm_front_end_connection_instance *feci, struct ecm_classifier_default_instance *dci, struct ecm_db_mapping_instance *mapping_from, struct ecm_db_mapping_instance *mapping_to, struct ecm_db_mapping_instance *mapping_nat_from, struct ecm_db_mapping_instance *mapping_nat_to, struct ecm_db_node_instance *from_node, struct ecm_db_node_instance *to_node, struct ecm_db_node_instance *from_nat_node, struct ecm_db_node_instance *to_nat_node, int protocol, ecm_db_direction_t dir, ecm_db_connection_final_callback_t final, ecm_db_connection_defunct_callback_t defunct, ecm_db_timer_group_t tg, bool is_routed, void *arg);
+void ecm_db_connection_add(struct ecm_db_connection_instance *ci, struct ecm_front_end_connection_instance *feci, struct ecm_db_mapping_instance *mapping_from, struct ecm_db_mapping_instance *mapping_to, struct ecm_db_mapping_instance *mapping_nat_from, struct ecm_db_mapping_instance *mapping_nat_to, struct ecm_db_node_instance *from_node, struct ecm_db_node_instance *to_node, struct ecm_db_node_instance *from_nat_node, struct ecm_db_node_instance *to_nat_node, int protocol, ecm_db_direction_t dir, ecm_db_connection_final_callback_t final, ecm_db_connection_defunct_callback_t defunct, ecm_db_timer_group_t tg, bool is_routed, void *arg);
 
 void ecm_db_listener_ref(struct ecm_db_listener_instance *li);
 void ecm_db_connection_ref(struct ecm_db_connection_instance *ci);
