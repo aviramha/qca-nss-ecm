@@ -818,6 +818,13 @@ static void ecm_classifier_nl_reclassify(struct ecm_classifier_instance *ci)
 	struct ecm_classifier_nl_instance *cnli;
 	cnli = (struct ecm_classifier_nl_instance *)ci;
 	DEBUG_CHECK_MAGIC(cnli, ECM_CLASSIFIER_NL_INSTANCE_MAGIC, "%p: magic failed\n", cnli);
+
+	/*
+	 * Revert back to MAYBE relevant - we will evaluate when we get the next process() call.
+	 */
+	spin_lock_bh(&ecm_classifier_nl_lock);
+	cnli->process_response.relevance = ECM_CLASSIFIER_RELEVANCE_MAYBE;
+	spin_unlock_bh(&ecm_classifier_nl_lock);
 }
 
 /*
@@ -1281,7 +1288,8 @@ static ssize_t ecm_classifier_nl_rule_set_enabled(struct sys_device *dev,
 				  const char *buf, size_t count)
 {
 	char num_buf[12];
-	int num;
+	int enabled;
+	bool prev_state;
 
 	/*
 	 * Get the number from buf into a properly z-termed number buffer
@@ -1289,16 +1297,34 @@ static ssize_t ecm_classifier_nl_rule_set_enabled(struct sys_device *dev,
 	if (count > 11) return 0;
 	memcpy(num_buf, buf, count);
 	num_buf[count] = '\0';
-	sscanf(num_buf, "%d", &num);
-	DEBUG_TRACE("ecm_classifier_nl_enabled = %d\n", num);
+	sscanf(num_buf, "%d", &enabled);
+
+	/*
+	 * Boolean-ise
+	 */
+	if (enabled) {
+		enabled = true;
+	}
+	DEBUG_TRACE("ecm_classifier_nl_enabled = %d\n", enabled);
 
 	/*
 	 * Operate under our locks
 	 */
 	spin_lock_bh(&ecm_classifier_nl_lock);
-	ecm_classifier_nl_enabled = num;
+	prev_state = ecm_classifier_nl_enabled;
+	ecm_classifier_nl_enabled = (bool)enabled;
 	spin_unlock_bh(&ecm_classifier_nl_lock);
 
+	/*
+	 * If there is a change in operating state, and that change is that we are now disabled
+	 * then we need to re-generate all connections relevant to this classifier type
+	 */
+	if (!enabled && (prev_state ^ (bool)enabled)) {
+		/*
+		 * Change in state to become disabled.
+		 */
+		ecm_db_connection_regenerate_by_assignment_type(ECM_CLASSIFIER_TYPE_NL);
+	}
 	return count;
 }
 
