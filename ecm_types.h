@@ -364,14 +364,14 @@ static inline bool ecm_string_to_ip_addr(ip_addr_t addr, char *ip_str)
 #define DEBUG_ECM_IP_ADDR_TO_STRING(addr_str, addr) ecm_ip_addr_to_string(addr_str, addr);
 #endif
 
-//#if defined(CONFIG_DYNAMIC_DEBUG)
+#if defined(CONFIG_DYNAMIC_DEBUG)
 /*
  * Compile messages for dynamic enable/disable
  */
-//#define DEBUG_WARN(s, ...) pr_debug("%s[%d]:" s, __FUNCTION__, __LINE__, ##__VA_ARGS__)
-//#define DEBUG_INFO(s, ...) pr_debug("%s[%d]:" s, __FUNCTION__, __LINE__, ##__VA_ARGS__)
-//#define DEBUG_TRACE(s, ...) pr_debug("%s[%d]:" s, __FUNCTION__, __LINE__, ##__VA_ARGS__)
-//#else
+#define DEBUG_WARN(s, ...) pr_debug("%s[%d]:" s, __FUNCTION__, __LINE__, ##__VA_ARGS__)
+#define DEBUG_INFO(s, ...) pr_debug("%s[%d]:" s, __FUNCTION__, __LINE__, ##__VA_ARGS__)
+#define DEBUG_TRACE(s, ...) pr_debug("%s[%d]:" s, __FUNCTION__, __LINE__, ##__VA_ARGS__)
+#else
 
 /*
  * Statically compile messages at different levels
@@ -393,4 +393,4 @@ static inline bool ecm_string_to_ip_addr(ip_addr_t addr, char *ip_str)
 #else
 #define DEBUG_TRACE(s, ...) pr_info("%s[%d]:" s, __FUNCTION__, __LINE__, ##__VA_ARGS__)
 #endif
-//#endif
+#endif
