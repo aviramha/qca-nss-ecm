@@ -2284,6 +2284,7 @@ static void _ecm_db_classifier_type_assignment_remove(struct ecm_db_connection_i
  */
 int ecm_db_connection_deref(struct ecm_db_connection_instance *ci)
 {
+	ecm_classifier_type_t ca_type;
 	int32_t i;
 
 	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed", ci);
@@ -2300,6 +2301,26 @@ int ecm_db_connection_deref(struct ecm_db_connection_instance *ci)
 	}
 
 	/*
+	 * Unlink from the "assignments by classifier type" lists.
+	 * 
+	 * This is done whether the connection is inserted into the database or not - this is because
+	 * classifier assignments take place before adding into the db.
+	 *
+	 * NOTE: We know that the ci is not being iterated in any of these lists because otherwise
+	 * ci would be being held as part of iteration and so we would not be here!
+	 * Equally we know that if the assignments_by_type[] element is non-null then it must also be in the relevant list too.
+	 */
+	for (ca_type = 0; ca_type < ECM_CLASSIFIER_TYPES; ++ca_type) {
+		if (!ci->assignments_by_type[ca_type]) {
+			/*
+			 * No assignment of this type, so would not be in the classifier type assignments list
+			 */
+			continue;
+		}
+		_ecm_db_classifier_type_assignment_remove(ci, ca_type);
+	}
+
+	/*
 	 * Remove from database if inserted
 	 */
 	if (!ci->flags & ECM_DB_CONNECTION_FLAGS_INSERTED) {
@@ -2310,7 +2331,6 @@ int ecm_db_connection_deref(struct ecm_db_connection_instance *ci)
 		struct ecm_db_iface_instance *iface_to;
 		struct ecm_db_iface_instance *iface_nat_from;
 		struct ecm_db_iface_instance *iface_nat_to;
-		ecm_classifier_type_t ca_type;
 
 		/*
 		 * Remove it from the connection hash table
@@ -2558,21 +2578,6 @@ int ecm_db_connection_deref(struct ecm_db_connection_instance *ci)
 		ecm_db_connection_count_by_protocol[ci->protocol]--;
 		DEBUG_ASSERT(ecm_db_connection_count_by_protocol[ci->protocol] >= 0, "%p: Invalid protocol count %d\n", ci, ecm_db_connection_count_by_protocol[ci->protocol]);
 
-		/*
-		 * Unlink from the "assignments by classifier type" lists
-		 * NOTE: We know that the ci is not being iterated in any of these lists because otherwise
-		 * ci would be being held as part of iteration and so we would not be here!
-		 * Equally we know that if the assignments_by_type[] element is non-null then it must also be in the relevant list too.
-		 */
-		for (ca_type = 0; ca_type < ECM_CLASSIFIER_TYPES; ++ca_type) {
-			if (!ci->assignments_by_type[ca_type]) {
-				/*
-				 * No assignment of this type, so would not be in the classifier type assignments list
-				 */
-				continue;
-			}
-			_ecm_db_classifier_type_assignment_remove(ci, ca_type);
-		}
 		spin_unlock_bh(&ecm_db_lock);
 
 		/*
