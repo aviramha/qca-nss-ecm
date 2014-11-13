@@ -76,6 +76,8 @@ typedef int (*ecm_front_end_connection_xml_state_get_callback_t)(struct ecm_fron
  */
 struct ecm_front_end_connection_mode_stats {
 	bool decelerate_pending;		/* Decel was attempted during pending accel - will be actioned when accel is done */
+	bool flush_happened;			/* A flush message was received from NSS before we received an ACK or NACK. (NSS Messaging sequence/ordering workaround) */
+	uint32_t flush_happened_total;		/* Total of times we see flush_happened */
 	uint32_t no_action_seen_total;		/* Total of times acceleration was ended by the NSS itself without any offload action */
 	uint32_t no_action_seen;		/* Count of times consecutive  acceleration was ended by the NSS itself without any offload action */
 	uint32_t no_action_seen_limit;		/* Limit on consecutive no-action at which point offload permanently fails out */
