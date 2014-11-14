@@ -161,7 +161,8 @@ ecm_classifier_nl_send_genl_msg(enum ECM_CL_NL_GENL_CMD cmd,
 	void *msg_head;
 	struct sk_buff *skb;
 
-	skb = nlmsg_new(sizeof(*tuple), GFP_ATOMIC);
+	skb = genlmsg_new(sizeof(*tuple) + ecm_cl_nl_genl_family.hdrsize,
+			  GFP_ATOMIC);
 	if (skb == NULL) {
 		DEBUG_WARN("failed to alloc nlmsg\n");
 		return -ENOMEM;
