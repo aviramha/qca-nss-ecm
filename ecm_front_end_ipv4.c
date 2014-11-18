@@ -688,9 +688,9 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_accelerate(struct ecm_fr
 	 * When we get it back we re-cast it to a uint32 and do a faster connection lookup.
 	 */
 	memset(&nim, 0, sizeof(struct nss_ipv4_msg));
-	nss_cmn_msg_init(&nim.cm, NSS_IPV4_RX_INTERFACE, NSS_IPV4_TX_CREATE_RULE_MSG,
+	nss_ipv4_msg_init(&nim, NSS_IPV4_RX_INTERFACE, NSS_IPV4_TX_CREATE_RULE_MSG,
 			sizeof(struct nss_ipv4_rule_create_msg),
-			ecm_front_end_ipv4_connection_tcp_callback,
+			(nss_ipv4_msg_callback_t *)ecm_front_end_ipv4_connection_tcp_callback,
 			(void *)ecm_db_connection_serial_get(fecti->ci));
 
 	nircm = &nim.msg.rule_create;
@@ -1495,9 +1495,9 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_decelerate(struct ecm_fr
 	/*
 	 * Prepare deceleration message
 	 */
-	nss_cmn_msg_init(&nim.cm, NSS_IPV4_RX_INTERFACE, NSS_IPV4_TX_DESTROY_RULE_MSG,
+	nss_ipv4_msg_init(&nim, NSS_IPV4_RX_INTERFACE, NSS_IPV4_TX_DESTROY_RULE_MSG,
 			sizeof(struct nss_ipv4_rule_destroy_msg),
-			ecm_front_end_ipv4_connection_tcp_destroy_callback,
+			(nss_ipv4_msg_callback_t *)ecm_front_end_ipv4_connection_tcp_destroy_callback,
 			(void *)ecm_db_connection_serial_get(fecti->ci));
 
 	nirdm = &nim.msg.rule_destroy;
@@ -2047,9 +2047,9 @@ static void ecm_front_end_ipv4_connection_udp_front_end_accelerate(struct ecm_fr
 	 * When we get it back we re-cast it to a uint32 and do a faster connection lookup.
 	 */
 	memset(&nim, 0, sizeof(struct nss_ipv4_msg));
-	nss_cmn_msg_init(&nim.cm, NSS_IPV4_RX_INTERFACE, NSS_IPV4_TX_CREATE_RULE_MSG,
+	nss_ipv4_msg_init(&nim, NSS_IPV4_RX_INTERFACE, NSS_IPV4_TX_CREATE_RULE_MSG,
 			sizeof(struct nss_ipv4_rule_create_msg),
-			ecm_front_end_ipv4_connection_udp_callback,
+			(nss_ipv4_msg_callback_t *)ecm_front_end_ipv4_connection_udp_callback,
 			(void *)ecm_db_connection_serial_get(fecui->ci));
 
 	nircm = &nim.msg.rule_create;
@@ -2806,9 +2806,9 @@ static void ecm_front_end_ipv4_connection_udp_front_end_decelerate(struct ecm_fr
 	/*
 	 * Prepare deceleration message
 	 */
-	nss_cmn_msg_init(&nim.cm, NSS_IPV4_RX_INTERFACE, NSS_IPV4_TX_DESTROY_RULE_MSG,
+	nss_ipv4_msg_init(&nim, NSS_IPV4_RX_INTERFACE, NSS_IPV4_TX_DESTROY_RULE_MSG,
 			sizeof(struct nss_ipv4_rule_destroy_msg),
-			ecm_front_end_ipv4_connection_udp_destroy_callback,
+			(nss_ipv4_msg_callback_t *)ecm_front_end_ipv4_connection_udp_destroy_callback,
 			(void *)ecm_db_connection_serial_get(fecui->ci));
 
 	nirdm = &nim.msg.rule_destroy;
@@ -3193,7 +3193,7 @@ static void ecm_front_end_ipv4_sit_set_peer(struct ecm_front_end_ipv4_connection
 	ecm_db_connection_to_address_get(fecnpi->ci, addr);
 
 	interface_number = ecm_db_iface_nss_interface_identifier_get(from_nss_iface);
-	nss_cmn_msg_init(&tun6rdmsg.cm, interface_number, NSS_TUN6RD_ADD_UPDATE_PEER,
+	nss_tun6rd_msg_init(&tun6rdmsg, interface_number, NSS_TUN6RD_ADD_UPDATE_PEER,
 			sizeof(struct nss_tun6rd_set_peer_msg), NULL, NULL);
 
 	tun6rdpeer = &tun6rdmsg.msg.peer;
@@ -3448,9 +3448,9 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_accelerate(struct
 	 * When we get it back we re-cast it to a uint32 and do a faster connection lookup.
 	 */
 	memset(&nim, 0, sizeof(struct nss_ipv4_msg));
-	nss_cmn_msg_init(&nim.cm, NSS_IPV4_RX_INTERFACE, NSS_IPV4_TX_CREATE_RULE_MSG,
+	nss_ipv4_msg_init(&nim, NSS_IPV4_RX_INTERFACE, NSS_IPV4_TX_CREATE_RULE_MSG,
 			sizeof(struct nss_ipv4_rule_create_msg),
-			ecm_front_end_ipv4_connection_non_ported_callback,
+			(nss_ipv4_msg_callback_t *)ecm_front_end_ipv4_connection_non_ported_callback,
 			(void *)ecm_db_connection_serial_get(fecnpi->ci));
 
 	nircm = &nim.msg.rule_create;
@@ -4217,9 +4217,9 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_decelerate(struct
 	/*
 	 * Prepare deceleration message
 	 */
-	nss_cmn_msg_init(&nim.cm, NSS_IPV4_RX_INTERFACE, NSS_IPV4_TX_DESTROY_RULE_MSG,
+	nss_ipv4_msg_init(&nim, NSS_IPV4_RX_INTERFACE, NSS_IPV4_TX_DESTROY_RULE_MSG,
 			sizeof(struct nss_ipv4_rule_destroy_msg),
-			ecm_front_end_ipv4_connection_non_ported_destroy_callback,
+			(nss_ipv4_msg_callback_t *)ecm_front_end_ipv4_connection_non_ported_destroy_callback,
 			(void *)ecm_db_connection_serial_get(fecnpi->ci));
 
 	nirdm = &nim.msg.rule_destroy;

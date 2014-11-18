@@ -146,7 +146,7 @@ static nss_tx_status_t ecm_bond_notifier_send_lag_state(struct nss_ctx_instance 
 	/*
 	 * Construct a message to the NSS to update it
 	 */
-	nss_cmn_msg_init(&nm.cm, lagid,
+	nss_lag_msg_init(&nm, lagid,
 			 NSS_TX_METADATA_LAG_STATE_CHANGE,
 			 sizeof(struct nss_lag_state_change),
 			 NULL, NULL);

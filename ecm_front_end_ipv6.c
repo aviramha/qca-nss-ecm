@@ -1256,9 +1256,9 @@ static void ecm_front_end_ipv6_connection_tcp_front_end_accelerate(struct ecm_fr
 	 * When we get it back we re-cast it to a uint32 and do a faster connection lookup.
 	 */
 	memset(&nim, 0, sizeof(struct nss_ipv6_msg));
-	nss_cmn_msg_init(&nim.cm, NSS_IPV6_RX_INTERFACE, NSS_IPV6_TX_CREATE_RULE_MSG,
+	nss_ipv6_msg_init(&nim, NSS_IPV6_RX_INTERFACE, NSS_IPV6_TX_CREATE_RULE_MSG,
 			sizeof(struct nss_ipv6_rule_create_msg),
-			ecm_front_end_ipv6_connection_tcp_callback,
+			(nss_ipv6_msg_callback_t *)ecm_front_end_ipv6_connection_tcp_callback,
 			(void *)ecm_db_connection_serial_get(fecti->ci));
 
 	nircm = &nim.msg.rule_create;
@@ -2021,9 +2021,9 @@ static void ecm_front_end_ipv6_connection_tcp_front_end_decelerate(struct ecm_fr
 	/*
 	 * Prepare deceleration message
 	 */
-	nss_cmn_msg_init(&nim.cm, NSS_IPV6_RX_INTERFACE, NSS_IPV6_TX_DESTROY_RULE_MSG,
+	nss_ipv6_msg_init(&nim, NSS_IPV6_RX_INTERFACE, NSS_IPV6_TX_DESTROY_RULE_MSG,
 			sizeof(struct nss_ipv6_rule_destroy_msg),
-			ecm_front_end_ipv6_connection_tcp_destroy_callback,
+			(nss_ipv6_msg_callback_t *)ecm_front_end_ipv6_connection_tcp_destroy_callback,
 			(void *)ecm_db_connection_serial_get(fecti->ci));
 
 	nirdm = &nim.msg.rule_destroy;
@@ -2576,9 +2576,9 @@ static void ecm_front_end_ipv6_connection_udp_front_end_accelerate(struct ecm_fr
 	 * When we get it back we re-cast it to a uint32 and do a faster connection lookup.
 	 */
 	memset(&nim, 0, sizeof(struct nss_ipv6_msg));
-	nss_cmn_msg_init(&nim.cm, NSS_IPV6_RX_INTERFACE, NSS_IPV6_TX_CREATE_RULE_MSG,
+	nss_ipv6_msg_init(&nim, NSS_IPV6_RX_INTERFACE, NSS_IPV6_TX_CREATE_RULE_MSG,
 			sizeof(struct nss_ipv6_rule_create_msg),
-			ecm_front_end_ipv6_connection_udp_callback,
+			(nss_ipv6_msg_callback_t *)ecm_front_end_ipv6_connection_udp_callback,
 			(void *)ecm_db_connection_serial_get(fecui->ci));
 
 	nircm = &nim.msg.rule_create;
@@ -3297,9 +3297,9 @@ static void ecm_front_end_ipv6_connection_udp_front_end_decelerate(struct ecm_fr
 	/*
 	 * Prepare deceleration message
 	 */
-	nss_cmn_msg_init(&nim.cm, NSS_IPV6_RX_INTERFACE, NSS_IPV6_TX_DESTROY_RULE_MSG,
+	nss_ipv6_msg_init(&nim, NSS_IPV6_RX_INTERFACE, NSS_IPV6_TX_DESTROY_RULE_MSG,
 			sizeof(struct nss_ipv6_rule_destroy_msg),
-			ecm_front_end_ipv6_connection_udp_destroy_callback,
+			(nss_ipv6_msg_callback_t *)ecm_front_end_ipv6_connection_udp_destroy_callback,
 			(void *)ecm_db_connection_serial_get(fecui->ci));
 
 	nirdm = &nim.msg.rule_destroy;
@@ -3877,9 +3877,9 @@ static void ecm_front_end_ipv6_connection_non_ported_front_end_accelerate(struct
 	 * When we get it back we re-cast it to a uint32 and do a faster connection lookup.
 	 */
 	memset(&nim, 0, sizeof(struct nss_ipv6_msg));
-	nss_cmn_msg_init(&nim.cm, NSS_IPV6_RX_INTERFACE, NSS_IPV6_TX_CREATE_RULE_MSG,
+	nss_ipv6_msg_init(&nim, NSS_IPV6_RX_INTERFACE, NSS_IPV6_TX_CREATE_RULE_MSG,
 			sizeof(struct nss_ipv6_rule_create_msg),
-			ecm_front_end_ipv6_connection_non_ported_callback,
+			(nss_ipv6_msg_callback_t *)ecm_front_end_ipv6_connection_non_ported_callback,
 			(void *)ecm_db_connection_serial_get(fecnpi->ci));
 
 	nircm = &nim.msg.rule_create;
@@ -4601,9 +4601,9 @@ static void ecm_front_end_ipv6_connection_non_ported_front_end_decelerate(struct
 	/*
 	 * Prepare deceleration message
 	 */
-	nss_cmn_msg_init(&nim.cm, NSS_IPV6_RX_INTERFACE, NSS_IPV6_TX_DESTROY_RULE_MSG,
+	nss_ipv6_msg_init(&nim, NSS_IPV6_RX_INTERFACE, NSS_IPV6_TX_DESTROY_RULE_MSG,
 			sizeof(struct nss_ipv6_rule_destroy_msg),
-			ecm_front_end_ipv6_connection_non_ported_destroy_callback,
+			(nss_ipv6_msg_callback_t *)ecm_front_end_ipv6_connection_non_ported_destroy_callback,
 			(void *)ecm_db_connection_serial_get(fecnpi->ci));
 
 	nirdm = &nim.msg.rule_destroy;
