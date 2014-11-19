@@ -604,6 +604,7 @@ struct ecm_db_connection_instance {
 								/* Each classifier TYPE has a list of connections that have a classifier instance (of that type) assigned to it */
 
 	uint16_t classifier_generation;				/* Used to detect when a re-evaluation of this connection is necessary */
+	uint32_t generations;					/* Tracks how many times re-generation was seen for this connection */
 	struct ecm_front_end_connection_instance *feci;		/* Front end instance specific to this connection */
 
 	ecm_db_connection_defunct_callback_t defunct;		/* Callback to be called when connection has become defunct */
@@ -1487,6 +1488,7 @@ bool ecm_db_connection_classifier_generation_changed(struct ecm_db_connection_in
 		spin_unlock_bh(&ecm_db_lock);
 		return false;
 	}
+	ci->generations++;
 	ci->classifier_generation = ecm_db_classifier_generation;
 	spin_unlock_bh(&ecm_db_lock);
 	return true;
@@ -8563,6 +8565,7 @@ static bool ecm_db_char_dev_conn_msg_prep(struct ecm_db_state_file_instance *sfi
 	ecm_db_direction_t direction;
 	int protocol;
 	bool is_routed;
+	uint32_t generations;
 	uint32_t time_added;
 	uint32_t serial;
 	uint64_t from_data_total;
@@ -8629,6 +8632,7 @@ static bool ecm_db_char_dev_conn_msg_prep(struct ecm_db_state_file_instance *sfi
 	direction = sfi->ci->direction;
 	protocol = sfi->ci->protocol;
 	is_routed = sfi->ci->is_routed;
+	generations = sfi->ci->generations;
 	time_added = sfi->ci->time_added;
 	serial = sfi->ci->serial;
 	ecm_db_connection_data_stats_get(sfi->ci, &from_data_total, &to_data_total,
@@ -8647,7 +8651,7 @@ static bool ecm_db_char_dev_conn_msg_prep(struct ecm_db_state_file_instance *sfi
 	msg_len = snprintf(sfi->msgp, ECM_DB_STATE_FILE_BUFFER_SIZE,
 			"<conn serial=\"%u\" sip_address=\"%s\" sip_address_nat=\"%s\" sport=\"%d\" sport_nat=\"%d\" snode_address=\"%s\" snode_address_nat=\"%s\""
 			" dip_address=\"%s\" dip_address_nat=\"%s\" dport=\"%d\" dport_nat=\"%d\" dnode_address=\"%s\" dnode_address_nat=\"%s\""
-			" protocol=\"%d\" is_routed=\"%d\" expires=\"%ld\" direction=\"%d\" time_added=\"%u\""
+			" protocol=\"%d\" is_routed=\"%d\" expires=\"%ld\" direction=\"%d\" time_added=\"%u\" generations=\"%u\""
 			" from_data_total=\"%llu\" to_data_total=\"%llu\" from_packet_total=\"%llu\" to_packet_total=\"%llu\" from_data_total_dropped=\"%llu\" to_data_total_dropped=\"%llu\" from_packet_total_dropped=\"%llu\" to_packet_total_dropped=\"%llu\">\n",
 			serial,
 			sip_address,
@@ -8667,6 +8671,7 @@ static bool ecm_db_char_dev_conn_msg_prep(struct ecm_db_state_file_instance *sfi
 			expires_in,
 			direction,
 			time_added,
+			generations,
 			from_data_total,
 			to_data_total,
 			from_packet_total,

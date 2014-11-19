@@ -4682,6 +4682,160 @@ static bool ecm_front_end_ipv4_reclassify(struct ecm_db_connection_instance *ci,
 	return full_reclassification;
 }
 
+/*
+ * ecm_front_end_ipv4_connection_regenerate()
+ *	Re-generate a connection.
+ *
+ * Re-generating a connection involves re-evaluating the interface lists in case interface heirarchies have changed.
+ * It also involves the possible triggering of classifier re-evaluation but only if all currently assigned
+ * classifiers permit this operation.
+ */
+static bool ecm_front_end_ipv4_connection_regenerate(struct ecm_db_connection_instance *ci, ecm_tracker_sender_type_t sender,
+							struct net_device *out_dev, struct net_device *out_dev_nat,
+							struct net_device *in_dev, struct net_device *in_dev_nat)
+{
+	int i;
+	bool reclassify_allowed;
+	int32_t to_list_first;
+	struct ecm_db_iface_instance *to_list[ECM_DB_IFACE_HEIRARCHY_MAX];
+	int32_t to_nat_list_first;
+	struct ecm_db_iface_instance *to_nat_list[ECM_DB_IFACE_HEIRARCHY_MAX];
+	int32_t from_list_first;
+	struct ecm_db_iface_instance *from_list[ECM_DB_IFACE_HEIRARCHY_MAX];
+	int32_t from_nat_list_first;
+	struct ecm_db_iface_instance *from_nat_list[ECM_DB_IFACE_HEIRARCHY_MAX];
+	ip_addr_t ip_src_addr;
+	ip_addr_t ip_dest_addr;
+	ip_addr_t ip_src_addr_nat;
+	ip_addr_t ip_dest_addr_nat;
+	int protocol;
+	bool is_routed;
+	uint8_t src_node_addr[ETH_ALEN];
+	uint8_t dest_node_addr[ETH_ALEN];
+	uint8_t src_node_addr_nat[ETH_ALEN];
+	uint8_t dest_node_addr_nat[ETH_ALEN];
+	int assignment_count;
+	struct ecm_classifier_instance *assignments[ECM_CLASSIFIER_TYPES];
+
+	DEBUG_INFO("%p: re-gen needed\n", ci);
+
+	/*
+	 * We may need to swap the devices around depending on who the sender of the packet that triggered the re-gen is
+	 */
+	if (sender == ECM_TRACKER_SENDER_TYPE_DEST) {
+		struct net_device *tmp_dev;
+
+		/*
+		 * This is a packet sent by the destination of the connection, i.e. it is a packet issued by the 'from' side of the connection.
+		 */
+		DEBUG_TRACE("%p: Re-gen swap devs\n", ci);
+		tmp_dev = out_dev;
+		out_dev = in_dev;
+		in_dev = tmp_dev;
+
+		tmp_dev = out_dev_nat;
+		out_dev_nat = in_dev_nat;
+		in_dev_nat = tmp_dev;
+	}
+
+	/*
+	 * Update the interface lists - these may have changed, e.g. LAG path change etc.
+	 * NOTE: We never have to change the usual mapping->host->node_iface arrangements for each side of the connection (to/from sides)
+	 * This is because if these interfaces change then the connection is dead anyway.
+	 * But a LAG slave might change the heirarchy the connection is using but the LAG master is still sane.
+	 * If any of the new interface heirarchies cannot be created then simply set empty-lists as this will deny
+	 * acceleration and ensure that a bad rule cannot be created.
+	 * IMPORTANT: The 'sender' defines who has sent the packet that triggered this re-generation
+	 */
+	protocol = ecm_db_connection_protocol_get(ci);
+
+	is_routed = ecm_db_connection_is_routed_get(ci);
+
+	ecm_db_connection_from_address_get(ci, ip_src_addr);
+	ecm_db_connection_from_address_nat_get(ci, ip_src_addr_nat);
+
+	ecm_db_connection_to_address_get(ci, ip_dest_addr);
+	ecm_db_connection_to_address_nat_get(ci, ip_dest_addr_nat);
+
+	ecm_db_connection_from_node_address_get(ci, src_node_addr);
+	ecm_db_connection_from_nat_node_address_get(ci, src_node_addr_nat);
+
+	ecm_db_connection_to_node_address_get(ci, dest_node_addr);
+	ecm_db_connection_to_nat_node_address_get(ci, dest_node_addr_nat);
+
+
+	DEBUG_TRACE("%p: Update the 'from' interface heirarchy list\n", ci);
+	from_list_first = ecm_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, protocol, in_dev, is_routed, in_dev, src_node_addr, dest_node_addr);
+	ecm_db_connection_from_interfaces_reset(ci, from_list, from_list_first);
+	ecm_db_connection_interfaces_deref(from_list, from_list_first);
+
+	DEBUG_TRACE("%p: Update the 'from NAT' interface heirarchy list\n", ci);
+	from_nat_list_first = ecm_interface_heirarchy_construct(from_nat_list, ip_dest_addr, ip_src_addr_nat, protocol, in_dev_nat, is_routed, in_dev_nat, src_node_addr_nat, dest_node_addr_nat);
+	ecm_db_connection_from_nat_interfaces_reset(ci, from_nat_list, from_nat_list_first);
+	ecm_db_connection_interfaces_deref(from_nat_list, from_nat_list_first);
+
+	DEBUG_TRACE("%p: Update the 'to' interface heirarchy list\n", ci);
+	to_list_first = ecm_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, protocol, out_dev, is_routed, in_dev, dest_node_addr, src_node_addr);
+	ecm_db_connection_to_interfaces_reset(ci, to_list, to_list_first);
+	ecm_db_connection_interfaces_deref(to_list, to_list_first);
+
+	DEBUG_TRACE("%p: Update the 'to NAT' interface heirarchy list\n", ci);
+	to_nat_list_first = ecm_interface_heirarchy_construct(to_nat_list, ip_src_addr, ip_dest_addr_nat, protocol, out_dev_nat, is_routed, in_dev, dest_node_addr_nat, src_node_addr_nat);
+	ecm_db_connection_to_nat_interfaces_reset(ci, to_nat_list, to_nat_list_first);
+	ecm_db_connection_interfaces_deref(to_nat_list, to_nat_list_first);
+
+	/*
+	 * Get list of assigned classifiers to reclassify.
+	 * Remember: This also includes our default classifier too.
+	 */
+	assignment_count = ecm_db_connection_classifier_assignments_get_and_ref(ci, assignments);
+
+	/*
+	 * All of the assigned classifiers must permit reclassification.
+	 */
+	reclassify_allowed = true;
+	for (i = 0; i < assignment_count; ++i) {
+		DEBUG_TRACE("%p: Calling to reclassify: %p, type: %d\n", ci, assignments[i], assignments[i]->type_get(assignments[i]));
+		if (!assignments[i]->reclassify_allowed(assignments[i])) {
+			DEBUG_TRACE("%p: reclassify denied: %p, by type: %d\n", ci, assignments[i], assignments[i]->type_get(assignments[i]));
+			reclassify_allowed = false;
+			break;
+		}
+	}
+
+	if (!reclassify_allowed) {
+		/*
+		 * Regeneration came to a successful conclusion even though reclassification was denied
+		 */
+		DEBUG_WARN("%p: re-gen denied\n", ci);\
+
+		/*
+		 * Release the assignments
+		 */
+		ecm_db_connection_assignments_release(assignment_count, assignments);
+		return true;
+	}
+
+	/*
+	 * Reclassify
+	 */
+	DEBUG_INFO("%p: reclassify\n", ci);
+	if (!ecm_front_end_ipv4_reclassify(ci, assignment_count, assignments)) {
+		/*
+		 * We could not set up the classifiers to reclassify, it is safer to fail out and try again next time
+		 */
+		DEBUG_WARN("%p: Regeneration: reclassify failed\n", ci);
+		ecm_db_connection_assignments_release(assignment_count, assignments);
+		return false;
+	}
+	DEBUG_INFO("%p: reclassify success\n", ci);
+
+	/*
+	 * Release the assignments
+	 */
+	ecm_db_connection_assignments_release(assignment_count, assignments);
+	return true;
+}
 
 /*
  * ecm_front_end_ipv4_tcp_process()
@@ -4693,7 +4847,7 @@ static unsigned int ecm_front_end_ipv4_tcp_process(struct net_device *out_dev, s
 							uint8_t *dest_node_addr, uint8_t *dest_node_addr_nat,
 							bool can_accel, bool is_routed, struct sk_buff *skb,
 							struct ecm_tracker_ip_header *iph,
-							struct nf_conn *ct, enum ip_conntrack_dir ct_dir, ecm_db_direction_t ecm_dir,
+							struct nf_conn *ct, ecm_tracker_sender_type_t sender, ecm_db_direction_t ecm_dir,
 							struct nf_conntrack_tuple *orig_tuple, struct nf_conntrack_tuple *reply_tuple,
 							ip_addr_t ip_src_addr, ip_addr_t ip_dest_addr, ip_addr_t ip_src_addr_nat, ip_addr_t ip_dest_addr_nat)
 {
@@ -4704,7 +4858,6 @@ static unsigned int ecm_front_end_ipv4_tcp_process(struct net_device *out_dev, s
 	int dest_port;
 	int dest_port_nat;
 	struct ecm_db_connection_instance *ci;
-	ecm_tracker_sender_type_t sender;
 	ip_addr_t match_addr;
 	struct ecm_classifier_instance *assignments[ECM_CLASSIFIER_TYPES];
 	int aci_index;
@@ -4735,7 +4888,7 @@ static unsigned int ecm_front_end_ipv4_tcp_process(struct net_device *out_dev, s
 	 * Extract transport port information
 	 * Refer to the ecm_front_end_ipv4_process() for information on how we extract this information.
 	 */
-	if (ct_dir == IP_CT_DIR_ORIGINAL) {
+	if (sender == ECM_TRACKER_SENDER_TYPE_SRC) {
 		if ((ecm_dir == ECM_DB_DIRECTION_EGRESS_NAT) || (ecm_dir == ECM_DB_DIRECTION_NON_NAT)) {
 			src_port = ntohs(orig_tuple->src.u.tcp.port);
 			dest_port = ntohs(orig_tuple->dst.u.tcp.port);
@@ -5136,119 +5289,26 @@ static unsigned int ecm_front_end_ipv4_tcp_process(struct net_device *out_dev, s
 	}
 
 	/*
-	 * Do we need to action generation change?
-	 */
-	if (unlikely(ecm_db_connection_classifier_generation_changed(ci))) {
-		int i;
-		bool reclassify_allowed;
-		int32_t to_list_first;
-		struct ecm_db_iface_instance *to_list[ECM_DB_IFACE_HEIRARCHY_MAX];
-		int32_t to_nat_list_first;
-		struct ecm_db_iface_instance *to_nat_list[ECM_DB_IFACE_HEIRARCHY_MAX];
-		int32_t from_list_first;
-		struct ecm_db_iface_instance *from_list[ECM_DB_IFACE_HEIRARCHY_MAX];
-		int32_t from_nat_list_first;
-		struct ecm_db_iface_instance *from_nat_list[ECM_DB_IFACE_HEIRARCHY_MAX];
-
-		DEBUG_INFO("%p: re-gen needed\n", ci);
-
-		/*
-		 * Update the interface lists - these may have changed, e.g. LAG path change etc.
-		 * NOTE: We never have to change the usual mapping->host->node_iface arrangements for each side of the connection (to/from sides)
-		 * This is because if these interfaces change then the connection is dead anyway.
-		 * But a LAG slave might change the heirarchy the connection is using but the LAG master is still sane.
-		 * GGG TODO The empty list checks may mean that stale interface list information remains on a connection - this could be bad.
-		 * GGG Investigate the removal of the empty list checks.
-		 */
-		DEBUG_TRACE("%p: Update the 'from' interface heirarchy list\n", ci);
-		from_list_first = ecm_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, IPPROTO_TCP, in_dev, is_routed, in_dev, src_node_addr, dest_node_addr);
-		if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
-			ecm_db_connection_deref(ci);
-			DEBUG_WARN("Failed to obtain 'from' heirarchy list\n");
-			return NF_ACCEPT;
-		}
-		ecm_db_connection_from_interfaces_reset(ci, from_list, from_list_first);
-		ecm_db_connection_interfaces_deref(from_list, from_list_first);
-
-		DEBUG_TRACE("%p: Update the 'from NAT' interface heirarchy list\n", ci);
-		from_nat_list_first = ecm_interface_heirarchy_construct(from_nat_list, ip_dest_addr, ip_src_addr_nat, IPPROTO_TCP, in_dev_nat, is_routed, in_dev_nat, src_node_addr_nat, dest_node_addr_nat);
-		if (from_nat_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
-			ecm_db_connection_deref(ci);
-			DEBUG_WARN("Failed to obtain 'from NAT' heirarchy list\n");
-			return NF_ACCEPT;
-		}
-		ecm_db_connection_from_nat_interfaces_reset(ci, from_nat_list, from_nat_list_first);
-		ecm_db_connection_interfaces_deref(from_nat_list, from_nat_list_first);
-
-		DEBUG_TRACE("%p: Update the 'to' interface heirarchy list\n", ci);
-		to_list_first = ecm_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, IPPROTO_TCP, out_dev, is_routed, in_dev, dest_node_addr, src_node_addr);
-		if (to_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
-			ecm_db_connection_deref(ci);
-			DEBUG_WARN("Failed to obtain 'to' heirarchy list\n");
-			return NF_ACCEPT;
-		}
-		ecm_db_connection_to_interfaces_reset(ci, to_list, to_list_first);
-		ecm_db_connection_interfaces_deref(to_list, to_list_first);
-
-		DEBUG_TRACE("%p: Update the 'to NAT' interface heirarchy list\n", ci);
-		to_nat_list_first = ecm_interface_heirarchy_construct(to_nat_list, ip_src_addr, ip_dest_addr_nat, IPPROTO_TCP, out_dev_nat, is_routed, in_dev, dest_node_addr_nat, src_node_addr_nat);
-		if (to_nat_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
-			ecm_db_connection_deref(ci);
-			DEBUG_WARN("Failed to obtain 'to NAT' heirarchy list\n");
-			return NF_ACCEPT;
-		}
-		ecm_db_connection_to_nat_interfaces_reset(ci, to_nat_list, to_nat_list_first);
-		ecm_db_connection_interfaces_deref(to_nat_list, to_nat_list_first);
-
-		/*
-		 * Get list of assigned classifiers to reclassify.
-		 * Remember: This also includes our default classifier too.
-		 */
-		assignment_count = ecm_db_connection_classifier_assignments_get_and_ref(ci, assignments);
-
-		/*
-		 * All of the assigned classifiers must permit reclassification.
-		 */
-		reclassify_allowed = true;
-		for (i = 0; i < assignment_count; ++i) {
-			DEBUG_TRACE("%p: Calling to reclassify: %p, type: %d\n", ci, assignments[i], assignments[i]->type_get(assignments[i]));
-			if (!assignments[i]->reclassify_allowed(assignments[i])) {
-				DEBUG_TRACE("%p: reclassify denied: %p, by type: %d\n", ci, assignments[i], assignments[i]->type_get(assignments[i]));
-				reclassify_allowed = false;
-				break;
-			}
-		}
-
-		if (!reclassify_allowed) {
-			DEBUG_WARN("%p: re-gen denied\n", ci);
-		} else {
-			/*
-			 * Reclassify
-			 */
-			DEBUG_TRACE("%p: reclassify\n", ci);
-			if (!ecm_front_end_ipv4_reclassify(ci, assignment_count, assignments)) {
-				DEBUG_WARN("%p: Regeneration failed, dropping packet\n", ci);
-				ecm_db_connection_assignments_release(assignment_count, assignments);
-				ecm_db_connection_deref(ci);
-				return NF_ACCEPT;
-			}
-			DEBUG_TRACE("%p: reclassify success\n", ci);
-		}
-
-		/*
-		 * Release the assignments and re-obtain them as there may be new ones been reassigned.
-		 */
-		ecm_db_connection_assignments_release(assignment_count, assignments);
-	}
-
-	/*
-	 * Identify which side of the connection is sending
+	 * Identify which side of the connection is sending.
+	 * NOTE: This may be different than what sender is at the moment
+	 * given the connection we have located.
 	 */
 	ecm_db_connection_from_address_get(ci, match_addr);
 	if (ECM_IP_ADDR_MATCH(ip_src_addr, match_addr)) {
 		sender = ECM_TRACKER_SENDER_TYPE_SRC;
 	} else {
 		sender = ECM_TRACKER_SENDER_TYPE_DEST;
+	}
+
+	/*
+	 * Do we need to action generation change?
+	 */
+	if (unlikely(ecm_db_connection_classifier_generation_changed(ci))) {
+		if (!ecm_front_end_ipv4_connection_regenerate(ci, sender, out_dev, out_dev_nat, in_dev, in_dev_nat)) {
+			DEBUG_WARN("%p: Re-generation failed\n", ci);
+			ecm_db_connection_deref(ci);
+			return NF_ACCEPT;
+		}
 	}
 
 	/*
@@ -5421,7 +5481,7 @@ static unsigned int ecm_front_end_ipv4_udp_process(struct net_device *out_dev, s
 							uint8_t *dest_node_addr, uint8_t *dest_node_addr_nat,
 							bool can_accel, bool is_routed, struct sk_buff *skb,
 							struct ecm_tracker_ip_header *iph,
-							struct nf_conn *ct, enum ip_conntrack_dir ct_dir, ecm_db_direction_t ecm_dir,
+							struct nf_conn *ct, ecm_tracker_sender_type_t sender, ecm_db_direction_t ecm_dir,
 							struct nf_conntrack_tuple *orig_tuple, struct nf_conntrack_tuple *reply_tuple,
 							ip_addr_t ip_src_addr, ip_addr_t ip_dest_addr, ip_addr_t ip_src_addr_nat, ip_addr_t ip_dest_addr_nat)
 {
@@ -5432,7 +5492,6 @@ static unsigned int ecm_front_end_ipv4_udp_process(struct net_device *out_dev, s
 	int dest_port;
 	int dest_port_nat;
 	struct ecm_db_connection_instance *ci;
-	ecm_tracker_sender_type_t sender;
 	ip_addr_t match_addr;
 	struct ecm_classifier_instance *assignments[ECM_CLASSIFIER_TYPES];
 	int aci_index;
@@ -5478,7 +5537,7 @@ static unsigned int ecm_front_end_ipv4_udp_process(struct net_device *out_dev, s
 	 * Extract transport port information
 	 * Refer to the ecm_front_end_ipv4_process() for information on how we extract this information.
 	 */
-	if (ct_dir == IP_CT_DIR_ORIGINAL) {
+	if (sender == ECM_TRACKER_SENDER_TYPE_SRC) {
 		if ((ecm_dir == ECM_DB_DIRECTION_EGRESS_NAT) || (ecm_dir == ECM_DB_DIRECTION_NON_NAT)) {
 			src_port = ntohs(orig_tuple->src.u.udp.port);
 			dest_port = ntohs(orig_tuple->dst.u.udp.port);
@@ -5863,119 +5922,26 @@ static unsigned int ecm_front_end_ipv4_udp_process(struct net_device *out_dev, s
 	}
 
 	/*
-	 * Do we need to action generation change?
-	 */
-	if (unlikely(ecm_db_connection_classifier_generation_changed(ci))) {
-		int i;
-		bool reclassify_allowed;
-		int32_t to_list_first;
-		struct ecm_db_iface_instance *to_list[ECM_DB_IFACE_HEIRARCHY_MAX];
-		int32_t to_nat_list_first;
-		struct ecm_db_iface_instance *to_nat_list[ECM_DB_IFACE_HEIRARCHY_MAX];
-		int32_t from_list_first;
-		struct ecm_db_iface_instance *from_list[ECM_DB_IFACE_HEIRARCHY_MAX];
-		int32_t from_nat_list_first;
-		struct ecm_db_iface_instance *from_nat_list[ECM_DB_IFACE_HEIRARCHY_MAX];
-
-		DEBUG_INFO("%p: re-gen needed\n", ci);
-
-		/*
-		 * Update the interface lists - these may have changed, e.g. LAG path change etc.
-		 * NOTE: We never have to change the usual mapping->host->node_iface arrangements for each side of the connection (to/from sides)
-		 * This is because if these interfaces change then the connection is dead anyway.
-		 * But a LAG slave might change the heirarchy the connection is using but the LAG master is still sane.
-		 * GGG TODO The empty list checks may mean that stale interface list information remains on a connection - this could be bad.
-		 * GGG Investigate the removal of the empty list checks.
-		 */
-		DEBUG_TRACE("%p: Update the 'from' interface heirarchy list\n", ci);
-		from_list_first = ecm_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, IPPROTO_UDP, in_dev, is_routed, in_dev, src_node_addr, dest_node_addr);
-		if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
-			ecm_db_connection_deref(ci);
-			DEBUG_WARN("Failed to obtain 'from' heirarchy list\n");
-			return NF_ACCEPT;
-		}
-		ecm_db_connection_from_interfaces_reset(ci, from_list, from_list_first);
-		ecm_db_connection_interfaces_deref(from_list, from_list_first);
-
-		DEBUG_TRACE("%p: Update the 'from NAT' interface heirarchy list\n", ci);
-		from_nat_list_first = ecm_interface_heirarchy_construct(from_nat_list, ip_dest_addr, ip_src_addr_nat, IPPROTO_UDP, in_dev_nat, is_routed, in_dev_nat, src_node_addr_nat, dest_node_addr_nat);
-		if (from_nat_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
-			ecm_db_connection_deref(ci);
-			DEBUG_WARN("Failed to obtain 'from NAT' heirarchy list\n");
-			return NF_ACCEPT;
-		}
-		ecm_db_connection_from_nat_interfaces_reset(ci, from_nat_list, from_nat_list_first);
-		ecm_db_connection_interfaces_deref(from_nat_list, from_nat_list_first);
-
-		DEBUG_TRACE("%p: Update the 'to' interface heirarchy list\n", ci);
-		to_list_first = ecm_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, IPPROTO_UDP, out_dev, is_routed, in_dev, dest_node_addr, src_node_addr);
-		if (to_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
-			ecm_db_connection_deref(ci);
-			DEBUG_WARN("Failed to obtain 'to' heirarchy list\n");
-			return NF_ACCEPT;
-		}
-		ecm_db_connection_to_interfaces_reset(ci, to_list, to_list_first);
-		ecm_db_connection_interfaces_deref(to_list, to_list_first);
-
-		DEBUG_TRACE("%p: Update the 'to NAT' interface heirarchy list\n", ci);
-		to_nat_list_first = ecm_interface_heirarchy_construct(to_nat_list, ip_src_addr, ip_dest_addr_nat, IPPROTO_UDP, out_dev_nat, is_routed, in_dev, dest_node_addr_nat, src_node_addr_nat);
-		if (to_nat_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
-			ecm_db_connection_deref(ci);
-			DEBUG_WARN("Failed to obtain 'to NAT' heirarchy list\n");
-			return NF_ACCEPT;
-		}
-		ecm_db_connection_to_nat_interfaces_reset(ci, to_nat_list, to_nat_list_first);
-		ecm_db_connection_interfaces_deref(to_nat_list, to_nat_list_first);
-
-		/*
-		 * Get list of assigned classifiers to reclassify.
-		 * Remember: This also includes our default classifier too.
-		 */
-		assignment_count = ecm_db_connection_classifier_assignments_get_and_ref(ci, assignments);
-
-		/*
-		 * All of the assigned classifiers must permit reclassification.
-		 */
-		reclassify_allowed = true;
-		for (i = 0; i < assignment_count; ++i) {
-			DEBUG_TRACE("%p: Calling to reclassify: %p, type: %d\n", ci, assignments[i], assignments[i]->type_get(assignments[i]));
-			if (!assignments[i]->reclassify_allowed(assignments[i])) {
-				DEBUG_TRACE("%p: reclassify denied: %p, by type: %d\n", ci, assignments[i], assignments[i]->type_get(assignments[i]));
-				reclassify_allowed = false;
-				break;
-			}
-		}
-
-		if (!reclassify_allowed) {
-			DEBUG_WARN("%p: re-gen denied\n", ci);
-		} else {
-			/*
-			 * Reclassify
-			 */
-			DEBUG_TRACE("%p: reclassify\n", ci);
-			if (!ecm_front_end_ipv4_reclassify(ci, assignment_count, assignments)) {
-				DEBUG_WARN("%p: Regeneration failed, dropping packet\n", ci);
-				ecm_db_connection_assignments_release(assignment_count, assignments);
-				ecm_db_connection_deref(ci);
-				return NF_ACCEPT;
-			}
-			DEBUG_TRACE("%p: reclassify success\n", ci);
-		}
-
-		/*
-		 * Release the assignments and re-obtain them as there may be new ones been reassigned.
-		 */
-		ecm_db_connection_assignments_release(assignment_count, assignments);
-	}
-
-	/*
-	 * Identify which side of the connection is sending
+	 * Identify which side of the connection is sending.
+	 * NOTE: This may be different than what sender is at the moment
+	 * given the connection we have located.
 	 */
 	ecm_db_connection_from_address_get(ci, match_addr);
 	if (ECM_IP_ADDR_MATCH(ip_src_addr, match_addr)) {
 		sender = ECM_TRACKER_SENDER_TYPE_SRC;
 	} else {
 		sender = ECM_TRACKER_SENDER_TYPE_DEST;
+	}
+
+	/*
+	 * Do we need to action generation change?
+	 */
+	if (unlikely(ecm_db_connection_classifier_generation_changed(ci))) {
+		if (!ecm_front_end_ipv4_connection_regenerate(ci, sender, out_dev, out_dev_nat, in_dev, in_dev_nat)) {
+			DEBUG_WARN("%p: Re-generation failed\n", ci);
+			ecm_db_connection_deref(ci);
+			return NF_ACCEPT;
+		}
 	}
 
 	/*
@@ -6148,12 +6114,11 @@ static unsigned int ecm_front_end_ipv4_non_ported_process(struct net_device *out
 							uint8_t *dest_node_addr, uint8_t *dest_node_addr_nat,
 							bool can_accel, bool is_routed, struct sk_buff *skb,
 							struct ecm_tracker_ip_header *ip_hdr,
-							struct nf_conn *ct, enum ip_conntrack_dir ct_dir, ecm_db_direction_t ecm_dir,
+							struct nf_conn *ct, ecm_tracker_sender_type_t sender, ecm_db_direction_t ecm_dir,
 							struct nf_conntrack_tuple *orig_tuple, struct nf_conntrack_tuple *reply_tuple,
 							ip_addr_t ip_src_addr, ip_addr_t ip_dest_addr, ip_addr_t ip_src_addr_nat, ip_addr_t ip_dest_addr_nat)
 {
 	struct ecm_db_connection_instance *ci;
-	ecm_tracker_sender_type_t sender;
 	int protocol;
 	int src_port;
 	int src_port_nat;
@@ -6541,119 +6506,26 @@ static unsigned int ecm_front_end_ipv4_non_ported_process(struct net_device *out
 	}
 
 	/*
-	 * Do we need to action generation change?
-	 */
-	if (unlikely(ecm_db_connection_classifier_generation_changed(ci))) {
-		int i;
-		bool reclassify_allowed;
-		int32_t to_list_first;
-		struct ecm_db_iface_instance *to_list[ECM_DB_IFACE_HEIRARCHY_MAX];
-		int32_t to_nat_list_first;
-		struct ecm_db_iface_instance *to_nat_list[ECM_DB_IFACE_HEIRARCHY_MAX];
-		int32_t from_list_first;
-		struct ecm_db_iface_instance *from_list[ECM_DB_IFACE_HEIRARCHY_MAX];
-		int32_t from_nat_list_first;
-		struct ecm_db_iface_instance *from_nat_list[ECM_DB_IFACE_HEIRARCHY_MAX];
-
-		DEBUG_INFO("%p: re-gen needed\n", ci);
-
-		/*
-		 * Update the interface lists - these may have changed, e.g. LAG path change etc.
-		 * NOTE: We never have to change the usual mapping->host->node_iface arrangements for each side of the connection (to/from sides)
-		 * This is because if these interfaces change then the connection is dead anyway.
-		 * But a LAG slave might change the heirarchy the connection is using but the LAG master is still sane.
-		 * GGG TODO The empty list checks may mean that stale interface list information remains on a connection - this could be bad.
-		 * GGG Investigate the removal of the empty list checks.
-		 */
-		DEBUG_TRACE("%p: Update the 'from' interface heirarchy list\n", ci);
-		from_list_first = ecm_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, protocol, in_dev, is_routed, in_dev, src_node_addr, dest_node_addr);
-		if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
-			ecm_db_connection_deref(ci);
-			DEBUG_WARN("Failed to obtain 'from' heirarchy list\n");
-			return NF_ACCEPT;
-		}
-		ecm_db_connection_from_interfaces_reset(ci, from_list, from_list_first);
-		ecm_db_connection_interfaces_deref(from_list, from_list_first);
-
-		DEBUG_TRACE("%p: Update the 'from NAT' interface heirarchy list\n", ci);
-		from_nat_list_first = ecm_interface_heirarchy_construct(from_nat_list, ip_dest_addr, ip_src_addr_nat, protocol, in_dev_nat, is_routed, in_dev_nat, src_node_addr_nat, dest_node_addr_nat);
-		if (from_nat_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
-			ecm_db_connection_deref(ci);
-			DEBUG_WARN("Failed to obtain 'from NAT' heirarchy list\n");
-			return NF_ACCEPT;
-		}
-		ecm_db_connection_from_nat_interfaces_reset(ci, from_nat_list, from_nat_list_first);
-		ecm_db_connection_interfaces_deref(from_nat_list, from_nat_list_first);
-
-		DEBUG_TRACE("%p: Update the 'to' interface heirarchy list\n", ci);
-		to_list_first = ecm_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, protocol, out_dev, is_routed, in_dev, dest_node_addr, src_node_addr);
-		if (to_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
-			ecm_db_connection_deref(ci);
-			DEBUG_WARN("Failed to obtain 'to' heirarchy list\n");
-			return NF_ACCEPT;
-		}
-		ecm_db_connection_to_interfaces_reset(ci, to_list, to_list_first);
-		ecm_db_connection_interfaces_deref(to_list, to_list_first);
-
-		DEBUG_TRACE("%p: Update the 'to NAT' interface heirarchy list\n", ci);
-		to_nat_list_first = ecm_interface_heirarchy_construct(to_nat_list, ip_src_addr, ip_dest_addr_nat, protocol, out_dev_nat, is_routed, in_dev, dest_node_addr_nat, src_node_addr_nat);
-		if (to_nat_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
-			ecm_db_connection_deref(ci);
-			DEBUG_WARN("Failed to obtain 'to NAT' heirarchy list\n");
-			return NF_ACCEPT;
-		}
-		ecm_db_connection_to_nat_interfaces_reset(ci, to_nat_list, to_nat_list_first);
-		ecm_db_connection_interfaces_deref(to_nat_list, to_nat_list_first);
-
-		/*
-		 * Get list of assigned classifiers to reclassify.
-		 * Remember: This also includes our default classifier too.
-		 */
-		assignment_count = ecm_db_connection_classifier_assignments_get_and_ref(ci, assignments);
-
-		/*
-		 * All of the assigned classifiers must permit reclassification.
-		 */
-		reclassify_allowed = true;
-		for (i = 0; i < assignment_count; ++i) {
-			DEBUG_TRACE("%p: Calling to reclassify: %p, type: %d\n", ci, assignments[i], assignments[i]->type_get(assignments[i]));
-			if (!assignments[i]->reclassify_allowed(assignments[i])) {
-				DEBUG_TRACE("%p: reclassify denied: %p, by type: %d\n", ci, assignments[i], assignments[i]->type_get(assignments[i]));
-				reclassify_allowed = false;
-				break;
-			}
-		}
-
-		if (!reclassify_allowed) {
-			DEBUG_WARN("%p: re-gen denied\n", ci);
-		} else {
-			/*
-			 * Reclassify
-			 */
-			DEBUG_TRACE("%p: reclassify\n", ci);
-			if (!ecm_front_end_ipv4_reclassify(ci, assignment_count, assignments)) {
-				DEBUG_WARN("%p: Regeneration failed, dropping packet\n", ci);
-				ecm_db_connection_assignments_release(assignment_count, assignments);
-				ecm_db_connection_deref(ci);
-				return NF_ACCEPT;
-			}
-			DEBUG_TRACE("%p: reclassify success\n", ci);
-		}
-
-		/*
-		 * Release the assignments and re-obtain them as there may be new ones been reassigned.
-		 */
-		ecm_db_connection_assignments_release(assignment_count, assignments);
-	}
-
-	/*
-	 * Identify which side of the connection is sending
+	 * Identify which side of the connection is sending.
+	 * NOTE: This may be different than what sender is at the moment
+	 * given the connection we have located.
 	 */
 	ecm_db_connection_from_address_get(ci, match_addr);
 	if (ECM_IP_ADDR_MATCH(ip_src_addr, match_addr)) {
 		sender = ECM_TRACKER_SENDER_TYPE_SRC;
 	} else {
 		sender = ECM_TRACKER_SENDER_TYPE_DEST;
+	}
+
+	/*
+	 * Do we need to action generation change?
+	 */
+	if (unlikely(ecm_db_connection_classifier_generation_changed(ci))) {
+		if (!ecm_front_end_ipv4_connection_regenerate(ci, sender, out_dev, out_dev_nat, in_dev, in_dev_nat)) {
+			DEBUG_WARN("%p: Re-generation failed\n", ci);
+			ecm_db_connection_deref(ci);
+			return NF_ACCEPT;
+		}
 	}
 
 	/*
@@ -6845,8 +6717,8 @@ static unsigned int ecm_front_end_ipv4_ip_process(struct net_device *out_dev, st
         enum ip_conntrack_info ctinfo;
 	struct nf_conntrack_tuple orig_tuple;
 	struct nf_conntrack_tuple reply_tuple;
-	enum ip_conntrack_dir ct_dir;
 	ecm_db_direction_t ecm_dir;
+	ecm_tracker_sender_type_t sender;
 	ip_addr_t ip_src_addr;
 	ip_addr_t ip_dest_addr;
 	ip_addr_t ip_src_addr_nat;
@@ -6880,7 +6752,7 @@ static unsigned int ecm_front_end_ipv4_ip_process(struct net_device *out_dev, st
 		orig_tuple.dst.protonum = ip_hdr.protocol;
 		reply_tuple.src.u3.ip = orig_tuple.dst.u3.ip;
 		reply_tuple.dst.u3.ip = orig_tuple.src.u3.ip;
-		ct_dir = IP_CT_DIR_ORIGINAL;
+		sender = ECM_TRACKER_SENDER_TYPE_SRC;
 	} else {
 		if (unlikely(ct == &nf_conntrack_untracked)) {
 			DEBUG_TRACE("%p: ct: untracked\n", skb);
@@ -6902,7 +6774,11 @@ static unsigned int ecm_front_end_ipv4_ip_process(struct net_device *out_dev, st
 		DEBUG_TRACE("%p: ct: %p, ctinfo: %x\n", skb, ct, ctinfo);
 		orig_tuple = ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple;
 		reply_tuple = ct->tuplehash[IP_CT_DIR_REPLY].tuple;
-		ct_dir = CTINFO2DIR(ctinfo);
+		if (IP_CT_DIR_ORIGINAL == CTINFO2DIR(ctinfo)) {
+			sender = ECM_TRACKER_SENDER_TYPE_SRC;
+		} else {
+			sender = ECM_TRACKER_SENDER_TYPE_DEST;
+		}
 
 		/*
 		 * Is this a related connection?
@@ -6944,7 +6820,7 @@ static unsigned int ecm_front_end_ipv4_ip_process(struct net_device *out_dev, st
 		ecm_dir = ECM_DB_DIRECTION_BRIDGED;
 	}
 
-	DEBUG_TRACE("IP Packet ORIGINAL src: %pI4 ORIGINAL dst: %pI4 protocol: %u, ct_dir: %d ecm_dir: %d\n", &orig_tuple.src.u3.ip, &orig_tuple.dst.u3.ip, orig_tuple.dst.protonum, ct_dir, ecm_dir);
+	DEBUG_TRACE("IP Packet ORIGINAL src: %pI4 ORIGINAL dst: %pI4 protocol: %u, sender: %d ecm_dir: %d\n", &orig_tuple.src.u3.ip, &orig_tuple.dst.u3.ip, orig_tuple.dst.protonum, sender, ecm_dir);
 
 	/*
 	 * Get IP addressing information.  This same logic is applied when extracting port information too.
@@ -7088,7 +6964,7 @@ static unsigned int ecm_front_end_ipv4_ip_process(struct net_device *out_dev, st
 	 *	dest_node_addr refers to node address of ip_dest_addr
 	 *	dest_node_addr_nat is set to dest_node_addr
 	 */
-	if (ct_dir == IP_CT_DIR_ORIGINAL) {
+	if (sender == ECM_TRACKER_SENDER_TYPE_SRC) {
 		if ((ecm_dir == ECM_DB_DIRECTION_EGRESS_NAT) || (ecm_dir == ECM_DB_DIRECTION_NON_NAT)) {
 			/*
 			 * Example 1
@@ -7216,7 +7092,7 @@ static unsigned int ecm_front_end_ipv4_ip_process(struct net_device *out_dev, st
 				dest_node_addr, dest_node_addr_nat,
 				can_accel, is_routed, skb,
 				&ip_hdr,
-				ct, ct_dir, ecm_dir,
+				ct, sender, ecm_dir,
 				&orig_tuple, &reply_tuple,
 				ip_src_addr, ip_dest_addr, ip_src_addr_nat, ip_dest_addr_nat);
 	} else if (likely(orig_tuple.dst.protonum == IPPROTO_UDP)) {
@@ -7226,7 +7102,7 @@ static unsigned int ecm_front_end_ipv4_ip_process(struct net_device *out_dev, st
 				dest_node_addr, dest_node_addr_nat,
 				can_accel, is_routed, skb,
 				&ip_hdr,
-				ct, ct_dir, ecm_dir,
+				ct, sender, ecm_dir,
 				&orig_tuple, &reply_tuple,
 				ip_src_addr, ip_dest_addr, ip_src_addr_nat, ip_dest_addr_nat);
 	}
@@ -7236,7 +7112,7 @@ static unsigned int ecm_front_end_ipv4_ip_process(struct net_device *out_dev, st
 				dest_node_addr, dest_node_addr_nat,
 				can_accel, is_routed, skb,
 				&ip_hdr,
-				ct, ct_dir, ecm_dir,
+				ct, sender, ecm_dir,
 				&orig_tuple, &reply_tuple,
 				ip_src_addr, ip_dest_addr, ip_src_addr_nat, ip_dest_addr_nat);
 }
