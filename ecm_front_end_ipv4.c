@@ -149,7 +149,8 @@ static int ecm_front_end_ipv4_non_ported_accelerated_count = 0;		/* Number of No
 static int ecm_front_end_ipv4_accelerated_count = 0;			/* Total offloads */
 
 /*
- * Locking of the classifier - concurrency control
+ * Locking of the classifier - concurrency control for file global parameters.
+ * NOTE: It is safe to take this lock WHILE HOLDING a feci->lock.  The reverse is NOT SAFE.
  */
 static spinlock_t ecm_front_end_ipv4_lock;			/* Protect against SMP access between netfilter, events and private threaded function. */
 
@@ -572,6 +573,41 @@ static void ecm_front_end_ipv4_connection_tcp_callback(void *app_data, struct ns
 		return;
 	}
 
+	spin_lock_bh(&fecti->lock);
+	DEBUG_ASSERT(fecti->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING, "%p: Unexpected mode: %d\n", ci, fecti->accel_mode);
+
+	/*
+	 * If a flush occured before we got the ACK then our acceleration was effectively cancelled on us
+	 * GGG TODO This is a workaround for a NSS message OOO quirk, this should eventually be removed.
+	 */
+	if (fecti->base.stats.flush_happened) {
+		fecti->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_DECEL;
+		fecti->base.stats.flush_happened = false;
+
+		/*
+		 * We are decelerated, clear any pending flag as that is meaningless now.
+		 */
+		fecti->base.stats.decelerate_pending = false;
+
+		/*
+		 * Increement the no-action counter.  Our connectin was decelerated on us with no action occurring.
+		 */
+		fecti->base.stats.no_action_seen++;
+		spin_unlock_bh(&fecti->lock);
+
+		/*
+		 * Release the connection.
+		 */
+		feci->deref(feci);
+		ecm_db_connection_deref(ci);
+		return;
+	}
+
+	/*
+	 * We got an ACK - we are accelerated.
+	 */
+	fecti->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_ACCEL;
+
 	/*
 	 * Create succeeded, declare that we are accelerated.
 	 */
@@ -579,15 +615,6 @@ static void ecm_front_end_ipv4_connection_tcp_callback(void *app_data, struct ns
 	ecm_front_end_ipv4_tcp_accelerated_count++;	/* Protocol specific counter */
 	ecm_front_end_ipv4_accelerated_count++;		/* General running counter */
 	spin_unlock_bh(&ecm_front_end_ipv4_lock);
-
-	spin_lock_bh(&fecti->lock);
-	DEBUG_ASSERT(fecti->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING, "%p: Unexpected mode: %d\n", ci, fecti->accel_mode);
-	fecti->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_ACCEL;
-
-	/*
-	 * Increement the no-action counter, this is reset if offload action is seen
-	 */
-	fecti->base.stats.no_action_seen++;
 
 	/*
 	 * Clear any nack count
@@ -599,6 +626,11 @@ static void ecm_front_end_ipv4_connection_tcp_callback(void *app_data, struct ns
 	 * If decelerate is pending then we need to begin deceleration :-(
 	 */
 	if (!fecti->base.stats.decelerate_pending) {
+		/*
+		 * Increement the no-action counter, this is reset if offload action is seen
+		 */
+		fecti->base.stats.no_action_seen++;
+
 		spin_unlock_bh(&fecti->lock);
 
 		/*
@@ -1658,10 +1690,24 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_accel_ceased(struct ecm_
 	DEBUG_CHECK_MAGIC(fecti, ECM_FRONT_END_IPV4_CONNECTION_TCP_INSTANCE_MAGIC, "%p: magic failed", fecti);
 	DEBUG_INFO("%p: accel ceased\n", fecti);
 
+	spin_lock_bh(&fecti->lock);
+
+	/*
+	 * If we are in accel-pending state then the NSS has issued a flush out-of-order
+	 * with the ACK/NACK we are actually waiting for.
+	 * To work around this we record a "flush has already happened" and will action it when we finally get that ACK/NACK.
+	 * GGG TODO This should eventually be removed when the NSS honours messaging sequence.
+	 */
+	if (fecti->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING) {
+		fecti->base.stats.flush_happened = true;
+		fecti->base.stats.flush_happened_total++;
+		spin_unlock_bh(&fecti->lock);
+		return;
+	}
+
 	/*
 	 * If connection is no longer accelerated by the time we get here just ignore the command
 	 */
-	spin_lock_bh(&fecti->lock);
 	if (fecti->accel_mode != ECM_FRONT_END_ACCELERATION_MODE_ACCEL) {
 		spin_unlock_bh(&fecti->lock);
 		return;
@@ -1766,11 +1812,12 @@ static int ecm_front_end_ipv4_connection_tcp_front_end_xml_state_get(struct ecm_
 	memcpy(&stats, &feci->stats, sizeof(struct ecm_front_end_connection_mode_stats));
 	spin_unlock_bh(&fecti->lock);
 
-	return snprintf(buf, buf_sz, "<front_end_tcp can_accel=\"%d\" accel_mode=\"%d\" decelerate_pending=\"%d\" no_action_seen_total=\"%d\" no_action_seen=\"%d\" no_action_seen_limit=\"%d\""
+	return snprintf(buf, buf_sz, "<front_end_tcp can_accel=\"%d\" accel_mode=\"%d\" decelerate_pending=\"%d\" flush_happened_total=\"%d\" no_action_seen_total=\"%d\" no_action_seen=\"%d\" no_action_seen_limit=\"%d\""
 				" driver_fail_total=\"%d\" driver_fail=\"%d\" driver_fail_limit=\"%d\" nss_nack_total=\"%d\" nss_nack=\"%d\" nss_nack_limit=\"%d\"/>\n",
 			can_accel,
 			accel_mode,
 			stats.decelerate_pending,
+			stats.flush_happened_total,
 			stats.no_action_seen_total,
 			stats.no_action_seen,
 			stats.no_action_seen_limit,
@@ -1932,6 +1979,41 @@ static void ecm_front_end_ipv4_connection_udp_callback(void *app_data, struct ns
 		return;
 	}
 
+	spin_lock_bh(&fecui->lock);
+	DEBUG_ASSERT(fecui->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING, "%p: Unexpected mode: %d\n", ci, fecui->accel_mode);
+
+	/*
+	 * If a flush occured before we got the ACK then our acceleration was effectively cancelled on us
+	 * GGG TODO This is a workaround for a NSS message OOO quirk, this should eventually be removed.
+	 */
+	if (fecui->base.stats.flush_happened) {
+		fecui->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_DECEL;
+		fecui->base.stats.flush_happened = false;
+
+		/*
+		 * We are decelerated, clear any pending flag as that is meaningless now.
+		 */
+		fecui->base.stats.decelerate_pending = false;
+
+		/*
+		 * Increement the no-action counter.  Our connectin was decelerated on us with no action occurring.
+		 */
+		fecui->base.stats.no_action_seen++;
+		spin_unlock_bh(&fecui->lock);
+
+		/*
+		 * Release the connection.
+		 */
+		feci->deref(feci);
+		ecm_db_connection_deref(ci);
+		return;
+	}
+
+	/*
+	 * We got an ACK - we are accelerated.
+	 */
+	fecui->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_ACCEL;
+
 	/*
 	 * Create succeeded, declare that we are accelerated.
 	 */
@@ -1939,15 +2021,6 @@ static void ecm_front_end_ipv4_connection_udp_callback(void *app_data, struct ns
 	ecm_front_end_ipv4_udp_accelerated_count++;	/* Protocol specific counter */
 	ecm_front_end_ipv4_accelerated_count++;		/* General running counter */
 	spin_unlock_bh(&ecm_front_end_ipv4_lock);
-
-	spin_lock_bh(&fecui->lock);
-	DEBUG_ASSERT(fecui->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING, "%p: Unexpected mode: %d\n", ci, fecui->accel_mode);
-	fecui->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_ACCEL;
-
-	/*
-	 * Increement the no-action counter, this is reset if offload action is seen
-	 */
-	fecui->base.stats.no_action_seen++;
 
 	/*
 	 * Clear any nack count
@@ -1959,6 +2032,11 @@ static void ecm_front_end_ipv4_connection_udp_callback(void *app_data, struct ns
 	 * If decelerate is pending then we need to begin deceleration :-(
 	 */
 	if (!fecui->base.stats.decelerate_pending) {
+		/*
+		 * Increement the no-action counter, this is reset if offload action is seen
+		 */
+		fecui->base.stats.no_action_seen++;
+
 		spin_unlock_bh(&fecui->lock);
 
 		/*
@@ -2969,10 +3047,24 @@ static void ecm_front_end_ipv4_connection_udp_front_end_accel_ceased(struct ecm_
 	DEBUG_CHECK_MAGIC(fecui, ECM_FRONT_END_IPV4_CONNECTION_UDP_INSTANCE_MAGIC, "%p: magic failed", fecui);
 	DEBUG_INFO("%p: accel ceased\n", fecui);
 
+	spin_lock_bh(&fecui->lock);
+
+	/*
+	 * If we are in accel-pending state then the NSS has issued a flush out-of-order
+	 * with the ACK/NACK we are actually waiting for.
+	 * To work around this we record a "flush has already happened" and will action it when we finally get that ACK/NACK.
+	 * GGG TODO This should eventually be removed when the NSS honours messaging sequence.
+	 */
+	if (fecui->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING) {
+		fecui->base.stats.flush_happened = true;
+		fecui->base.stats.flush_happened_total++;
+		spin_unlock_bh(&fecui->lock);
+		return;
+	}
+
 	/*
 	 * If connection is no longer accelerated by the time we get here just ignore the command
 	 */
-	spin_lock_bh(&fecui->lock);
 	if (fecui->accel_mode != ECM_FRONT_END_ACCELERATION_MODE_ACCEL) {
 		spin_unlock_bh(&fecui->lock);
 		return;
@@ -3077,11 +3169,12 @@ static int ecm_front_end_ipv4_connection_udp_front_end_xml_state_get(struct ecm_
 	memcpy(&stats, &feci->stats, sizeof(struct ecm_front_end_connection_mode_stats));
 	spin_unlock_bh(&fecui->lock);
 
-	return snprintf(buf, buf_sz, "<front_end_udp can_accel=\"%d\" accel_mode=\"%d\" decelerate_pending=\"%d\" no_action_seen_total=\"%d\" no_action_seen=\"%d\" no_action_seen_limit=\"%d\""
+	return snprintf(buf, buf_sz, "<front_end_udp can_accel=\"%d\" accel_mode=\"%d\" decelerate_pending=\"%d\" flush_happened_total=\"%d\" no_action_seen_total=\"%d\" no_action_seen=\"%d\" no_action_seen_limit=\"%d\""
 				" driver_fail_total=\"%d\" driver_fail=\"%d\" driver_fail_limit=\"%d\" nss_nack_total=\"%d\" nss_nack=\"%d\" nss_nack_limit=\"%d\"/>\n",
 			can_accel,
 			accel_mode,
 			stats.decelerate_pending,
+			stats.flush_happened_total,
 			stats.no_action_seen_total,
 			stats.no_action_seen,
 			stats.no_action_seen_limit,
@@ -3317,6 +3410,41 @@ static void ecm_front_end_ipv4_connection_non_ported_callback(void *app_data, st
 		return;
 	}
 
+	spin_lock_bh(&fecnpi->lock);
+	DEBUG_ASSERT(fecnpi->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING, "%p: Unexpected mode: %d\n", ci, fecnpi->accel_mode);
+
+	/*
+	 * If a flush occured before we got the ACK then our acceleration was effectively cancelled on us
+	 * GGG TODO This is a workaround for a NSS message OOO quirk, this should eventually be removed.
+	 */
+	if (fecnpi->base.stats.flush_happened) {
+		fecnpi->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_DECEL;
+		fecnpi->base.stats.flush_happened = false;
+
+		/*
+		 * We are decelerated, clear any pending flag as that is meaningless now.
+		 */
+		fecnpi->base.stats.decelerate_pending = false;
+
+		/*
+		 * Increement the no-action counter.  Our connectin was decelerated on us with no action occurring.
+		 */
+		fecnpi->base.stats.no_action_seen++;
+		spin_unlock_bh(&fecnpi->lock);
+
+		/*
+		 * Release the connection.
+		 */
+		feci->deref(feci);
+		ecm_db_connection_deref(ci);
+		return;
+	}
+
+	/*
+	 * We got an ACK - we are accelerated.
+	 */
+	fecnpi->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_ACCEL;
+
 	/*
 	 * Create succeeded, declare that we are accelerated.
 	 */
@@ -3324,15 +3452,6 @@ static void ecm_front_end_ipv4_connection_non_ported_callback(void *app_data, st
 	ecm_front_end_ipv4_non_ported_accelerated_count++;	/* Protocol specific counter */
 	ecm_front_end_ipv4_accelerated_count++;			/* General running counter */
 	spin_unlock_bh(&ecm_front_end_ipv4_lock);
-
-	spin_lock_bh(&fecnpi->lock);
-	DEBUG_ASSERT(fecnpi->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING, "%p: Unexpected mode: %d\n", ci, fecnpi->accel_mode);
-	fecnpi->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_ACCEL;
-
-	/*
-	 * Increement the no-action counter, this is reset if offload action is seen
-	 */
-	fecnpi->base.stats.no_action_seen++;
 
 	/*
 	 * Clear any nack count
@@ -3344,6 +3463,11 @@ static void ecm_front_end_ipv4_connection_non_ported_callback(void *app_data, st
 	 * If decelerate is pending then we need to begin deceleration :-(
 	 */
 	if (!fecnpi->base.stats.decelerate_pending) {
+		/*
+		 * Increement the no-action counter, this is reset if offload action is seen
+		 */
+		fecnpi->base.stats.no_action_seen++;
+
 		spin_unlock_bh(&fecnpi->lock);
 
 		/*
@@ -4382,10 +4506,24 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_accel_ceased(stru
 
 	DEBUG_INFO("%p: accel ceased\n", fecnpi);
 
+	spin_lock_bh(&fecnpi->lock);
+
+	/*
+	 * If we are in accel-pending state then the NSS has issued a flush out-of-order
+	 * with the ACK/NACK we are actually waiting for.
+	 * To work around this we record a "flush has already happened" and will action it when we finally get that ACK/NACK.
+	 * GGG TODO This should eventually be removed when the NSS honours messaging sequence.
+	 */
+	if (fecnpi->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING) {
+		fecnpi->base.stats.flush_happened = true;
+		fecnpi->base.stats.flush_happened_total++;
+		spin_unlock_bh(&fecnpi->lock);
+		return;
+	}
+
 	/*
 	 * If connection is no longer accelerated by the time we get here just ignore the command
 	 */
-	spin_lock_bh(&fecnpi->lock);
 	if (fecnpi->accel_mode != ECM_FRONT_END_ACCELERATION_MODE_ACCEL) {
 		spin_unlock_bh(&fecnpi->lock);
 		return;
@@ -4490,11 +4628,12 @@ static int ecm_front_end_ipv4_connection_non_ported_front_end_xml_state_get(stru
 	memcpy(&stats, &feci->stats, sizeof(struct ecm_front_end_connection_mode_stats));
 	spin_unlock_bh(&fecnpi->lock);
 
-	return snprintf(buf, buf_sz, "<front_end_non_ported can_accel=\"%d\" accel_mode=\"%d\" decelerate_pending=\"%d\" no_action_seen_total=\"%d\" no_action_seen=\"%d\" no_action_seen_limit=\"%d\""
+	return snprintf(buf, buf_sz, "<front_end_non_ported can_accel=\"%d\" accel_mode=\"%d\" decelerate_pending=\"%d\" flush_happened_total=\"%d\" no_action_seen_total=\"%d\" no_action_seen=\"%d\" no_action_seen_limit=\"%d\""
 				" driver_fail_total=\"%d\" driver_fail=\"%d\" driver_fail_limit=\"%d\" nss_nack_total=\"%d\" nss_nack=\"%d\" nss_nack_limit=\"%d\"/>\n",
 			can_accel,
 			accel_mode,
 			stats.decelerate_pending,
+			stats.flush_happened_total,
 			stats.no_action_seen_total,
 			stats.no_action_seen,
 			stats.no_action_seen_limit,
@@ -7409,7 +7548,7 @@ static void ecm_front_end_ipv4_net_dev_callback(void *app_data, struct nss_ipv4_
 		/*
 		 * NSS has ended acceleration without instruction from the ECM.
 		 */
-		DEBUG_INFO("%p: NSS Initiated final sync seen: %d\n", ci, sync->reason);
+		DEBUG_INFO("%p: NSS Initiated final sync seen: %d cause:%d\n", ci, sync->reason, sync->cause);
 
 		/*
 		 * NSS Decelerated the connection
