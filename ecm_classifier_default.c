@@ -22,7 +22,7 @@
 #include <linux/icmp.h>
 #include <linux/sysctl.h>
 #include <linux/kthread.h>
-#include <linux/sysdev.h>
+#include <linux/device.h>
 #include <linux/fs.h>
 #include <linux/pkt_sched.h>
 #include <linux/string.h>
@@ -133,7 +133,7 @@ struct ecm_classifier_default_state_file_instance {
 	uint16_t magic;
 #endif
 };
-static struct sys_device ecm_classifier_default_sys_dev;		/* SysFS linkage */
+static struct device ecm_classifier_default_dev;		/* System device linkage */
 
 /*
  * _ecm_classifier_default_ref()
@@ -695,19 +695,11 @@ struct ecm_classifier_default_instance *ecm_classifier_default_instance_alloc(st
 EXPORT_SYMBOL(ecm_classifier_default_instance_alloc);
 
 /*
- * SysFS class of the ubicom default classifier
- * SysFS control points can be found at /sys/devices/system/ecm_classifier_default/ecm_classifier_defaultX/
- */
-static struct sysdev_class ecm_classifier_default_sysclass = {
-	.name = "ecm_classifier_default",
-};
-
-/*
  * ecm_classifier_default_get_accel_mode()
  *	Display accel_mode of classifier.
  */
-static ssize_t ecm_classifier_default_get_accel_mode(struct sys_device *dev,
-		  struct sysdev_attribute *attr,
+static ssize_t ecm_classifier_default_get_accel_mode(struct device *dev,
+		  struct device_attribute *attr,
 		  char *buf)
 {
 	ssize_t count;
@@ -727,8 +719,8 @@ static ssize_t ecm_classifier_default_get_accel_mode(struct sys_device *dev,
  * ecm_classifier_default_set_accel_mode()
  *	Set new accel mode value for default classifier.
  */
-static ssize_t ecm_classifier_default_set_accel_mode(struct sys_device *dev,
-		  struct sysdev_attribute *attr,
+static ssize_t ecm_classifier_default_set_accel_mode(struct device *dev,
+		  struct device_attribute *attr,
 		  const char *buf, size_t count)
 {
 	char num_buf[12];
@@ -754,8 +746,8 @@ static ssize_t ecm_classifier_default_set_accel_mode(struct sys_device *dev,
  * ecm_classifier_default_get_enabled()
  *	Display enabled of classifier.
  */
-static ssize_t ecm_classifier_default_get_enabled(struct sys_device *dev,
-		  struct sysdev_attribute *attr,
+static ssize_t ecm_classifier_default_get_enabled(struct device *dev,
+		  struct device_attribute *attr,
 		  char *buf)
 {
 	ssize_t count;
@@ -775,8 +767,8 @@ static ssize_t ecm_classifier_default_get_enabled(struct sys_device *dev,
  * ecm_classifier_default_set_enabled()
  *	Set new enabled value for default classifier.
  */
-static ssize_t ecm_classifier_default_set_enabled(struct sys_device *dev,
-		  struct sysdev_attribute *attr,
+static ssize_t ecm_classifier_default_set_enabled(struct device *dev,
+		  struct device_attribute *attr,
 		  const char *buf, size_t count)
 {
 	char num_buf[12];
@@ -798,8 +790,34 @@ static ssize_t ecm_classifier_default_set_enabled(struct sys_device *dev,
 	return count;
 }
 
-static SYSDEV_ATTR(accel_mode, 0644, ecm_classifier_default_get_accel_mode, ecm_classifier_default_set_accel_mode);
-static SYSDEV_ATTR(enabled, 0644, ecm_classifier_default_get_enabled, ecm_classifier_default_set_enabled);
+static DEVICE_ATTR(accel_mode, 0644, ecm_classifier_default_get_accel_mode, ecm_classifier_default_set_accel_mode);
+static DEVICE_ATTR(enabled, 0644, ecm_classifier_default_get_enabled, ecm_classifier_default_set_enabled);
+
+/*
+ * System device attribute array.
+ */
+static struct device_attribute *ecm_classifier_default_attrs[] = {
+	&dev_attr_accel_mode,
+	&dev_attr_enabled,
+};
+
+/*
+ * System device node the ECM default classifier
+ * Sysdevice control points can be found at /sys/devices/system/ecm_classifier_default/ecm_classifier_defaultX/
+ */
+static struct bus_type ecm_classifier_default_subsys = {
+	.name = "ecm_classifier_default",
+	.dev_name = "ecm_classifier_default",
+};
+
+/*
+ * ecm_classifier_default_dev_release()
+ *	This is a dummy release function for device.
+ */
+static void ecm_classifier_default_dev_release(struct device *dev)
+{
+
+}
 
 /*
  * ecm_classifier_default_init()
@@ -807,6 +825,7 @@ static SYSDEV_ATTR(enabled, 0644, ecm_classifier_default_get_enabled, ecm_classi
 int ecm_classifier_default_init(void)
 {
 	int result;
+	int i;
 	DEBUG_INFO("Default classifier Module init\n");
 
 	DEBUG_ASSERT(ECM_CLASSIFIER_TYPE_DEFAULT == 0, "DO NOT CHANGE DEFAULT PRIORITY");
@@ -817,47 +836,47 @@ int ecm_classifier_default_init(void)
 	spin_lock_init(&ecm_classifier_default_lock);
 
 	/*
-	 * Register the sysfs class
+	 * Register the Sub system
 	 */
-	result = sysdev_class_register(&ecm_classifier_default_sysclass);
+	result = subsys_system_register(&ecm_classifier_default_subsys, NULL);
 	if (result) {
-		DEBUG_TRACE("Failed to register SysFS class\n");
+		DEBUG_ERROR("Failed to register sub system %d\n", result);
 		return result;
 	}
 
 	/*
-	 * Register SYSFS device control
+	 * Register System device control
 	 */
-	memset(&ecm_classifier_default_sys_dev, 0, sizeof(ecm_classifier_default_sys_dev));
-	ecm_classifier_default_sys_dev.id = 0;
-	ecm_classifier_default_sys_dev.cls = &ecm_classifier_default_sysclass;
-	result = sysdev_register(&ecm_classifier_default_sys_dev);
+	memset(&ecm_classifier_default_dev, 0, sizeof(ecm_classifier_default_dev));
+	ecm_classifier_default_dev.id = 0;
+	ecm_classifier_default_dev.bus = &ecm_classifier_default_subsys;
+	ecm_classifier_default_dev.release = &ecm_classifier_default_dev_release;
+	result = device_register(&ecm_classifier_default_dev);
 	if (result) {
-		DEBUG_TRACE("Failed to register SysFS device\n");
+		DEBUG_ERROR("Failed to register System device %d\n", result);
 		goto classifier_task_cleanup_1;
 	}
 
 	/*
 	 * Create files, one for each parameter supported by this module
 	 */
-	result = sysdev_create_file(&ecm_classifier_default_sys_dev, &attr_accel_mode);
-	if (result) {
-		DEBUG_TRACE("Failed to register accel_mode SysFS file\n");
-		goto classifier_task_cleanup_2;
-	}
-
-	result = sysdev_create_file(&ecm_classifier_default_sys_dev, &attr_enabled);
-	if (result) {
-		DEBUG_TRACE("Failed to register enabled SysFS file\n");
-		goto classifier_task_cleanup_2;
+	for (i = 0; i < ARRAY_SIZE(ecm_classifier_default_attrs); i++) {
+		result = device_create_file(&ecm_classifier_default_dev, ecm_classifier_default_attrs[i]);
+		if (result) {
+			DEBUG_ERROR("Failed to register system device file %d\n", result);
+			goto classifier_task_cleanup_2;
+		}
 	}
 
 	return 0;
 
 classifier_task_cleanup_2:
-	sysdev_unregister(&ecm_classifier_default_sys_dev);
+	while (--i >= 0) {
+		device_remove_file(&ecm_classifier_default_dev, ecm_classifier_default_attrs[i]);
+	}
+	device_unregister(&ecm_classifier_default_dev);
 classifier_task_cleanup_1:
-	sysdev_class_unregister(&ecm_classifier_default_sysclass);
+	bus_unregister(&ecm_classifier_default_subsys);
 
 	return result;
 }
@@ -868,12 +887,17 @@ EXPORT_SYMBOL(ecm_classifier_default_init);
  */
 void ecm_classifier_default_exit(void)
 {
+	int i;
 	DEBUG_INFO("Default classifier Module exit\n");
 	spin_lock_bh(&ecm_classifier_default_lock);
 	ecm_classifier_default_terminate_pending = true;
 	spin_unlock_bh(&ecm_classifier_default_lock);
 
-	sysdev_unregister(&ecm_classifier_default_sys_dev);
-	sysdev_class_unregister(&ecm_classifier_default_sysclass);
+	for (i = 0; i < ARRAY_SIZE(ecm_classifier_default_attrs); i++) {
+		device_remove_file(&ecm_classifier_default_dev, ecm_classifier_default_attrs[i]);
+	}
+
+	device_unregister(&ecm_classifier_default_dev);
+	bus_unregister(&ecm_classifier_default_subsys);
 }
 EXPORT_SYMBOL(ecm_classifier_default_exit);

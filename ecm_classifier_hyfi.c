@@ -22,7 +22,7 @@
 #include <linux/icmp.h>
 #include <linux/sysctl.h>
 #include <linux/kthread.h>
-#include <linux/sysdev.h>
+#include <linux/device.h>
 #include <linux/fs.h>
 #include <linux/pkt_sched.h>
 #include <linux/string.h>
@@ -121,9 +121,9 @@ static bool ecm_classifier_hyfi_enabled = true;		/* Operational behaviour */
 static bool ecm_classifier_hyfi_terminate_pending = false;		/* True when the user wants us to terminate */
 
 /*
- * Sys dev linkage
+ * System device linkage
  */
-static struct sys_device ecm_classifier_hyfi_sys_dev;		/* SysFS linkage */
+static struct device ecm_classifier_hyfi_dev;		/* System device linkage */
 
 /*
  * Locking of the classifier structures
@@ -660,8 +660,8 @@ static void ecm_classifier_hyfi_connection_removed(void *arg, struct ecm_db_conn
  * ecm_classifier_hyfi_set_set_command()
  *	Set hyfi command to accel/decel connection.
  */
-static ssize_t ecm_classifier_hyfi_set_command(struct sys_device *dev,
-							  struct sysdev_attribute *attr,
+static ssize_t ecm_classifier_hyfi_set_command(struct device *dev,
+							  struct device_attribute *attr,
 							  const char *buf, size_t count)
 {
 #define ECM_CLASSIFIER_HYFI_SET_IP_COMMAND_FIELDS 2
@@ -773,8 +773,8 @@ static ssize_t ecm_classifier_hyfi_set_command(struct sys_device *dev,
 /*
  * ecm_classifier_hyfi_rule_get_enabled()
  */
-static ssize_t ecm_classifier_hyfi_rule_get_enabled(struct sys_device *dev,
-				  struct sysdev_attribute *attr,
+static ssize_t ecm_classifier_hyfi_rule_get_enabled(struct device *dev,
+				  struct device_attribute *attr,
 				  char *buf)
 {
 	ssize_t count;
@@ -795,8 +795,8 @@ static ssize_t ecm_classifier_hyfi_rule_get_enabled(struct sys_device *dev,
 /*
  * ecm_classifier_hyfi_rule_set_enabled()
  */
-static ssize_t ecm_classifier_hyfi_rule_set_enabled(struct sys_device *dev,
-				  struct sysdev_attribute *attr,
+static ssize_t ecm_classifier_hyfi_rule_set_enabled(struct device *dev,
+				  struct device_attribute *attr,
 				  const char *buf, size_t count)
 {
 	char num_buf[12];
@@ -822,18 +822,36 @@ static ssize_t ecm_classifier_hyfi_rule_set_enabled(struct sys_device *dev,
 }
 
 /*
- * SysFS attributes for the user_rule classifier itself.
+ * System device attributes for the hyfi classifier itself.
  */
-static SYSDEV_ATTR(enabled, 0644, ecm_classifier_hyfi_rule_get_enabled, ecm_classifier_hyfi_rule_set_enabled);
-static SYSDEV_ATTR(cmd, 0200, NULL, ecm_classifier_hyfi_set_command);
+static DEVICE_ATTR(enabled, 0644, ecm_classifier_hyfi_rule_get_enabled, ecm_classifier_hyfi_rule_set_enabled);
+static DEVICE_ATTR(cmd, 0200, NULL, ecm_classifier_hyfi_set_command);
 
 /*
- * SysFS class of the ubicom user_rule classifier
- * SysFS control points can be found at /sys/devices/system/ecm_classifier_hyfi/ecm_classifier_hyfiX/
+ * System device attribute array.
  */
-static struct sysdev_class ecm_classifier_hyfi_sysclass = {
-	.name = "ecm_classifier_hyfi",
+static struct device_attribute *ecm_classifier_hyfi_attrs[] = {
+	&dev_attr_enabled,
+	&dev_attr_cmd,
 };
+
+/*
+ * System device node of the ECM hyfi classifier
+ * Sysdevice control points can be found at /sys/devices/system/ecm_classifier_hyfi/ecm_classifier_hyfiX/
+ */
+static struct bus_type ecm_classifier_hyfi_subsys = {
+	.name = "ecm_classifier_hyfi",
+	.dev_name = "ecm_classifier_hyfi",
+};
+
+/*
+ * ecm_classifier_hyfi_dev_release()
+ *	This is a dummy release function for device.
+ */
+static void ecm_classifier_hyfi_dev_release(struct device *dev)
+{
+
+}
 
 /*
  * ecm_classifier_hyfi_rules_init()
@@ -841,6 +859,7 @@ static struct sysdev_class ecm_classifier_hyfi_sysclass = {
 int ecm_classifier_hyfi_rules_init(void)
 {
 	int result;
+	int i;
 	DEBUG_INFO("HyFi classifier Module init\n");
 
 	/*
@@ -849,36 +868,36 @@ int ecm_classifier_hyfi_rules_init(void)
 	spin_lock_init(&ecm_classifier_hyfi_lock);
 
 	/*
-	 * Register the sysfs class
+	 * Register the Sub system
 	 */
-	result = sysdev_class_register(&ecm_classifier_hyfi_sysclass);
+	result = subsys_system_register(&ecm_classifier_hyfi_subsys, NULL);
 	if (result) {
-		DEBUG_WARN("Failed to register SysFS class\n");
+		DEBUG_ERROR("Failed to register sub system %d\n", result);
 		return result;
 	}
 
 	/*
-	 * Register SYSFS device control
+	 * Register System device control
 	 */
-	memset(&ecm_classifier_hyfi_sys_dev, 0, sizeof(ecm_classifier_hyfi_sys_dev));
-	ecm_classifier_hyfi_sys_dev.id = 0;
-	ecm_classifier_hyfi_sys_dev.cls = &ecm_classifier_hyfi_sysclass;
-	result = sysdev_register(&ecm_classifier_hyfi_sys_dev);
+	memset(&ecm_classifier_hyfi_dev, 0, sizeof(ecm_classifier_hyfi_dev));
+	ecm_classifier_hyfi_dev.id = 0;
+	ecm_classifier_hyfi_dev.bus = &ecm_classifier_hyfi_subsys;
+	ecm_classifier_hyfi_dev.release = &ecm_classifier_hyfi_dev_release;
+	result = device_register(&ecm_classifier_hyfi_dev);
 	if (result) {
-		DEBUG_WARN("Failed to register SysFS device\n");
+		DEBUG_ERROR("Failed to register System device %d\n", result);
 		goto classifier_task_cleanup_1;
 	}
 
-	result = sysdev_create_file(&ecm_classifier_hyfi_sys_dev, &attr_enabled);
-	if (result) {
-		DEBUG_TRACE("Failed to register enabled SysFS file\n");
-		goto classifier_task_cleanup_2;
-	}
-
-	result = sysdev_create_file(&ecm_classifier_hyfi_sys_dev, &attr_cmd);
-	if (result) {
-		DEBUG_TRACE("Failed to register cmd SysFS file\n");
-		goto classifier_task_cleanup_2;
+	/*
+	 * Create files, one for each parameter supported by this module
+	 */
+	for (i = 0; i < ARRAY_SIZE(ecm_classifier_hyfi_attrs); i++) {
+		result = device_create_file(&ecm_classifier_hyfi_dev, ecm_classifier_hyfi_attrs[i]);
+		if (result) {
+			DEBUG_ERROR("Failed to register system device file %d\n", result);
+			goto classifier_task_cleanup_2;
+		}
 	}
 
 	/*
@@ -911,9 +930,12 @@ int ecm_classifier_hyfi_rules_init(void)
 	return 0;
 
 classifier_task_cleanup_2:
-	sysdev_unregister(&ecm_classifier_hyfi_sys_dev);
+	while (--i >= 0) {
+		device_remove_file(&ecm_classifier_hyfi_dev, ecm_classifier_hyfi_attrs[i]);
+	}
+	device_unregister(&ecm_classifier_hyfi_dev);
 classifier_task_cleanup_1:
-	sysdev_class_unregister(&ecm_classifier_hyfi_sysclass);
+	bus_unregister(&ecm_classifier_hyfi_subsys);
 
 	return result;
 }
@@ -924,6 +946,7 @@ EXPORT_SYMBOL(ecm_classifier_hyfi_rules_init);
  */
 void ecm_classifier_hyfi_rules_exit(void)
 {
+	int i;
 	DEBUG_INFO("HyFi classifier Module exit\n");
 
 	spin_lock_bh(&ecm_classifier_hyfi_lock);
@@ -941,7 +964,11 @@ void ecm_classifier_hyfi_rules_exit(void)
 		ecm_classifier_hyfi_li = NULL;
 	}
 
-	sysdev_unregister(&ecm_classifier_hyfi_sys_dev);
-	sysdev_class_unregister(&ecm_classifier_hyfi_sysclass);
+	for (i = 0; i < ARRAY_SIZE(ecm_classifier_hyfi_attrs); i++) {
+		device_remove_file(&ecm_classifier_hyfi_dev, ecm_classifier_hyfi_attrs[i]);
+	}
+
+	device_unregister(&ecm_classifier_hyfi_dev);
+	bus_unregister(&ecm_classifier_hyfi_subsys);
 }
 EXPORT_SYMBOL(ecm_classifier_hyfi_rules_exit);

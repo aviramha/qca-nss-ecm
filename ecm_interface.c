@@ -22,7 +22,7 @@
 #include <linux/icmp.h>
 #include <linux/sysctl.h>
 #include <linux/kthread.h>
-#include <linux/sysdev.h>
+#include <linux/device.h>
 #include <linux/fs.h>
 #include <linux/pkt_sched.h>
 #include <linux/string.h>
@@ -97,9 +97,9 @@ struct net_device *ipv6_dev_find(struct net *net, struct in6_addr *addr, int str
 static spinlock_t ecm_interface_lock;			/* Protect against SMP access between netfilter, events and private threaded function. */
 
 /*
- * SysFS linkage
+ * System device linkage
  */
-static struct sys_device ecm_interface_sys_dev;		/* SysFS linkage */
+static struct device ecm_interface_dev;		/* System device linkage */
 
 /*
  * General operational control
@@ -2255,8 +2255,8 @@ static struct notifier_block ecm_interface_netdev_notifier __read_mostly = {
 /*
  * ecm_interface_get_stop()
  */
-static ssize_t ecm_interface_get_stop(struct sys_device *dev,
-				  struct sysdev_attribute *attr,
+static ssize_t ecm_interface_get_stop(struct device *dev,
+				  struct device_attribute *attr,
 				  char *buf)
 {
 	ssize_t count;
@@ -2289,8 +2289,8 @@ EXPORT_SYMBOL(ecm_interface_stop);
 /*
  * ecm_interface_set_stop()
  */
-static ssize_t ecm_interface_set_stop(struct sys_device *dev,
-				  struct sysdev_attribute *attr,
+static ssize_t ecm_interface_set_stop(struct device *dev,
+				  struct device_attribute *attr,
 				  const char *buf, size_t count)
 {
 	char num_buf[12];
@@ -2313,17 +2313,27 @@ static ssize_t ecm_interface_set_stop(struct sys_device *dev,
 }
 
 /*
- * SysFS attributes for the default classifier itself.
+ * System device attributes for the ECM interface.
  */
-static SYSDEV_ATTR(stop, 0644, ecm_interface_get_stop, ecm_interface_set_stop);
+static DEVICE_ATTR(stop, 0644, ecm_interface_get_stop, ecm_interface_set_stop);
 
 /*
- * SysFS class of the ubicom default classifier
- * SysFS control points can be found at /sys/devices/system/ecm_front_end/ecm_front_endX/
+ * Sub system node.
+ * Sys device control points can be found at /sys/devices/system/ecm_interface/ecm_interfaceX/
  */
-static struct sysdev_class ecm_interface_sysclass = {
+static struct bus_type ecm_interface_subsys = {
 	.name = "ecm_interface",
+	.dev_name = "ecm_interface",
 };
+
+/*
+ * ecm_interface_dev_release()
+ *	This is a dummy release function for device.
+ */
+static void ecm_interface_dev_release(struct device *dev)
+{
+
+}
 
 /*
  * ecm_interface_init()
@@ -2339,30 +2349,31 @@ int ecm_interface_init(void)
 	spin_lock_init(&ecm_interface_lock);
 
 	/*
-	 * Register the sysfs class
+	 * Register the sub system
 	 */
-	result = sysdev_class_register(&ecm_interface_sysclass);
+	result = subsys_system_register(&ecm_interface_subsys, NULL);
 	if (result) {
-		DEBUG_ERROR("Failed to register SysFS class %d\n", result);
+		DEBUG_ERROR("Failed to register sub system %d\n", result);
 		return result;
 	}
 
 	/*
-	 * Register SYSFS device control
+	 * Register system device control
 	 */
-	memset(&ecm_interface_sys_dev, 0, sizeof(ecm_interface_sys_dev));
-	ecm_interface_sys_dev.id = 0;
-	ecm_interface_sys_dev.cls = &ecm_interface_sysclass;
-	result = sysdev_register(&ecm_interface_sys_dev);
+	memset(&ecm_interface_dev, 0, sizeof(ecm_interface_dev));
+	ecm_interface_dev.id = 0;
+	ecm_interface_dev.bus = &ecm_interface_subsys;
+	ecm_interface_dev.release = &ecm_interface_dev_release;
+	result = device_register(&ecm_interface_dev);
 	if (result) {
-		DEBUG_ERROR("Failed to register SysFS device %d\n", result);
+		DEBUG_ERROR("Failed to register system device %d\n", result);
 		goto task_cleanup_1;
 	}
 
 	/*
 	 * Create files, one for each parameter supported by this module
 	 */
-	result = sysdev_create_file(&ecm_interface_sys_dev, &attr_stop);
+	result = device_create_file(&ecm_interface_dev, &dev_attr_stop);
 	if (result) {
 		DEBUG_ERROR("Failed to register stop file %d\n", result);
 		goto task_cleanup_2;
@@ -2377,9 +2388,9 @@ int ecm_interface_init(void)
 	return 0;
 
 task_cleanup_2:
-	sysdev_unregister(&ecm_interface_sys_dev);
+	device_unregister(&ecm_interface_dev);
 task_cleanup_1:
-	sysdev_class_unregister(&ecm_interface_sysclass);
+	bus_unregister(&ecm_interface_subsys);
 
 	return result;
 }
@@ -2397,7 +2408,9 @@ void ecm_interface_exit(void)
 	spin_unlock_bh(&ecm_interface_lock);
 
 	unregister_netdevice_notifier(&ecm_interface_netdev_notifier);
-	sysdev_unregister(&ecm_interface_sys_dev);
-	sysdev_class_unregister(&ecm_interface_sysclass);
+
+	device_remove_file(&ecm_interface_dev, &dev_attr_stop);
+	device_unregister(&ecm_interface_dev);
+	bus_unregister(&ecm_interface_subsys);
 }
 EXPORT_SYMBOL(ecm_interface_exit);
