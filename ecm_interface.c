@@ -700,7 +700,7 @@ static struct ecm_db_iface_instance *ecm_interface_ethernet_interface_establish(
 	return nii;
 }
 
-#ifdef ECM_INTERFACE_PPP_SUPPORT
+#ifdef ECM_INTERFACE_PPP_ENABLE
 /*
  * ecm_interface_pppoe_interface_establish()
  *	Returns a reference to a iface of the PPPoE type, possibly creating one if necessary.
@@ -1031,7 +1031,7 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct net_device 
 		struct ecm_db_interface_info_tunipip6 tunipip6;		/* type == ECM_DB_IFACE_TYPE_TUNIPIP6 */
 	} type_info;
 
-#ifdef ECM_INTERFACE_PPP_SUPPORT
+#ifdef ECM_INTERFACE_PPP_ENABLE
 	int channel_count;
 	struct ppp_channel *ppp_chan[1];
 	int channel_protocol;
@@ -1238,7 +1238,7 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct net_device 
 		return ii;
 	}
 
-#ifndef ECM_INTERFACE_PPP_SUPPORT
+#ifndef ECM_INTERFACE_PPP_ENABLE
 	/*
 	 * PPP support is NOT provided for.
 	 * Interface is therefore unknown
@@ -1551,7 +1551,7 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfac
 		 * will use to emit to the destination address.
 		 */
 		do {
-#ifdef ECM_INTERFACE_PPP_SUPPORT
+#ifdef ECM_INTERFACE_PPP_ENABLE
 			int channel_count;
 			struct ppp_channel *ppp_chan[1];
 			int channel_protocol;
@@ -1824,7 +1824,7 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfac
 				break;
 			}
 
-#ifndef ECM_INTERFACE_PPP_SUPPORT
+#ifndef ECM_INTERFACE_PPP_ENABLE
 			DEBUG_TRACE("Net device: %p is UNKNOWN (PPP Unsupported) type: %d\n", dest_dev, dest_dev_type);
 #else
 			/*

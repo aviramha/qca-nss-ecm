@@ -19,28 +19,76 @@
 obj-m += ecm.o
 
 ecm-y := \
-	 ecm_classifier_dscp.o \
-	 ecm_classifier_nl.o \
 	 ecm_tracker_udp.o \
 	 ecm_tracker_tcp.o \
 	 ecm_tracker_datagram.o \
 	 ecm_tracker.o \
 	 ecm_front_end_ipv4.o \
-	 ecm_front_end_ipv6.o \
 	 ecm_db.o \
 	 ecm_classifier_default.o \
 	 ecm_conntrack_notifier.o \
 	 ecm_interface.o \
-	 ecm_bond_notifier.o \
 	 ecm_init.o
 
-#
-# Define ECM_CLASSIFIER_HYFI_ENABLE=y in order to enable
-# the Hy-Fi classifier in ECM. Currently disabled until
-# the integration with Hy-Fi is completed.
-#
-ecm-$(ECM_CLASSIFIER_HYFI_ENABLE) += ecm_classifier_hyfi.o
+# #############################################################################
+# Define ECM_INTERFACE_BOND_ENABLE=y in order to enable
+# Bonding / Link Aggregation support.
+# #############################################################################
+ifeq ("$(KERNELVERSION)","3.4.0")
+ECM_INTERFACE_BOND_ENABLE=y
+endif
+ecm-$(ECM_INTERFACE_BOND_ENABLE) += ecm_bond_notifier.o
+ccflags-$(ECM_INTERFACE_BOND_ENABLE) += -DECM_INTERFACE_BOND_ENABLE
 
+# #############################################################################
+# Define ECM_INTERFACE_PPP_SUPPORT=y in order
+# to enable support for PPP and, specifically, PPPoE acceleration.
+# #############################################################################
+ifeq ("$(KERNELVERSION)","3.4.0")
+ECM_INTERFACE_PPP_ENABLE=y
+endif
+ccflags-$(ECM_INTERFACE_PPP_ENABLE) += -DECM_INTERFACE_PPP_ENABLE
+
+# #############################################################################
+# Define ECM_FRONT_END_IPV6_ENABLE=y in order to enable IPv6 front end.
+# #############################################################################
+ifeq ("$(KERNELVERSION)","3.4.0")
+ECM_FRONT_END_IPV6_ENABLE=y
+endif
+ecm-$(ECM_FRONT_END_IPV6_ENABLE) += ecm_front_end_ipv6.o
+ccflags-$(ECM_FRONT_END_IPV6_ENABLE) += -DECM_FRONT_END_IPV6_ENABLE
+
+# #############################################################################
+# Define ECM_CLASSIFIER_NL_ENABLE=y in order to enable NL classifier.
+# #############################################################################
+ifeq ("$(KERNELVERSION)","3.4.0")
+ECM_CLASSIFIER_NL_ENABLE=y
+endif
+ecm-$(ECM_CLASSIFIER_NL_ENABLE) += ecm_classifier_nl.o
+ccflags-$(ECM_CLASSIFIER_NL_ENABLE) += -DECM_CLASSIFIER_NL_ENABLE
+
+# #############################################################################
+# Define ECM_CLASSIFIER_DSCP_ENABLE=y in order to enable DSCP classifier.
+# #############################################################################
+ifeq ("$(KERNELVERSION)","3.4.0")
+ECM_CLASSIFIER_DSCP_ENABLE=y
+endif
+ecm-$(ECM_CLASSIFIER_DSCP_ENABLE) += ecm_classifier_dscp.o
+ccflags-$(ECM_CLASSIFIER_DSCP_ENABLE) += -DECM_CLASSIFIER_DSCP_ENABLE
+
+# #############################################################################
+# Define ECM_CLASSIFIER_HYFI_ENABLE=y in order to enable
+# the Hy-Fi classifier in ECM. Currently disabled until the integration
+# with Hy-Fi is completed.
+# #############################################################################
+ecm-$(ECM_CLASSIFIER_HYFI_ENABLE) += ecm_classifier_hyfi.o
+ccflags-$(ECM_CLASSIFIER_HYFI_ENABLE) += -DECM_CLASSIFIER_HYFI_ENABLE
+
+# #############################################################################
+# Debug flags, set these to = 0 if you want to disable all debugging for that
+# file.
+# By turning off debugs you gain maximum ECM performance.
+# #############################################################################
 ccflags-y += -DECM_CLASSIFIER_DSCP_DEBUG_LEVEL=1
 ccflags-y += -DECM_CLASSIFIER_HYFI_DEBUG_LEVEL=1
 ccflags-y += -DECM_CLASSIFIER_NL_DEBUG_LEVEL=1
@@ -55,7 +103,6 @@ ccflags-y += -DECM_TRACKER_TCP_DEBUG_LEVEL=1
 ccflags-y += -DECM_TRACKER_UDP_DEBUG_LEVEL=1
 ccflags-y += -DECM_BOND_NOTIFIER_DEBUG_LEVEL=1
 ccflags-y += -DECM_INTERFACE_DEBUG_LEVEL=1
-ccflags-$(ECM_CLASSIFIER_HYFI_ENABLE) += -DECM_CLASSIFIER_HYFI_ENABLE
 
 obj ?= .
 
