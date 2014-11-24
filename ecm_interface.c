@@ -86,10 +86,12 @@
 #include "ecm_db.h"
 #include "ecm_interface.h"
 
+#ifdef ECM_FRONT_END_IPV6_ENABLE
 /*
  * TODO: Remove once the Linux image and headers get propogated.
  */
 struct net_device *ipv6_dev_find(struct net *net, struct in6_addr *addr, int strict);
+#endif
 
 /*
  * Locking - concurrency control
@@ -125,6 +127,7 @@ static struct net_device *ecm_interface_dev_find_by_local_addr_ipv4(ip_addr_t ad
 	return dev;
 }
 
+#ifdef ECM_FRONT_END_IPV6_ENABLE
 /*
  * ecm_interface_dev_find_by_local_addr_ipv6()
  *	Return a hold to the device for the given local IP address.  Returns NULL on failure.
@@ -138,6 +141,7 @@ static struct net_device *ecm_interface_dev_find_by_local_addr_ipv6(ip_addr_t ad
 	dev = (struct net_device *)ipv6_dev_find(&init_net, &addr6, 1);
 	return dev;
 }
+#endif
 
 /*
  * ecm_interface_dev_find_by_local_addr()
@@ -156,7 +160,11 @@ struct net_device *ecm_interface_dev_find_by_local_addr(ip_addr_t addr)
 		return ecm_interface_dev_find_by_local_addr_ipv4(addr);
 	}
 
+#ifdef ECM_FRONT_END_IPV6_ENABLE
 	return ecm_interface_dev_find_by_local_addr_ipv6(addr);
+#else
+	return NULL;
+#endif
 }
 EXPORT_SYMBOL(ecm_interface_dev_find_by_local_addr);
 
@@ -208,6 +216,7 @@ struct net_device *ecm_interface_dev_find_by_addr(ip_addr_t addr, bool *from_loc
 }
 EXPORT_SYMBOL(ecm_interface_dev_find_by_addr);
 
+#ifdef ECM_FRONT_END_IPV6_ENABLE
 /*
  * ecm_interface_mac_addr_get_ipv6()
  *	Return mac for an IPv6 address
@@ -291,6 +300,7 @@ static bool ecm_interface_mac_addr_get_ipv6(ip_addr_t addr, uint8_t *mac_addr, b
 	DEBUG_TRACE(ECM_IP_ADDR_OCTAL_FMT " maps to %pM\n", ECM_IP_ADDR_TO_OCTAL(addr), mac_addr);
 	return true;
 }
+#endif
 
 /*
  * ecm_interface_mac_addr_get_ipv4()
@@ -413,7 +423,11 @@ bool ecm_interface_mac_addr_get(ip_addr_t addr, uint8_t *mac_addr, bool *on_link
 		return ecm_interface_mac_addr_get_ipv4(addr, mac_addr, on_link, gw_addr);
 	}
 
+#ifdef ECM_FRONT_END_IPV6_ENABLE
 	return ecm_interface_mac_addr_get_ipv6(addr, mac_addr, on_link, gw_addr);
+#else
+	return false;
+#endif
 }
 EXPORT_SYMBOL(ecm_interface_mac_addr_get);
 
@@ -441,6 +455,7 @@ static bool ecm_interface_find_route_by_addr_ipv4(ip_addr_t addr, struct ecm_int
 	return true;
 }
 
+#ifdef ECM_FRONT_END_IPV6_ENABLE
 /*
  * ecm_interface_addr_find_route_by_addr_ipv6()
  *	Return the route for the given IP address.  Returns NULL on failure.
@@ -465,6 +480,7 @@ static bool ecm_interface_find_route_by_addr_ipv6(ip_addr_t addr, struct ecm_int
 	ecm_rt->v4_route = false;
 	return true;
 }
+#endif
 
 /*
  * ecm_interface_addr_find_route_by_addr()
@@ -485,7 +501,11 @@ bool ecm_interface_find_route_by_addr(ip_addr_t addr, struct ecm_interface_route
 		return ecm_interface_find_route_by_addr_ipv4(addr, ecm_rt);
 	}
 
+#ifdef ECM_FRONT_END_IPV6_ENABLE
 	return ecm_interface_find_route_by_addr_ipv6(addr, ecm_rt);
+#else
+	return false;
+#endif
 }
 EXPORT_SYMBOL(ecm_interface_find_route_by_addr);
 
