@@ -34,8 +34,10 @@ extern void ecm_tracker_datagram_module_exit(void);
 extern int ecm_classifier_default_init(void);
 extern void ecm_classifier_default_exit(void);
 
+#ifdef ECM_CLASSIFIER_NL_ENABLE
 extern int ecm_classifier_nl_rules_init(void);
 extern void ecm_classifier_nl_rules_exit(void);
+#endif
 
 #ifdef ECM_CLASSIFIER_HYFI_ENABLE
 extern int ecm_classifier_hyfi_rules_init(void);
@@ -105,10 +107,12 @@ static int __init ecm_init(void)
 		goto err_cls_default;
 	}
 
+#ifdef ECM_CLASSIFIER_NL_ENABLE
 	ret = ecm_classifier_nl_rules_init();
 	if (0 != ret) {
 		goto err_cls_nl;
 	}
+#endif
 
 #ifdef ECM_CLASSIFIER_HYFI_ENABLE
 	ret = ecm_classifier_hyfi_rules_init();
@@ -169,8 +173,10 @@ err_cls_dscp:
 	ecm_classifier_hyfi_rules_exit();
 err_cls_hyfi:
 #endif
+#ifdef ECM_CLASSIFIER_NL_ENABLE
 	ecm_classifier_nl_rules_exit();
 err_cls_nl:
+#endif
 	ecm_classifier_default_exit();
 err_cls_default:
 	ecm_tracker_datagram_module_exit();
@@ -229,8 +235,10 @@ static void __exit ecm_exit(void)
 	printk(KERN_INFO "exit hyfi classifier\n");
 	ecm_classifier_hyfi_rules_exit();
 #endif
+#ifdef ECM_CLASSIFIER_NL_ENABLE
 	printk(KERN_INFO "exit nl classifier\n");
 	ecm_classifier_nl_rules_exit();
+#endif
 	printk(KERN_INFO "exit default classifier\n");
 	ecm_classifier_default_exit();
 	printk(KERN_INFO "exit datagram tracker\n");
