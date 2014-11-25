@@ -41,13 +41,21 @@ ecm-$(ECM_INTERFACE_BOND_ENABLE) += ecm_bond_notifier.o
 ccflags-$(ECM_INTERFACE_BOND_ENABLE) += -DECM_INTERFACE_BOND_ENABLE
 
 # #############################################################################
-# Define ECM_INTERFACE_PPP_SUPPORT=y in order
+# Define ECM_INTERFACE_PPP_ENABLE=y in order
 # to enable support for PPP and, specifically, PPPoE acceleration.
 # #############################################################################
 ifeq ("$(KERNELVERSION)","3.4.0")
 ECM_INTERFACE_PPP_ENABLE=y
 endif
 ccflags-$(ECM_INTERFACE_PPP_ENABLE) += -DECM_INTERFACE_PPP_ENABLE
+
+# #############################################################################
+# Define ECM_INTERFACE_VLAN_ENABLE=y in order to enable support for VLAN
+# #############################################################################
+ifeq ("$(KERNELVERSION)","3.4.0")
+ECM_INTERFACE_VLAN_ENABLE=y
+endif
+ccflags-$(ECM_INTERFACE_VLAN_ENABLE) += -DECM_INTERFACE_VLAN_ENABLE
 
 # #############################################################################
 # Define ECM_FRONT_END_IPV6_ENABLE=y in order to enable IPv6 front end.

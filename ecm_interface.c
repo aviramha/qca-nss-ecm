@@ -60,8 +60,10 @@
 #include <net/netfilter/nf_conntrack_core.h>
 #include <net/netfilter/ipv4/nf_conntrack_ipv4.h>
 #include <net/netfilter/ipv4/nf_defrag_ipv4.h>
+#ifdef ECM_INTERFACE_VLAN_ENABLE
 #include <linux/../../net/8021q/vlan.h>
 #include <linux/if_vlan.h>
+#endif
 
 /*
  * Debug output levels
@@ -519,6 +521,7 @@ void ecm_interface_route_release(struct ecm_interface_route *rt)
 }
 EXPORT_SYMBOL(ecm_interface_route_release);
 
+#ifdef ECM_INTERFACE_VLAN_ENABLE
 /*
  * ecm_interface_vlan_interface_establish()
  *	Returns a reference to a iface of the VLAN type, possibly creating one if necessary.
@@ -568,6 +571,7 @@ static struct ecm_db_iface_instance *ecm_interface_vlan_interface_establish(stru
 	DEBUG_TRACE("%p: vlan iface established\n", nii);
 	return nii;
 }
+#endif
 
 /*
  * ecm_interface_bridge_interface_establish()
@@ -1040,7 +1044,9 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct net_device 
 	struct ecm_db_iface_instance *ii;
 	union {
 		struct ecm_db_interface_info_ethernet ethernet;		/* type == ECM_DB_IFACE_TYPE_ETHERNET */
+#ifdef ECM_INTERFACE_VLAN_ENABLE
 		struct ecm_db_interface_info_vlan vlan;			/* type == ECM_DB_IFACE_TYPE_VLAN */
+#endif
 		struct ecm_db_interface_info_lag lag;			/* type == ECM_DB_IFACE_TYPE_LAG */
 		struct ecm_db_interface_info_bridge bridge;		/* type == ECM_DB_IFACE_TYPE_BRIDGE */
 		struct ecm_db_interface_info_pppoe pppoe;		/* type == ECM_DB_IFACE_TYPE_PPPOE */
@@ -1082,6 +1088,7 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct net_device 
 		 * Ethernet - but what sub type?
 		 */
 
+#ifdef ECM_INTERFACE_VLAN_ENABLE
 		/*
 		 * VLAN?
 		 */
@@ -1102,6 +1109,7 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct net_device 
 			ii = ecm_interface_vlan_interface_establish(&type_info.vlan, dev_name, dev_interface_num, nss_interface_num, dev_mtu);
 			return ii;
 		}
+#endif
 
 		/*
 		 * BRIDGE?
@@ -1586,6 +1594,7 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfac
 				 * Ethernet - but what sub type?
 				 */
 
+#ifdef ECM_INTERFACE_VLAN_ENABLE
 				/*
 				 * VLAN?
 				 */
@@ -1600,6 +1609,7 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfac
 							dest_dev, next_dev, next_dev->name);
 					break;
 				}
+#endif
 
 				/*
 				 * BRIDGE?
@@ -2000,6 +2010,7 @@ static void ecm_interface_list_stats_update(int iface_list_first, struct ecm_db_
 		switch (ii_type) {
 			struct rtnl_link_stats64 stats;
 
+#ifdef ECM_INTERFACE_VLAN_ENABLE
 			case ECM_DB_IFACE_TYPE_VLAN:
 				DEBUG_INFO("VLAN\n");
 				stats.rx_packets = rx_packets;
@@ -2008,6 +2019,7 @@ static void ecm_interface_list_stats_update(int iface_list_first, struct ecm_db_
 				stats.tx_bytes = tx_bytes;
 				__vlan_dev_update_accel_stats(dev, &stats);
 				break;
+#endif
 			case ECM_DB_IFACE_TYPE_BRIDGE:
 				DEBUG_INFO("BRIDGE\n");
 				stats.rx_packets = rx_packets;

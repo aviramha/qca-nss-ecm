@@ -54,8 +54,10 @@
 #include <net/netfilter/nf_conntrack_core.h>
 #include <net/netfilter/ipv6/nf_conntrack_ipv6.h>
 #include <net/netfilter/ipv6/nf_defrag_ipv6.h>
+#ifdef ECM_INTERFACE_VLAN_ENABLE
 #include <linux/../../net/8021q/vlan.h>
 #include <linux/if_vlan.h>
+#endif
 
 /*
  * Debug output levels
@@ -476,6 +478,7 @@ int32_t ecm_front_end_ipv6_interface_heirarchy_construct(struct ecm_db_iface_ins
 				 * Ethernet - but what sub type?
 				 */
 
+#ifdef ECM_INTERFACE_VLAN_ENABLE
 				/*
 				 * VLAN?
 				 */
@@ -490,6 +493,7 @@ int32_t ecm_front_end_ipv6_interface_heirarchy_construct(struct ecm_db_iface_ins
 							dest_dev, next_dev, next_dev->name);
 					break;
 				}
+#endif
 
 				/*
 				 * BRIDGE?
@@ -830,8 +834,11 @@ static struct ecm_db_node_instance *ecm_front_end_ipv6_node_establish_and_ref(st
 			ecm_db_iface_pppoe_session_info_get(interface_list[i], &pppoe_info);
 			memcpy(node_addr, pppoe_info.remote_mac, ETH_ALEN);
 			done = true;
-#endif
 			break;
+#else
+			DEBUG_TRACE("PPPoE interface unsupported\n");
+			return NULL;
+#endif
 
 		case ECM_DB_IFACE_TYPE_SIT:
 		case ECM_DB_IFACE_TYPE_TUNIPIP6:
@@ -841,6 +848,14 @@ static struct ecm_db_node_instance *ecm_front_end_ipv6_node_establish_and_ref(st
 		case ECM_DB_IFACE_TYPE_ETHERNET:
 		case ECM_DB_IFACE_TYPE_LAG:
 		case ECM_DB_IFACE_TYPE_VLAN:
+#ifdef ECM_INTERFACE_VLAN_ENABLE
+			/*
+			 * VLAN handled same along with bridge etc.
+			 */
+#else
+			DEBUG_TRACE("VLAN interface unsupported\n");
+			return NULL;
+#endif
 		case ECM_DB_IFACE_TYPE_BRIDGE:
 			if (!ecm_interface_mac_addr_get(addr, node_addr, &on_link, gw_addr)) {
 				DEBUG_TRACE("Failed to obtain mac for host " ECM_IP_ADDR_OCTAL_FMT "\n", ECM_IP_ADDR_TO_OCTAL(addr));
@@ -1385,9 +1400,11 @@ static void ecm_front_end_ipv6_connection_tcp_front_end_accelerate(struct ecm_fr
 #ifdef ECM_INTERFACE_PPP_ENABLE
 			struct ecm_db_interface_info_pppoe pppoe_info;
 #endif
+#ifdef ECM_INTERFACE_VLAN_ENABLE
 			struct ecm_db_interface_info_vlan vlan_info;
 			uint32_t vlan_value = 0;
 			struct net_device *vlan_in_dev = NULL;
+#endif
 
 		case ECM_DB_IFACE_TYPE_BRIDGE:
 			DEBUG_TRACE("%p: Bridge\n", fecti);
@@ -1447,6 +1464,7 @@ static void ecm_front_end_ipv6_connection_tcp_front_end_accelerate(struct ecm_fr
 #endif
 			break;
 		case ECM_DB_IFACE_TYPE_VLAN:
+#ifdef ECM_INTERFACE_VLAN_ENABLE
 			DEBUG_TRACE("%p: VLAN\n", fecti);
 			if (interface_type_counts[ii_type] > 1) {
 				/*
@@ -1488,6 +1506,10 @@ static void ecm_front_end_ipv6_connection_tcp_front_end_accelerate(struct ecm_fr
 				DEBUG_TRACE("%p: VLAN use mac: %pM\n", fecti, from_nss_iface_address);
 			}
 			DEBUG_TRACE("%p: vlan tag: %x\n", fecti, vlan_value);
+#else
+			rule_invalid = true;
+			DEBUG_TRACE("%p: VLAN - unsupported\n", fecti);
+#endif
 			break;
 		case ECM_DB_IFACE_TYPE_IPSEC_TUNNEL:
 			DEBUG_TRACE("%p: IPSEC\n", fecti);
@@ -1541,9 +1563,11 @@ static void ecm_front_end_ipv6_connection_tcp_front_end_accelerate(struct ecm_fr
 #ifdef ECM_INTERFACE_PPP_ENABLE
 			struct ecm_db_interface_info_pppoe pppoe_info;
 #endif
+#ifdef ECM_INTERFACE_VLAN_ENABLE
 			struct ecm_db_interface_info_vlan vlan_info;
 			uint32_t vlan_value = 0;
-			struct net_device *vlan_out_dev = NULL;
+			struct net_device *vlan_in_dev = NULL;
+#endif
 
 		case ECM_DB_IFACE_TYPE_BRIDGE:
 			DEBUG_TRACE("%p: Bridge\n", fecti);
@@ -1602,6 +1626,7 @@ static void ecm_front_end_ipv6_connection_tcp_front_end_accelerate(struct ecm_fr
 #endif
 			break;
 		case ECM_DB_IFACE_TYPE_VLAN:
+#ifdef ECM_INTERFACE_VLAN_ENABLE
 			DEBUG_TRACE("%p: VLAN\n", fecti);
 			if (interface_type_counts[ii_type] > 1) {
 				/*
@@ -1643,6 +1668,10 @@ static void ecm_front_end_ipv6_connection_tcp_front_end_accelerate(struct ecm_fr
 				DEBUG_TRACE("%p: VLAN use mac: %pM\n", fecti, to_nss_iface_address);
 			}
 			DEBUG_TRACE("%p: vlan tag: %x\n", fecti, vlan_value);
+#else
+			rule_invalid = true;
+			DEBUG_TRACE("%p: VLAN - unsupported\n", fecti);
+#endif
 			break;
 		case ECM_DB_IFACE_TYPE_IPSEC_TUNNEL:
 			DEBUG_TRACE("%p: IPSEC\n", fecti);
@@ -2763,9 +2792,11 @@ static void ecm_front_end_ipv6_connection_udp_front_end_accelerate(struct ecm_fr
 #ifdef ECM_INTERFACE_PPP_ENABLE
 			struct ecm_db_interface_info_pppoe pppoe_info;
 #endif
+#ifdef ECM_INTERFACE_VLAN_ENABLE
 			struct ecm_db_interface_info_vlan vlan_info;
 			uint32_t vlan_value = 0;
 			struct net_device *vlan_in_dev = NULL;
+#endif
 
 		case ECM_DB_IFACE_TYPE_BRIDGE:
 			DEBUG_TRACE("%p: Bridge\n", fecui);
@@ -2825,6 +2856,7 @@ static void ecm_front_end_ipv6_connection_udp_front_end_accelerate(struct ecm_fr
 #endif
 			break;
 		case ECM_DB_IFACE_TYPE_VLAN:
+#ifdef ECM_INTERFACE_VLAN_ENABLE
 			DEBUG_TRACE("%p: VLAN\n", fecui);
 			if (interface_type_counts[ii_type] > 1) {
 				/*
@@ -2867,6 +2899,10 @@ static void ecm_front_end_ipv6_connection_udp_front_end_accelerate(struct ecm_fr
 				DEBUG_TRACE("%p: VLAN use mac: %pM\n", fecui, from_nss_iface_address);
 			}
 			DEBUG_TRACE("%p: vlan tag: %x\n", fecui, vlan_value);
+#else
+			rule_invalid = true;
+			DEBUG_TRACE("%p: VLAN - unsupported\n", fecti);
+#endif
 			break;
 		case ECM_DB_IFACE_TYPE_IPSEC_TUNNEL:
 			DEBUG_TRACE("%p: IPSEC\n", fecui);
@@ -2920,9 +2956,11 @@ static void ecm_front_end_ipv6_connection_udp_front_end_accelerate(struct ecm_fr
 #ifdef ECM_INTERFACE_PPP_ENABLE
 			struct ecm_db_interface_info_pppoe pppoe_info;
 #endif
+#ifdef ECM_INTERFACE_VLAN_ENABLE
 			struct ecm_db_interface_info_vlan vlan_info;
 			uint32_t vlan_value = 0;
-			struct net_device *vlan_out_dev = NULL;
+			struct net_device *vlan_in_dev = NULL;
+#endif
 
 		case ECM_DB_IFACE_TYPE_BRIDGE:
 			DEBUG_TRACE("%p: Bridge\n", fecui);
@@ -2981,6 +3019,7 @@ static void ecm_front_end_ipv6_connection_udp_front_end_accelerate(struct ecm_fr
 #endif
 			break;
 		case ECM_DB_IFACE_TYPE_VLAN:
+#ifdef ECM_INTERFACE_VLAN_ENABLE
 			DEBUG_TRACE("%p: VLAN\n", fecui);
 			if (interface_type_counts[ii_type] > 1) {
 				/*
@@ -3022,6 +3061,10 @@ static void ecm_front_end_ipv6_connection_udp_front_end_accelerate(struct ecm_fr
 				DEBUG_TRACE("%p: VLAN use mac: %pM\n", fecui, to_nss_iface_address);
 			}
 			DEBUG_TRACE("%p: vlan tag: %x\n", fecui, vlan_value);
+#else
+			rule_invalid = true;
+			DEBUG_TRACE("%p: VLAN - unsupported\n", fecti);
+#endif
 			break;
 		case ECM_DB_IFACE_TYPE_IPSEC_TUNNEL:
 			DEBUG_TRACE("%p: IPSEC\n", fecui);
@@ -4122,9 +4165,11 @@ static void ecm_front_end_ipv6_connection_non_ported_front_end_accelerate(struct
 #ifdef ECM_INTERFACE_PPP_ENABLE
 			struct ecm_db_interface_info_pppoe pppoe_info;
 #endif
+#ifdef ECM_INTERFACE_VLAN_ENABLE
 			struct ecm_db_interface_info_vlan vlan_info;
 			uint32_t vlan_value = 0;
 			struct net_device *vlan_in_dev = NULL;
+#endif
 
 		case ECM_DB_IFACE_TYPE_BRIDGE:
 			DEBUG_TRACE("%p: Bridge\n", fecnpi);
@@ -4184,6 +4229,7 @@ static void ecm_front_end_ipv6_connection_non_ported_front_end_accelerate(struct
 #endif
 			break;
 		case ECM_DB_IFACE_TYPE_VLAN:
+#ifdef ECM_INTERFACE_VLAN_ENABLE
 			DEBUG_TRACE("%p: VLAN\n", fecnpi);
 			if (interface_type_counts[ii_type] > 1) {
 				/*
@@ -4225,6 +4271,10 @@ static void ecm_front_end_ipv6_connection_non_ported_front_end_accelerate(struct
 				DEBUG_TRACE("%p: VLAN use mac: %pM\n", fecnpi, from_nss_iface_address);
 			}
 			DEBUG_TRACE("%p: vlan tag: %x\n", fecnpi, vlan_value);
+#else
+			rule_invalid = true;
+			DEBUG_TRACE("%p: VLAN - unsupported\n", fecti);
+#endif
 			break;
 		case ECM_DB_IFACE_TYPE_IPSEC_TUNNEL:
 			DEBUG_TRACE("%p: IPSEC\n", fecnpi);
@@ -4278,9 +4328,11 @@ static void ecm_front_end_ipv6_connection_non_ported_front_end_accelerate(struct
 #ifdef ECM_INTERFACE_PPP_ENABLE
 			struct ecm_db_interface_info_pppoe pppoe_info;
 #endif
+#ifdef ECM_INTERFACE_VLAN_ENABLE
 			struct ecm_db_interface_info_vlan vlan_info;
 			uint32_t vlan_value = 0;
-			struct net_device *vlan_out_dev = NULL;
+			struct net_device *vlan_in_dev = NULL;
+#endif
 
 		case ECM_DB_IFACE_TYPE_BRIDGE:
 			DEBUG_TRACE("%p: Bridge\n", fecnpi);
@@ -4339,6 +4391,7 @@ static void ecm_front_end_ipv6_connection_non_ported_front_end_accelerate(struct
 #endif
 			break;
 		case ECM_DB_IFACE_TYPE_VLAN:
+#ifdef ECM_INTERFACE_VLAN_ENABLE
 			DEBUG_TRACE("%p: VLAN\n", fecnpi);
 			if (interface_type_counts[ii_type] > 1) {
 				/*
@@ -4380,6 +4433,10 @@ static void ecm_front_end_ipv6_connection_non_ported_front_end_accelerate(struct
 				DEBUG_TRACE("%p: VLAN use mac: %pM\n", fecnpi, to_nss_iface_address);
 			}
 			DEBUG_TRACE("%p: vlan tag: %x\n", fecnpi, vlan_value);
+#else
+			rule_invalid = true;
+			DEBUG_TRACE("%p: VLAN - unsupported\n", fecti);
+#endif
 			break;
 		case ECM_DB_IFACE_TYPE_IPSEC_TUNNEL:
 			DEBUG_TRACE("%p: IPSEC\n", fecnpi);
