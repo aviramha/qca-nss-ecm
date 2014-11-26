@@ -14,6 +14,7 @@
  **************************************************************************
  */
 
+#include <linux/version.h>
 #include <linux/types.h>
 #include <linux/ip.h>
 #include <linux/tcp.h>
@@ -1566,7 +1567,7 @@ static void ecm_front_end_ipv6_connection_tcp_front_end_accelerate(struct ecm_fr
 #ifdef ECM_INTERFACE_VLAN_ENABLE
 			struct ecm_db_interface_info_vlan vlan_info;
 			uint32_t vlan_value = 0;
-			struct net_device *vlan_in_dev = NULL;
+			struct net_device *vlan_out_dev = NULL;
 #endif
 
 		case ECM_DB_IFACE_TYPE_BRIDGE:
@@ -2959,7 +2960,7 @@ static void ecm_front_end_ipv6_connection_udp_front_end_accelerate(struct ecm_fr
 #ifdef ECM_INTERFACE_VLAN_ENABLE
 			struct ecm_db_interface_info_vlan vlan_info;
 			uint32_t vlan_value = 0;
-			struct net_device *vlan_in_dev = NULL;
+			struct net_device *vlan_out_dev = NULL;
 #endif
 
 		case ECM_DB_IFACE_TYPE_BRIDGE:
@@ -4331,7 +4332,7 @@ static void ecm_front_end_ipv6_connection_non_ported_front_end_accelerate(struct
 #ifdef ECM_INTERFACE_VLAN_ENABLE
 			struct ecm_db_interface_info_vlan vlan_info;
 			uint32_t vlan_value = 0;
-			struct net_device *vlan_in_dev = NULL;
+			struct net_device *vlan_out_dev = NULL;
 #endif
 
 		case ECM_DB_IFACE_TYPE_BRIDGE:
