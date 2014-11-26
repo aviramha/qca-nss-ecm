@@ -50,6 +50,15 @@ endif
 ccflags-$(ECM_INTERFACE_PPP_ENABLE) += -DECM_INTERFACE_PPP_ENABLE
 
 # #############################################################################
+# Define ECM_INTERFACE_SIT_ENABLE=y in order
+# to enable support for SIT interface.
+# #############################################################################
+ifeq ("$(KERNELVERSION)","3.4.0")
+ECM_INTERFACE_SIT_ENABLE=y
+endif
+ccflags-$(ECM_INTERFACE_SIT_ENABLE) += -DECM_INTERFACE_SIT_ENABLE
+
+# #############################################################################
 # Define ECM_INTERFACE_VLAN_ENABLE=y in order to enable support for VLAN
 # #############################################################################
 ifeq ("$(KERNELVERSION)","3.4.0")

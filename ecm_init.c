@@ -48,9 +48,11 @@ extern int ecm_interface_init(void);
 extern void ecm_interface_stop(int);
 extern void ecm_interface_exit(void);
 
+#ifdef ECM_INTERFACE_BOND_ENABLE
 extern int ecm_bond_notifier_init(void);
 extern void ecm_bond_notifier_stop(int);
 extern void ecm_bond_notifier_exit(void);
+#endif
 
 extern int ecm_front_end_ipv4_init(void);
 extern void ecm_front_end_ipv4_stop(int);
@@ -66,8 +68,10 @@ extern int ecm_conntrack_notifier_init(void);
 extern void ecm_conntrack_notifier_stop(int);
 extern void ecm_conntrack_notifier_exit(void);
 
+#ifdef ECM_CLASSIFIER_DSCP_ENABLE
 extern int ecm_classifier_dscp_init(void);
 extern void ecm_classifier_dscp_exit(void);
+#endif
 
 /*
  * ecm_init()
@@ -121,20 +125,24 @@ static int __init ecm_init(void)
 	}
 #endif
 
+#ifdef ECM_CLASSIFIER_DSCP_ENABLE
 	ret = ecm_classifier_dscp_init();
 	if (0 != ret) {
 		goto err_cls_dscp;
 	}
+#endif
 
 	ret = ecm_interface_init();
 	if (0 != ret) {
 		goto err_iface;
 	}
 
+#ifdef ECM_INTERFACE_BOND_ENABLE
 	ret = ecm_bond_notifier_init();
 	if (0 != ret) {
 		goto err_bond;
 	}
+#endif
 
 	ret = ecm_front_end_ipv4_init();
 	if (0 != ret) {
@@ -163,12 +171,16 @@ err_fe_ipv6:
 #endif
 	ecm_front_end_ipv4_exit();
 err_fe_ipv4:
+#ifdef ECM_INTERFACE_BOND_ENABLE
 	ecm_bond_notifier_exit();
 err_bond:
+#endif
 	ecm_interface_exit();
 err_iface:
+#ifdef ECM_CLASSIFIER_DSCP_ENABLE
 	ecm_classifier_dscp_exit();
 err_cls_dscp:
+#endif
 #ifdef ECM_CLASSIFIER_HYFI_ENABLE
 	ecm_classifier_hyfi_rules_exit();
 err_cls_hyfi:
@@ -211,8 +223,10 @@ static void __exit ecm_exit(void)
 #endif
 	printk(KERN_INFO "stop interface\n");
 	ecm_interface_stop(1);
+#ifdef ECM_INTERFACE_BOND_ENABLE
 	printk(KERN_INFO "stop bond notifier\n");
 	ecm_bond_notifier_stop(1);
+#endif
 	printk(KERN_INFO "defunct all db connections\n");
 	ecm_db_connection_defunct_all();
 
@@ -225,12 +239,16 @@ static void __exit ecm_exit(void)
 	printk(KERN_INFO "exit front_end_ipv6\n");
 	ecm_front_end_ipv6_exit();
 #endif
+#ifdef ECM_INTERFACE_BOND_ENABLE
 	printk(KERN_INFO "exit bond notifier\n");
 	ecm_bond_notifier_exit();
+#endif
 	printk(KERN_INFO "exit interface\n");
 	ecm_interface_exit();
+#ifdef ECM_CLASSIFIER_DSCP_ENABLE
 	printk(KERN_INFO "exit dscp classifier\n");
 	ecm_classifier_dscp_exit();
+#endif
 #ifdef ECM_CLASSIFIER_HYFI_ENABLE
 	printk(KERN_INFO "exit hyfi classifier\n");
 	ecm_classifier_hyfi_rules_exit();

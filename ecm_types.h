@@ -150,6 +150,7 @@ static inline void ecm_nss_type_check_nss_ipv4(uint32_t addr){}
  */
 #define ECM_IP_ADDR_TO_NIN4_ADDR(nin4, ipaddrt) \
 	{ \
+		nin4 = 0; \
 		ecm_nss_type_check_linux_ipv4(nin4); \
 		ecm_nss_type_check_ecm_ip_addr(ipaddrt); \
 		DEBUG_ASSERT(!ipaddrt[3] && !ipaddrt[2] && (ipaddrt[1] == 0x0000ffff), "Not IPv4 address: " ECM_IP_ADDR_OCTAL_FMT "\n", ECM_IP_ADDR_TO_OCTAL(ipaddrt)); \
@@ -231,6 +232,19 @@ static inline void ecm_nss_type_check_nss_ipv4(uint32_t addr){}
 		ipaddrt[2] = nss6[1]; \
 		ipaddrt[3] = nss6[0]; \
 	}
+
+/*
+ * ecm_mac_addr_equal()
+ *	Compares two MAC addresses.
+ */
+static inline unsigned ecm_mac_addr_equal(const u8 *addr1, const u8 *addr2)
+{
+#if (LINUX_VERSION_CODE <= KERNEL_VERSION(3,6,0))
+	return compare_ether_addr(addr1, addr2);
+#else
+	return ether_addr_equal(addr1, addr2);
+#endif
+}
 
 /*
  * ecm_ip_addr_is_non_unicast()
