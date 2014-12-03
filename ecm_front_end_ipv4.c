@@ -420,21 +420,21 @@ static struct ecm_db_mapping_instance *ecm_front_end_ipv4_mapping_establish_and_
 	DEBUG_INFO("Establish mapping for " ECM_IP_ADDR_DOT_FMT ":%d\n", ECM_IP_ADDR_TO_DOT(addr), port);
 
 	/*
-	 * No mapping - establish host existence
-	 */
-	hi = ecm_front_end_ipv4_host_establish_and_ref(addr);
-	if (!hi) {
-		DEBUG_WARN("Failed to establish host\n");
-		return NULL;
-	}
-
-	/*
 	 * Locate the mapping
 	 */
 	mi = ecm_db_mapping_find_and_ref(addr, port);
 	if (mi) {
 		DEBUG_TRACE("%p: mapping established\n", mi);
 		return mi;
+	}
+
+	/*
+	 * No mapping - establish host existence
+	 */
+	hi = ecm_front_end_ipv4_host_establish_and_ref(addr);
+	if (!hi) {
+		DEBUG_WARN("Failed to establish host\n");
+		return NULL;
 	}
 
 	/*
