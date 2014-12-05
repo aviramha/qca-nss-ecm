@@ -22,7 +22,7 @@
 #include <linux/icmp.h>
 #include <linux/sysctl.h>
 #include <linux/kthread.h>
-#include <linux/sysdev.h>
+#include <linux/device.h>
 #include <linux/fs.h>
 #include <linux/pkt_sched.h>
 #include <linux/string.h>
@@ -672,9 +672,9 @@ static spinlock_t ecm_db_lock;					/* Protect the table from SMP access. */
 static uint16_t ecm_db_classifier_generation = 0;		/* Generation counter to detect out of date connections that should be reclassified */
 
 /*
- * SysFS linkage
+ * System device linkage
  */
-static struct sys_device ecm_db_sys_dev;				/* SysFS linkage */
+static struct device ecm_db_dev;				/* System device linkage */
 
 /*
  * Management thread control
@@ -8233,8 +8233,8 @@ EXPORT_SYMBOL(ecm_db_time_get);
 /*
  * ecm_db_get_state_dev_major()
  */
-static ssize_t ecm_db_get_state_dev_major(struct sys_device *dev,
-				  struct sysdev_attribute *attr,
+static ssize_t ecm_db_get_state_dev_major(struct device *dev,
+				  struct device_attribute *attr,
 				  char *buf)
 {
 	ssize_t count;
@@ -8252,8 +8252,8 @@ static ssize_t ecm_db_get_state_dev_major(struct sys_device *dev,
 /*
  * ecm_db_get_connection_count()
  */
-static ssize_t ecm_db_get_connection_count(struct sys_device *dev,
-				  struct sysdev_attribute *attr,
+static ssize_t ecm_db_get_connection_count(struct device *dev,
+				  struct device_attribute *attr,
 				  char *buf)
 {
 	ssize_t count;
@@ -8273,8 +8273,8 @@ static ssize_t ecm_db_get_connection_count(struct sys_device *dev,
 /*
  * ecm_db_get_host_count()
  */
-static ssize_t ecm_db_get_host_count(struct sys_device *dev,
-				  struct sysdev_attribute *attr,
+static ssize_t ecm_db_get_host_count(struct device *dev,
+				  struct device_attribute *attr,
 				  char *buf)
 {
 	ssize_t count;
@@ -8294,8 +8294,8 @@ static ssize_t ecm_db_get_host_count(struct sys_device *dev,
 /*
  * ecm_db_get_mapping_count()
  */
-static ssize_t ecm_db_get_mapping_count(struct sys_device *dev,
-				  struct sysdev_attribute *attr,
+static ssize_t ecm_db_get_mapping_count(struct device *dev,
+				  struct device_attribute *attr,
 				  char *buf)
 {
 	ssize_t count;
@@ -8315,8 +8315,8 @@ static ssize_t ecm_db_get_mapping_count(struct sys_device *dev,
 /*
  * ecm_db_get_node_count()
  */
-static ssize_t ecm_db_get_node_count(struct sys_device *dev,
-				  struct sysdev_attribute *attr,
+static ssize_t ecm_db_get_node_count(struct device *dev,
+				  struct device_attribute *attr,
 				  char *buf)
 {
 	ssize_t count;
@@ -8336,8 +8336,8 @@ static ssize_t ecm_db_get_node_count(struct sys_device *dev,
 /*
  * ecm_db_get_iface_count()
  */
-static ssize_t ecm_db_get_iface_count(struct sys_device *dev,
-				  struct sysdev_attribute *attr,
+static ssize_t ecm_db_get_iface_count(struct device *dev,
+				  struct device_attribute *attr,
 				  char *buf)
 {
 	ssize_t count;
@@ -8358,8 +8358,8 @@ static ssize_t ecm_db_get_iface_count(struct sys_device *dev,
  * ecm_db_get_defunct_all()
  *	Reading this file returns the accumulated total of all objects
  */
-static ssize_t ecm_db_get_defunct_all(struct sys_device *dev,
-				  struct sysdev_attribute *attr,
+static ssize_t ecm_db_get_defunct_all(struct device *dev,
+				  struct device_attribute *attr,
 				  char *buf)
 {
 	ssize_t count;
@@ -8380,8 +8380,8 @@ static ssize_t ecm_db_get_defunct_all(struct sys_device *dev,
 /*
  * ecm_db_set_defunct_all()
  */
-static ssize_t ecm_db_set_defunct_all(struct sys_device *dev,
-				  struct sysdev_attribute *attr,
+static ssize_t ecm_db_set_defunct_all(struct device *dev,
+				  struct device_attribute *attr,
 				  const char *buf, size_t count)
 {
 	ecm_db_connection_defunct_all();
@@ -8392,8 +8392,8 @@ static ssize_t ecm_db_set_defunct_all(struct sys_device *dev,
  * ecm_db_get_connection_counts_simple()
  *	Return total of connections for each simple protocol (tcp, udp, other).  Primarily for use by the luci-bwc service.
  */
-static ssize_t ecm_db_get_connection_counts_simple(struct sys_device *dev,
-				  struct sysdev_attribute *attr,
+static ssize_t ecm_db_get_connection_counts_simple(struct device *dev,
+				  struct device_attribute *attr,
 				  char *buf)
 {
 	int tcp_count;
@@ -8419,8 +8419,8 @@ static ssize_t ecm_db_get_connection_counts_simple(struct sys_device *dev,
 /*
  * ecm_db_get_state_file_output_mask()
  */
-static ssize_t ecm_db_get_state_file_output_mask(struct sys_device *dev,
-				  struct sysdev_attribute *attr,
+static ssize_t ecm_db_get_state_file_output_mask(struct device *dev,
+				  struct device_attribute *attr,
 				  char *buf)
 {
 	ssize_t count;
@@ -8440,8 +8440,8 @@ static ssize_t ecm_db_get_state_file_output_mask(struct sys_device *dev,
 /*
  * ecm_db_set_state_file_output_mask()
  */
-static ssize_t ecm_db_set_state_file_output_mask(struct sys_device *dev,
-				  struct sysdev_attribute *attr,
+static ssize_t ecm_db_set_state_file_output_mask(struct device *dev,
+				  struct device_attribute *attr,
 				  const char *buf, size_t count)
 {
 	char num_buf[12];
@@ -8469,23 +8469,48 @@ static ssize_t ecm_db_set_state_file_output_mask(struct sys_device *dev,
 /*
  * SysFS attributes for the default classifier itself.
  */
-static SYSDEV_ATTR(state_dev_major, 0444, ecm_db_get_state_dev_major, NULL);
-static SYSDEV_ATTR(connection_count, 0444, ecm_db_get_connection_count, NULL);
-static SYSDEV_ATTR(host_count, 0444, ecm_db_get_host_count, NULL);
-static SYSDEV_ATTR(mapping_count, 0444, ecm_db_get_mapping_count, NULL);
-static SYSDEV_ATTR(node_count, 0444, ecm_db_get_node_count, NULL);
-static SYSDEV_ATTR(iface_count, 0444, ecm_db_get_iface_count, NULL);
-static SYSDEV_ATTR(defunct_all, 0644, ecm_db_get_defunct_all, ecm_db_set_defunct_all);
-static SYSDEV_ATTR(connection_counts_simple, 0444, ecm_db_get_connection_counts_simple, NULL);
-static SYSDEV_ATTR(state_file_output_mask, 0644, ecm_db_get_state_file_output_mask, ecm_db_set_state_file_output_mask);
+static DEVICE_ATTR(state_dev_major, 0444, ecm_db_get_state_dev_major, NULL);
+static DEVICE_ATTR(connection_count, 0444, ecm_db_get_connection_count, NULL);
+static DEVICE_ATTR(host_count, 0444, ecm_db_get_host_count, NULL);
+static DEVICE_ATTR(mapping_count, 0444, ecm_db_get_mapping_count, NULL);
+static DEVICE_ATTR(node_count, 0444, ecm_db_get_node_count, NULL);
+static DEVICE_ATTR(iface_count, 0444, ecm_db_get_iface_count, NULL);
+static DEVICE_ATTR(defunct_all, 0644, ecm_db_get_defunct_all, ecm_db_set_defunct_all);
+static DEVICE_ATTR(connection_counts_simple, 0444, ecm_db_get_connection_counts_simple, NULL);
+static DEVICE_ATTR(state_file_output_mask, 0644, ecm_db_get_state_file_output_mask, ecm_db_set_state_file_output_mask);
 
 /*
- * SysFS class of the ubicom default classifier
- * SysFS control points can be found at /sys/devices/system/ecm_db/ecm_dbX/
+ * System device attribute array.
  */
-static struct sysdev_class ecm_db_sysclass = {
-	.name = "ecm_db",
+static struct device_attribute *ecm_db_attrs[] = {
+	&dev_attr_state_dev_major,
+	&dev_attr_connection_count,
+	&dev_attr_host_count,
+	&dev_attr_mapping_count,
+	&dev_attr_node_count,
+	&dev_attr_iface_count,
+	&dev_attr_defunct_all,
+	&dev_attr_connection_counts_simple,
+	&dev_attr_state_file_output_mask,
 };
+
+/*
+ * Sub system node of the ECM default classifier
+ * Sys device control points can be found at /sys/devices/system/ecm_db/ecm_dbX/
+ */
+static struct bus_type ecm_db_subsys = {
+	.name = "ecm_db",
+	.dev_name = "ecm_db",
+};
+
+/*
+ * ecm_db_dev_release()
+ *	This is a dummy release function for device.
+ */
+static void ecm_db_dev_release(struct device *dev)
+{
+
+}
 
 /*
  * ecm_db_connection_heirarchy_xml_state_get()
@@ -9795,6 +9820,7 @@ static void ecm_db_timer_callback(unsigned long data)
 int ecm_db_init(void)
 {
 	int result;
+	int i;
 	DEBUG_INFO("ECM Module init\n");
 
 	/*
@@ -9803,9 +9829,9 @@ int ecm_db_init(void)
 	spin_lock_init(&ecm_db_lock);
 
 	/*
-	 * Register the sysfs class
+	 * Register System device control
 	 */
-	result = sysdev_class_register(&ecm_db_sysclass);
+	result = subsys_system_register(&ecm_db_subsys, NULL);
 	if (result) {
 		DEBUG_ERROR("Failed to register SysFS class %d\n", result);
 		return result;
@@ -9814,76 +9840,31 @@ int ecm_db_init(void)
 	/*
 	 * Register SYSFS device control
 	 */
-	memset(&ecm_db_sys_dev, 0, sizeof(ecm_db_sys_dev));
-	ecm_db_sys_dev.id = 0;
-	ecm_db_sys_dev.cls = &ecm_db_sysclass;
-	result = sysdev_register(&ecm_db_sys_dev);
+	memset(&ecm_db_dev, 0, sizeof(ecm_db_dev));
+	ecm_db_dev.id = 0;
+	ecm_db_dev.bus = &ecm_db_subsys;
+	ecm_db_dev.release = ecm_db_dev_release;
+	result = device_register(&ecm_db_dev);
 	if (result) {
-		DEBUG_ERROR("Failed to register SysFS device %d\n", result);
+		DEBUG_ERROR("Failed to register System device %d\n", result);
 		goto task_cleanup_1;
 	}
 
 	/*
 	 * Create files, one for each parameter supported by this module
 	 */
-	result = sysdev_create_file(&ecm_db_sys_dev, &attr_state_dev_major);
-	if (result) {
-		DEBUG_ERROR("Failed to register dev major file %d\n", result);
-		goto task_cleanup_2;
-	}
-
-	result = sysdev_create_file(&ecm_db_sys_dev, &attr_connection_count);
-	if (result) {
-		DEBUG_ERROR("Failed to register conn count SysFS file\n");
-		goto task_cleanup_2;
-	}
-
-	result = sysdev_create_file(&ecm_db_sys_dev, &attr_host_count);
-	if (result) {
-		DEBUG_ERROR("Failed to register host count SysFS file\n");
-		goto task_cleanup_2;
-	}
-
-	result = sysdev_create_file(&ecm_db_sys_dev, &attr_mapping_count);
-	if (result) {
-		DEBUG_ERROR("Failed to register mapping count SysFS file\n");
-		goto task_cleanup_2;
-	}
-
-	result = sysdev_create_file(&ecm_db_sys_dev, &attr_defunct_all);
-	if (result) {
-		DEBUG_ERROR("Failed to register expire all SysFS file\n");
-		goto task_cleanup_2;
-	}
-
-	result = sysdev_create_file(&ecm_db_sys_dev, &attr_node_count);
-	if (result) {
-		DEBUG_ERROR("Failed to register node count SysFS file\n");
-		goto task_cleanup_2;
-	}
-
-	result = sysdev_create_file(&ecm_db_sys_dev, &attr_iface_count);
-	if (result) {
-		DEBUG_ERROR("Failed to register iface count SysFS file\n");
-		goto task_cleanup_2;
-	}
-
-	result = sysdev_create_file(&ecm_db_sys_dev, &attr_connection_counts_simple);
-	if (result) {
-		DEBUG_ERROR("Failed to register connection counts simple SysFS file\n");
-		goto task_cleanup_2;
-	}
-
-	result = sysdev_create_file(&ecm_db_sys_dev, &attr_state_file_output_mask);
-	if (result) {
-		DEBUG_ERROR("Failed to register state_file_output_mask SysFS file\n");
-		goto task_cleanup_2;
+	for (i = 0; i < ARRAY_SIZE(ecm_db_attrs); i++) {
+		result = device_create_file(&ecm_db_dev, ecm_db_attrs[i]);
+		if (result) {
+			DEBUG_ERROR("Failed to create attribute file %d\n", result);
+			goto task_cleanup_2;
+		}
 	}
 
 	/*
 	 * Register a char device that we will use to provide a dump of our state
 	 */
-	result = register_chrdev(0, ecm_db_sysclass.name, &ecm_db_fops);
+	result = register_chrdev(0, ecm_db_subsys.name, &ecm_db_fops);
 	if (result < 0) {
                 DEBUG_ERROR("Failed to register chrdev %d\n", result);
 		goto task_cleanup_2;
@@ -9973,9 +9954,12 @@ int ecm_db_init(void)
 	return 0;
 
 task_cleanup_2:
-	sysdev_unregister(&ecm_db_sys_dev);
+	while (--i >= 0) {
+		device_remove_file(&ecm_db_dev, ecm_db_attrs[i]);
+	}
+	device_unregister(&ecm_db_dev);
 task_cleanup_1:
-	sysdev_class_unregister(&ecm_db_sysclass);
+	bus_unregister(&ecm_db_subsys);
 
 	return result;
 }
@@ -9986,6 +9970,7 @@ EXPORT_SYMBOL(ecm_db_init);
  */
 void ecm_db_exit(void)
 {
+	int i;
 	DEBUG_INFO("ECM DB Module exit\n");
 
 	spin_lock_bh(&ecm_db_lock);
@@ -10002,8 +9987,13 @@ void ecm_db_exit(void)
 	 * indefinately for the lock to be released!
 	 */
 	del_timer_sync(&ecm_db_timer);
-	unregister_chrdev(ecm_db_dev_major_id, ecm_db_sysclass.name);
-	sysdev_unregister(&ecm_db_sys_dev);
-	sysdev_class_unregister(&ecm_db_sysclass);
+	unregister_chrdev(ecm_db_dev_major_id, ecm_db_subsys.name);
+
+	for (i = 0; i < ARRAY_SIZE(ecm_db_attrs); i++) {
+		device_remove_file(&ecm_db_dev, ecm_db_attrs[i]);
+	}
+
+	device_unregister(&ecm_db_dev);
+	bus_unregister(&ecm_db_subsys);
 }
 EXPORT_SYMBOL(ecm_db_exit);

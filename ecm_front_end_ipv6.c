@@ -22,7 +22,7 @@
 #include <linux/icmp.h>
 #include <linux/sysctl.h>
 #include <linux/kthread.h>
-#include <linux/sysdev.h>
+#include <linux/device.h>
 #include <linux/fs.h>
 #include <linux/pkt_sched.h>
 #include <linux/string.h>
@@ -156,9 +156,9 @@ static int ecm_front_end_ipv6_accelerated_count = 0;			/* Total offloads */
 static spinlock_t ecm_front_end_ipv6_lock;			/* Protect against SMP access between netfilter, events and private threaded function. */
 
 /*
- * SysFS linkage
+ * System device linkage
  */
-static struct sys_device ecm_front_end_ipv6_sys_dev;		/* SysFS linkage */
+static struct device ecm_front_end_ipv6_dev;		/* System device linkage */
 
 /*
  * General operational control
@@ -7606,8 +7606,8 @@ EXPORT_SYMBOL(ecm_front_end_ipv6_conntrack_event);
 /*
  * ecm_front_end_ipv6_get_stop()
  */
-static ssize_t ecm_front_end_ipv6_get_stop(struct sys_device *dev,
-				  struct sysdev_attribute *attr,
+static ssize_t ecm_front_end_ipv6_get_stop(struct device *dev,
+				  struct device_attribute *attr,
 				  char *buf)
 {
 	ssize_t count;
@@ -7638,8 +7638,8 @@ EXPORT_SYMBOL(ecm_front_end_ipv6_stop);
 /*
  * ecm_front_end_ipv6_set_stop()
  */
-static ssize_t ecm_front_end_ipv6_set_stop(struct sys_device *dev,
-				  struct sysdev_attribute *attr,
+static ssize_t ecm_front_end_ipv6_set_stop(struct device *dev,
+				  struct device_attribute *attr,
 				  const char *buf, size_t count)
 {
 	char num_buf[12];
@@ -7664,8 +7664,8 @@ static ssize_t ecm_front_end_ipv6_set_stop(struct sys_device *dev,
 /*
  * ecm_front_end_ipv6_get_udp_accelerated_count()
  */
-static ssize_t ecm_front_end_ipv6_get_udp_accelerated_count(struct sys_device *dev,
-				  struct sysdev_attribute *attr,
+static ssize_t ecm_front_end_ipv6_get_udp_accelerated_count(struct device *dev,
+				  struct device_attribute *attr,
 				  char *buf)
 {
 	ssize_t count;
@@ -7685,8 +7685,8 @@ static ssize_t ecm_front_end_ipv6_get_udp_accelerated_count(struct sys_device *d
 /*
  * ecm_front_end_ipv6_get_tcp_accelerated_count()
  */
-static ssize_t ecm_front_end_ipv6_get_tcp_accelerated_count(struct sys_device *dev,
-				  struct sysdev_attribute *attr,
+static ssize_t ecm_front_end_ipv6_get_tcp_accelerated_count(struct device *dev,
+				  struct device_attribute *attr,
 				  char *buf)
 {
 	ssize_t count;
@@ -7706,8 +7706,8 @@ static ssize_t ecm_front_end_ipv6_get_tcp_accelerated_count(struct sys_device *d
 /*
  * ecm_front_end_ipv6_get_non_ported_accelerated_count()
  */
-static ssize_t ecm_front_end_ipv6_get_non_ported_accelerated_count(struct sys_device *dev,
-				  struct sysdev_attribute *attr,
+static ssize_t ecm_front_end_ipv6_get_non_ported_accelerated_count(struct device *dev,
+				  struct device_attribute *attr,
 				  char *buf)
 {
 	ssize_t count;
@@ -7727,8 +7727,8 @@ static ssize_t ecm_front_end_ipv6_get_non_ported_accelerated_count(struct sys_de
 /*
  * ecm_front_end_ipv6_get_accelerated_count()
  */
-static ssize_t ecm_front_end_ipv6_get_accelerated_count(struct sys_device *dev,
-				  struct sysdev_attribute *attr,
+static ssize_t ecm_front_end_ipv6_get_accelerated_count(struct device *dev,
+				  struct device_attribute *attr,
 				  char *buf)
 {
 	ssize_t count;
@@ -7748,8 +7748,8 @@ static ssize_t ecm_front_end_ipv6_get_accelerated_count(struct sys_device *dev,
 /*
  * ecm_front_end_ipv6_get_no_action_limit_default()
  */
-static ssize_t ecm_front_end_ipv6_get_no_action_limit_default(struct sys_device *dev,
-				  struct sysdev_attribute *attr,
+static ssize_t ecm_front_end_ipv6_get_no_action_limit_default(struct device *dev,
+				  struct device_attribute *attr,
 				  char *buf)
 {
 	ssize_t count;
@@ -7769,8 +7769,8 @@ static ssize_t ecm_front_end_ipv6_get_no_action_limit_default(struct sys_device 
 /*
  * ecm_front_end_ipv6_set_no_action_limit_default()
  */
-static ssize_t ecm_front_end_ipv6_set_no_action_limit_default(struct sys_device *dev,
-				  struct sysdev_attribute *attr,
+static ssize_t ecm_front_end_ipv6_set_no_action_limit_default(struct device *dev,
+				  struct device_attribute *attr,
 				  const char *buf, size_t count)
 {
 	char num_buf[12];
@@ -7797,8 +7797,8 @@ static ssize_t ecm_front_end_ipv6_set_no_action_limit_default(struct sys_device 
 /*
  * ecm_front_end_ipv6_get_driver_fail_limit_default()
  */
-static ssize_t ecm_front_end_ipv6_get_driver_fail_limit_default(struct sys_device *dev,
-				  struct sysdev_attribute *attr,
+static ssize_t ecm_front_end_ipv6_get_driver_fail_limit_default(struct device *dev,
+				  struct device_attribute *attr,
 				  char *buf)
 {
 	ssize_t count;
@@ -7818,8 +7818,8 @@ static ssize_t ecm_front_end_ipv6_get_driver_fail_limit_default(struct sys_devic
 /*
  * ecm_front_end_ipv6_set_driver_fail_limit_default()
  */
-static ssize_t ecm_front_end_ipv6_set_driver_fail_limit_default(struct sys_device *dev,
-				  struct sysdev_attribute *attr,
+static ssize_t ecm_front_end_ipv6_set_driver_fail_limit_default(struct device *dev,
+				  struct device_attribute *attr,
 				  const char *buf, size_t count)
 {
 	char num_buf[12];
@@ -7846,8 +7846,8 @@ static ssize_t ecm_front_end_ipv6_set_driver_fail_limit_default(struct sys_devic
 /*
  * ecm_front_end_ipv6_get_nack_limit_default()
  */
-static ssize_t ecm_front_end_ipv6_get_nack_limit_default(struct sys_device *dev,
-				  struct sysdev_attribute *attr,
+static ssize_t ecm_front_end_ipv6_get_nack_limit_default(struct device *dev,
+				  struct device_attribute *attr,
 				  char *buf)
 {
 	ssize_t count;
@@ -7867,8 +7867,8 @@ static ssize_t ecm_front_end_ipv6_get_nack_limit_default(struct sys_device *dev,
 /*
  * ecm_front_end_ipv6_set_nack_limit_default()
  */
-static ssize_t ecm_front_end_ipv6_set_nack_limit_default(struct sys_device *dev,
-				  struct sysdev_attribute *attr,
+static ssize_t ecm_front_end_ipv6_set_nack_limit_default(struct device *dev,
+				  struct device_attribute *attr,
 				  const char *buf, size_t count)
 {
 	char num_buf[12];
@@ -7893,24 +7893,48 @@ static ssize_t ecm_front_end_ipv6_set_nack_limit_default(struct sys_device *dev,
 }
 
 /*
- * SysFS attributes
+ * System device attributes
  */
-static SYSDEV_ATTR(stop, 0644, ecm_front_end_ipv6_get_stop, ecm_front_end_ipv6_set_stop);
-static SYSDEV_ATTR(no_action_limit_default, 0644, ecm_front_end_ipv6_get_no_action_limit_default, ecm_front_end_ipv6_set_no_action_limit_default);
-static SYSDEV_ATTR(driver_fail_limit_default, 0644, ecm_front_end_ipv6_get_driver_fail_limit_default, ecm_front_end_ipv6_set_driver_fail_limit_default);
-static SYSDEV_ATTR(nack_limit_default, 0644, ecm_front_end_ipv6_get_nack_limit_default, ecm_front_end_ipv6_set_nack_limit_default);
-static SYSDEV_ATTR(udp_accelerated_count, 0444, ecm_front_end_ipv6_get_udp_accelerated_count, NULL);
-static SYSDEV_ATTR(tcp_accelerated_count, 0444, ecm_front_end_ipv6_get_tcp_accelerated_count, NULL);
-static SYSDEV_ATTR(non_ported_accelerated_count, 0444, ecm_front_end_ipv6_get_non_ported_accelerated_count, NULL);
-static SYSDEV_ATTR(accelerated_count, 0444, ecm_front_end_ipv6_get_accelerated_count, NULL);
+static DEVICE_ATTR(stop, 0644, ecm_front_end_ipv6_get_stop, ecm_front_end_ipv6_set_stop);
+static DEVICE_ATTR(no_action_limit_default, 0644, ecm_front_end_ipv6_get_no_action_limit_default, ecm_front_end_ipv6_set_no_action_limit_default);
+static DEVICE_ATTR(driver_fail_limit_default, 0644, ecm_front_end_ipv6_get_driver_fail_limit_default, ecm_front_end_ipv6_set_driver_fail_limit_default);
+static DEVICE_ATTR(nack_limit_default, 0644, ecm_front_end_ipv6_get_nack_limit_default, ecm_front_end_ipv6_set_nack_limit_default);
+static DEVICE_ATTR(udp_accelerated_count, 0444, ecm_front_end_ipv6_get_udp_accelerated_count, NULL);
+static DEVICE_ATTR(tcp_accelerated_count, 0444, ecm_front_end_ipv6_get_tcp_accelerated_count, NULL);
+static DEVICE_ATTR(non_ported_accelerated_count, 0444, ecm_front_end_ipv6_get_non_ported_accelerated_count, NULL);
+static DEVICE_ATTR(accelerated_count, 0444, ecm_front_end_ipv6_get_accelerated_count, NULL);
 
 /*
- * SysFS class of the front end
- * SysFS control points can be found at /sys/devices/system/ecm_front_end_ipv6/ecm_front_end_ipv6X/
+ * System device attribute array.
  */
-static struct sysdev_class ecm_front_end_ipv6_sysclass = {
-	.name = "ecm_front_end_ipv6",
+static struct device_attribute *ecm_front_end_ipv6_attrs[] = {
+	&dev_attr_stop,
+	&dev_attr_no_action_limit_default,
+	&dev_attr_driver_fail_limit_default,
+	&dev_attr_nack_limit_default,
+	&dev_attr_udp_accelerated_count,
+	&dev_attr_tcp_accelerated_count,
+	&dev_attr_non_ported_accelerated_count,
+	&dev_attr_accelerated_count
 };
+
+/*
+ * Sub system node of the front end
+ * Sysdevice control points can be found at /sys/devices/system/ecm_front_end_ipv6/ecm_front_end_ipv6X/
+ */
+static struct bus_type ecm_front_end_ipv6_subsys = {
+	.name = "ecm_front_end_ipv6",
+	.dev_name = "ecm_front_end_ipv6",
+};
+
+/*
+ * ecm_front_end_ipv6_dev_release()
+ *	This is a dummy release function for device.
+ */
+static void ecm_front_end_ipv6_dev_release(struct device *dev)
+{
+
+}
 
 /*
  * ecm_front_end_ipv6_init()
@@ -7918,6 +7942,7 @@ static struct sysdev_class ecm_front_end_ipv6_sysclass = {
 int ecm_front_end_ipv6_init(void)
 {
 	int result;
+	int i;
 	DEBUG_INFO("ECM Front end IPv6 init\n");
 
 	/*
@@ -7926,68 +7951,36 @@ int ecm_front_end_ipv6_init(void)
 	spin_lock_init(&ecm_front_end_ipv6_lock);
 
 	/*
-	 * Register the sysfs class
+	 * Register the Sub system
 	 */
-	result = sysdev_class_register(&ecm_front_end_ipv6_sysclass);
+	result = subsys_system_register(&ecm_front_end_ipv6_subsys, NULL);
 	if (result) {
-		DEBUG_ERROR("Failed to register SysFS class %d\n", result);
+		DEBUG_ERROR("Failed to register sub system %d\n", result);
 		return result;
 	}
 
 	/*
-	 * Register SYSFS device control
+	 * Register System device control
 	 */
-	memset(&ecm_front_end_ipv6_sys_dev, 0, sizeof(ecm_front_end_ipv6_sys_dev));
-	ecm_front_end_ipv6_sys_dev.id = 0;
-	ecm_front_end_ipv6_sys_dev.cls = &ecm_front_end_ipv6_sysclass;
-	result = sysdev_register(&ecm_front_end_ipv6_sys_dev);
+	memset(&ecm_front_end_ipv6_dev, 0, sizeof(ecm_front_end_ipv6_dev));
+	ecm_front_end_ipv6_dev.id = 0;
+	ecm_front_end_ipv6_dev.bus = &ecm_front_end_ipv6_subsys;
+	ecm_front_end_ipv6_dev.release = ecm_front_end_ipv6_dev_release;
+	result = device_register(&ecm_front_end_ipv6_dev);
 	if (result) {
-		DEBUG_ERROR("Failed to register SysFS device %d\n", result);
+		DEBUG_ERROR("Failed to register System device %d\n", result);
 		goto task_cleanup_1;
 	}
 
 	/*
 	 * Create files, one for each parameter supported by this module
 	 */
-	result = sysdev_create_file(&ecm_front_end_ipv6_sys_dev, &attr_stop);
-	if (result) {
-		DEBUG_ERROR("Failed to register stop file %d\n", result);
-		goto task_cleanup_2;
-	}
-	result = sysdev_create_file(&ecm_front_end_ipv6_sys_dev, &attr_no_action_limit_default);
-	if (result) {
-		DEBUG_ERROR("Failed to register no_action_limit_default file %d\n", result);
-		goto task_cleanup_2;
-	}
-	result = sysdev_create_file(&ecm_front_end_ipv6_sys_dev, &attr_driver_fail_limit_default);
-	if (result) {
-		DEBUG_ERROR("Failed to register driver_fail_limit_default file %d\n", result);
-		goto task_cleanup_2;
-	}
-	result = sysdev_create_file(&ecm_front_end_ipv6_sys_dev, &attr_nack_limit_default);
-	if (result) {
-		DEBUG_ERROR("Failed to register nack_limit_default file %d\n", result);
-		goto task_cleanup_2;
-	}
-	result = sysdev_create_file(&ecm_front_end_ipv6_sys_dev, &attr_udp_accelerated_count);
-	if (result) {
-		DEBUG_ERROR("Failed to register udp_accelerated_count file %d\n", result);
-		goto task_cleanup_2;
-	}
-	result = sysdev_create_file(&ecm_front_end_ipv6_sys_dev, &attr_tcp_accelerated_count);
-	if (result) {
-		DEBUG_ERROR("Failed to register tcp_accelerated_count file %d\n", result);
-		goto task_cleanup_2;
-	}
-	result = sysdev_create_file(&ecm_front_end_ipv6_sys_dev, &attr_non_ported_accelerated_count);
-	if (result) {
-		DEBUG_ERROR("Failed to register non_ported_accelerated_count file %d\n", result);
-		goto task_cleanup_2;
-	}
-	result = sysdev_create_file(&ecm_front_end_ipv6_sys_dev, &attr_accelerated_count);
-	if (result) {
-		DEBUG_ERROR("Failed to register accelerated_count file %d\n", result);
-		goto task_cleanup_2;
+	for (i = 0; i < ARRAY_SIZE(ecm_front_end_ipv6_attrs); i++) {
+		result = device_create_file(&ecm_front_end_ipv6_dev, ecm_front_end_ipv6_attrs[i]);
+		if (result) {
+			DEBUG_ERROR("Failed to register stop file %d\n", result);
+			goto task_cleanup_2;
+		}
 	}
 
 	/*
@@ -8007,9 +8000,12 @@ int ecm_front_end_ipv6_init(void)
 	return 0;
 
 task_cleanup_2:
-	sysdev_unregister(&ecm_front_end_ipv6_sys_dev);
+	while (--i >= 0) {
+		device_remove_file(&ecm_front_end_ipv6_dev, ecm_front_end_ipv6_attrs[i]);
+	}
+	device_unregister(&ecm_front_end_ipv6_dev);
 task_cleanup_1:
-	sysdev_class_unregister(&ecm_front_end_ipv6_sysclass);
+	bus_unregister(&ecm_front_end_ipv6_subsys);
 
 	return result;
 }
@@ -8020,6 +8016,7 @@ EXPORT_SYMBOL(ecm_front_end_ipv6_init);
  */
 void ecm_front_end_ipv6_exit(void)
 {
+	int i;
 	DEBUG_INFO("ECM Front end IPv6 Module exit\n");
 	spin_lock_bh(&ecm_front_end_ipv6_lock);
 	ecm_front_end_ipv6_terminate_pending = true;
@@ -8036,7 +8033,11 @@ void ecm_front_end_ipv6_exit(void)
 	 */
 	nss_ipv6_notify_unregister();
 
-	sysdev_unregister(&ecm_front_end_ipv6_sys_dev);
-	sysdev_class_unregister(&ecm_front_end_ipv6_sysclass);
+	for (i = 0; i < ARRAY_SIZE(ecm_front_end_ipv6_attrs); i++) {
+		device_remove_file(&ecm_front_end_ipv6_dev, ecm_front_end_ipv6_attrs[i]);
+	}
+
+	device_unregister(&ecm_front_end_ipv6_dev);
+	bus_unregister(&ecm_front_end_ipv6_subsys);
 }
 EXPORT_SYMBOL(ecm_front_end_ipv6_exit);

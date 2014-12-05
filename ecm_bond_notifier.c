@@ -27,7 +27,7 @@
 #include <linux/icmp.h>
 #include <linux/sysctl.h>
 #include <linux/kthread.h>
-#include <linux/sysdev.h>
+#include <linux/device.h>
 #include <linux/fs.h>
 #include <linux/pkt_sched.h>
 #include <linux/string.h>
@@ -90,9 +90,9 @@
 static spinlock_t ecm_bond_notifier_lock;			/* Protect against SMP access between netfilter, events and private threaded function. */
 
 /*
- * SysFS linkage
+ * System device linkage
  */
-static struct sys_device ecm_bond_notifier_sys_dev;		/* SysFS linkage */
+static struct device ecm_bond_notifier_dev;		/* System device linkage */
 
 /*
  * General operational control
@@ -277,8 +277,8 @@ static void ecm_bond_notifier_lag_event_cb(void *if_ctx, struct nss_lag_msg *msg
 /*
  * ecm_bond_notifier_get_stop()
  */
-static ssize_t ecm_bond_notifier_get_stop(struct sys_device *dev,
-				  struct sysdev_attribute *attr,
+static ssize_t ecm_bond_notifier_get_stop(struct device *dev,
+				  struct device_attribute *attr,
 				  char *buf)
 {
 	ssize_t count;
@@ -309,8 +309,8 @@ EXPORT_SYMBOL(ecm_bond_notifier_stop);
 /*
  * ecm_bond_notifier_set_stop()
  */
-static ssize_t ecm_bond_notifier_set_stop(struct sys_device *dev,
-				  struct sysdev_attribute *attr,
+static ssize_t ecm_bond_notifier_set_stop(struct device *dev,
+				  struct device_attribute *attr,
 				  const char *buf, size_t count)
 {
 	char num_buf[12];
@@ -333,17 +333,27 @@ static ssize_t ecm_bond_notifier_set_stop(struct sys_device *dev,
 }
 
 /*
- * SysFS attributes for the default classifier itself.
+ * System device attributes for the default classifier itself.
  */
-static SYSDEV_ATTR(stop, 0644, ecm_bond_notifier_get_stop, ecm_bond_notifier_set_stop);
+static DEVICE_ATTR(stop, 0644, ecm_bond_notifier_get_stop, ecm_bond_notifier_set_stop);
 
 /*
- * SysFS class
- * SysFS control points can be found at /sys/devices/system/ecm_bond_notifier/ecm_bond_notifierX/
+ * Sub system node.
+ * Sys device control points can be found at /sys/devices/system/ecm_bond_notifier/ecm_bond_notifierX/
  */
-static struct sysdev_class ecm_bond_notifier_sysclass = {
+static struct bus_type ecm_bond_notifier_subsys = {
 	.name = "ecm_bond_notifier",
+	.dev_name = "ecm_bond_notifier",
 };
+
+/*
+ * ecm_bond_notifier_dev_release()
+ *	This is a dummy release function for device.
+ */
+static void ecm_bond_notifier_dev_release(struct device *dev)
+{
+
+}
 
 /*
  * ecm_bond_notifier_init()
@@ -359,27 +369,28 @@ int ecm_bond_notifier_init(void)
 	spin_lock_init(&ecm_bond_notifier_lock);
 
 	/*
-	 * Register the sysfs class
+	 * Register the sub system
 	 */
-	result = sysdev_class_register(&ecm_bond_notifier_sysclass);
+	result = subsys_system_register(&ecm_bond_notifier_subsys, NULL);
 	if (result) {
-		DEBUG_ERROR("Failed to register SysFS class %d\n", result);
+		DEBUG_ERROR("Failed to register sub system %d\n", result);
 		return result;
 	}
 
 	/*
-	 * Register SYSFS device control
+	 * Register system device control
 	 */
-	memset(&ecm_bond_notifier_sys_dev, 0, sizeof(ecm_bond_notifier_sys_dev));
-	ecm_bond_notifier_sys_dev.id = 0;
-	ecm_bond_notifier_sys_dev.cls = &ecm_bond_notifier_sysclass;
-	result = sysdev_register(&ecm_bond_notifier_sys_dev);
+	memset(&ecm_bond_notifier_dev, 0, sizeof(ecm_bond_notifier_dev));
+	ecm_bond_notifier_dev.id = 0;
+	ecm_bond_notifier_dev.bus = &ecm_bond_notifier_subsys;
+	ecm_bond_notifier_dev.release = &ecm_bond_notifier_dev_release;
+	result = device_register(&ecm_bond_notifier_dev);
 	if (result) {
-		DEBUG_ERROR("Failed to register SysFS device %d\n", result);
+		DEBUG_ERROR("Failed to register system device %d\n", result);
 		goto task_cleanup_1;
 	}
 
-	result = sysdev_create_file(&ecm_bond_notifier_sys_dev, &attr_stop);
+	result = device_create_file(&ecm_bond_notifier_dev, &dev_attr_stop);
 	if (result) {
 		DEBUG_ERROR("Failed to register stop file %d\n", result);
 		goto task_cleanup_2;
@@ -402,9 +413,9 @@ int ecm_bond_notifier_init(void)
 	return 0;
 
 task_cleanup_2:
-	sysdev_unregister(&ecm_bond_notifier_sys_dev);
+	device_unregister(&ecm_bond_notifier_dev);
 task_cleanup_1:
-	sysdev_class_unregister(&ecm_bond_notifier_sysclass);
+	bus_unregister(&ecm_bond_notifier_subsys);
 
 	return result;
 }
@@ -428,8 +439,8 @@ void ecm_bond_notifier_exit(void)
 	nss_unregister_lag_if(NSS_LAG0_INTERFACE_NUM);
 	nss_unregister_lag_if(NSS_LAG1_INTERFACE_NUM);
 
-	sysdev_unregister(&ecm_bond_notifier_sys_dev);
-	sysdev_class_unregister(&ecm_bond_notifier_sysclass);
-
+	device_remove_file(&ecm_bond_notifier_dev, &dev_attr_stop);
+	device_unregister(&ecm_bond_notifier_dev);
+	bus_unregister(&ecm_bond_notifier_subsys);
 }
 EXPORT_SYMBOL(ecm_bond_notifier_exit);

@@ -22,7 +22,7 @@
 #include <linux/icmp.h>
 #include <linux/sysctl.h>
 #include <linux/kthread.h>
-#include <linux/sysdev.h>
+#include <linux/device.h>
 #include <linux/fs.h>
 #include <linux/pkt_sched.h>
 #include <linux/string.h>
