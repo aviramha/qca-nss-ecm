@@ -19,6 +19,7 @@
  * 	Bonding notifier functionality.
  */
 
+#include <linux/version.h>
 #include <linux/types.h>
 #include <linux/ip.h>
 #include <linux/tcp.h>
