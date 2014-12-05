@@ -14,6 +14,7 @@
  **************************************************************************
  */
 
+#include <linux/version.h>
 #include <linux/types.h>
 #include <linux/ip.h>
 #include <linux/tcp.h>
@@ -255,8 +256,6 @@ static struct ecm_db_node_instance *ecm_front_end_ipv4_node_establish_and_ref(st
 			done = true;
 			break;
 
-		case ECM_DB_IFACE_TYPE_ETHERNET:
-		case ECM_DB_IFACE_TYPE_LAG:
 		case ECM_DB_IFACE_TYPE_VLAN:
 #ifdef ECM_INTERFACE_VLAN_ENABLE
 			/*
@@ -266,6 +265,8 @@ static struct ecm_db_node_instance *ecm_front_end_ipv4_node_establish_and_ref(st
 			DEBUG_TRACE("VLAN interface unsupported\n");
 			return NULL;
 #endif
+		case ECM_DB_IFACE_TYPE_ETHERNET:
+		case ECM_DB_IFACE_TYPE_LAG:
 		case ECM_DB_IFACE_TYPE_BRIDGE:
 		case ECM_DB_IFACE_TYPE_IPSEC_TUNNEL:
 			if (!ecm_interface_mac_addr_get(addr, node_addr, &on_link, gw_addr)) {
@@ -2370,7 +2371,7 @@ static void ecm_front_end_ipv4_connection_udp_front_end_accelerate(struct ecm_fr
 			DEBUG_TRACE("%p: vlan tag: %x\n", fecui, vlan_value);
 #else
 			rule_invalid = true;
-			DEBUG_TRACE("%p: VLAN - unsupported\n", fecti);
+			DEBUG_TRACE("%p: VLAN - unsupported\n", fecui);
 #endif
 			break;
 		case ECM_DB_IFACE_TYPE_IPSEC_TUNNEL:
@@ -2532,7 +2533,7 @@ static void ecm_front_end_ipv4_connection_udp_front_end_accelerate(struct ecm_fr
 			DEBUG_TRACE("%p: vlan tag: %x\n", fecui, vlan_value);
 #else
 			rule_invalid = true;
-			DEBUG_TRACE("%p: VLAN - unsupported\n", fecti);
+			DEBUG_TRACE("%p: VLAN - unsupported\n", fecui);
 #endif
 			break;
 		case ECM_DB_IFACE_TYPE_IPSEC_TUNNEL:
@@ -3312,6 +3313,7 @@ static struct ecm_front_end_ipv4_connection_udp_instance *ecm_front_end_ipv4_con
 }
 
 #ifdef CONFIG_IPV6_SIT_6RD
+#ifdef ECM_INTERFACE_SIT_ENABLE
 /*
  * ecm_front_end_ipv4_sit_set_peer()
  *	It will set the tunnel's peer when the tunnel is a remote any tunnel.
@@ -3382,6 +3384,7 @@ static void ecm_front_end_ipv4_sit_set_peer(struct ecm_front_end_ipv4_connection
 
 	ecm_db_connection_interfaces_deref(from_ifaces, from_ifaces_first);
 }
+#endif
 #endif
 
 /*
@@ -3843,7 +3846,7 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_accelerate(struct
 			DEBUG_TRACE("%p: vlan tag: %x\n", fecnpi, vlan_value);
 #else
 			rule_invalid = true;
-			DEBUG_TRACE("%p: VLAN - unsupported\n", fecti);
+			DEBUG_TRACE("%p: VLAN - unsupported\n", fecnpi);
 #endif
 			break;
 		case ECM_DB_IFACE_TYPE_IPSEC_TUNNEL:
@@ -4005,7 +4008,7 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_accelerate(struct
 			DEBUG_TRACE("%p: vlan tag: %x\n", fecnpi, vlan_value);
 #else
 			rule_invalid = true;
-			DEBUG_TRACE("%p: VLAN - unsupported\n", fecti);
+			DEBUG_TRACE("%p: VLAN - unsupported\n", fecnpi);
 #endif
 			break;
 		case ECM_DB_IFACE_TYPE_IPSEC_TUNNEL:
@@ -4817,6 +4820,8 @@ static struct ecm_classifier_instance *ecm_front_end_ipv4_assign_classifier(stru
 		return (struct ecm_classifier_instance *)cnli;
 	}
 #endif
+
+#ifdef ECM_CLASSIFIER_DSCP_ENABLE
 	if (type == ECM_CLASSIFIER_TYPE_DSCP) {
 		struct ecm_classifier_dscp_instance *cdscpi;
 		cdscpi = ecm_classifier_dscp_instance_alloc(ci);
@@ -4828,6 +4833,7 @@ static struct ecm_classifier_instance *ecm_front_end_ipv4_assign_classifier(stru
 		ecm_db_connection_classifier_assign(ci, (struct ecm_classifier_instance *)cdscpi);
 		return (struct ecm_classifier_instance *)cdscpi;
 	}
+#endif
 
 #ifdef ECM_CLASSIFIER_HYFI_ENABLE
 	if (type == ECM_CLASSIFIER_TYPE_HYFI) {
@@ -6912,6 +6918,7 @@ static unsigned int ecm_front_end_ipv4_non_ported_process(struct net_device *out
 	DEBUG_TRACE("%p: skb priority: %u\n", ci, skb->priority);
 
 #ifdef CONFIG_IPV6_SIT_6RD
+#ifdef ECM_INTERFACE_SIT_ENABLE
 	/*
 	 * SIT tunnel acceleration needs create a rule to the nss firmware if the
 	 *	tunnel's dest ip address is empty,it will get dest ip and the embedded ipv6's dest ip
@@ -6927,6 +6934,8 @@ static unsigned int ecm_front_end_ipv4_non_ported_process(struct net_device *out
 		feci->deref(feci);
 	}
 #endif
+#endif
+
 	/*
 	 * Accelerate?
 	 */
@@ -7359,11 +7368,19 @@ static unsigned int ecm_front_end_ipv4_ip_process(struct net_device *out_dev, st
  * ecm_front_end_ipv4_post_routing_hook()
  *	Called for IP packets that are going out to interfaces after IP routing stage.
  */
+#if (LINUX_VERSION_CODE <= KERNEL_VERSION(3,6,0))
 static unsigned int ecm_front_end_ipv4_post_routing_hook(unsigned int hooknum,
 				struct sk_buff *skb,
 				const struct net_device *in_unused,
 				const struct net_device *out,
 				int (*okfn)(struct sk_buff *))
+#else
+static unsigned int ecm_front_end_ipv4_post_routing_hook(const struct nf_hook_ops *ops,
+				struct sk_buff *skb,
+				const struct net_device *in_unused,
+				const struct net_device *out,
+				int (*okfn)(struct sk_buff *))
+#endif
 {
 	struct net_device *in;
 	bool can_accel = true;
@@ -7407,11 +7424,19 @@ static unsigned int ecm_front_end_ipv4_post_routing_hook(unsigned int hooknum,
  * These may have come from another bridged interface or from a non-bridged interface.
  * Conntrack information may be available or not if this skb is bridged.
  */
+#if (LINUX_VERSION_CODE <= KERNEL_VERSION(3,6,0))
 static unsigned int ecm_front_end_ipv4_bridge_post_routing_hook(unsigned int hooknum,
 					struct sk_buff *skb,
 					const struct net_device *in_unused,
 					const struct net_device *out,
 					int (*okfn)(struct sk_buff *))
+#else
+static unsigned int ecm_front_end_ipv4_bridge_post_routing_hook(const struct nf_hook_ops *ops,
+					struct sk_buff *skb,
+					const struct net_device *in_unused,
+					const struct net_device *out,
+					int (*okfn)(struct sk_buff *))
+#endif
 {
 	struct ethhdr *skb_eth_hdr;
 	uint16_t eth_type;
@@ -7458,15 +7483,17 @@ static unsigned int ecm_front_end_ipv4_bridge_post_routing_hook(unsigned int hoo
 	 *	Process.
 	 *
 	 * Begin by identifying case 1.
-	 * NOTE: We are given 'out' (which we implicitly know is a bridge port) so out->master is the 'bridge'.
+	 * NOTE: We are given 'out' (which we implicitly know is a bridge port) so out interface's master is the 'bridge'.
 	 */
-	bridge = out->master;
+	bridge = ecm_interface_get_and_hold_dev_master((struct net_device *)out);
+	DEBUG_ASSERT(bridge, "Expected bridge\n");
 	in = dev_get_by_index(&init_net, skb->skb_iif);
 	if  (!in) {
 		/*
 		 * Case 1.
 		 */
 		DEBUG_TRACE("Local traffic: %p, ignoring traffic to bridge: %p (%s) \n", skb, bridge, bridge->name);
+		dev_put(bridge);
 		return NF_ACCEPT;
 	}
 	dev_put(in);
@@ -7477,22 +7504,25 @@ static unsigned int ecm_front_end_ipv4_bridge_post_routing_hook(unsigned int hoo
 	 * Case 3:
 	 *	If the packet was not local (case 1) or routed (case 2) then we process.
 	 */
-	in = br_port_dev_get(out->master, skb_eth_hdr->h_source);
+	in = br_port_dev_get(bridge, skb_eth_hdr->h_source);
 	if (!in) {
 		DEBUG_TRACE("skb: %p, no in device for bridge: %p (%s)\n", skb, bridge, bridge->name);
+		dev_put(bridge);
 		return NF_ACCEPT;
 	}
 	if (in == out) {
 		DEBUG_TRACE("skb: %p, bridge: %p (%s), port bounce on %p (%s)\n", skb, bridge, bridge->name, out, out->name);
 		dev_put(in);
+		dev_put(bridge);
 		return NF_ACCEPT;
 	}
-	if (!compare_ether_addr(skb_eth_hdr->h_source, bridge->dev_addr)) {
+	if (!ecm_mac_addr_equal(skb_eth_hdr->h_source, bridge->dev_addr)) {
 		/*
 		 * Case 2: Routed trafffic would be handled by the INET post routing.
 		 */
 		DEBUG_TRACE("skb: %p, Ignoring routed packet to bridge: %p (%s)\n", skb, bridge, bridge->name);
 		dev_put(in);
+		dev_put(bridge);
 		return NF_ACCEPT;
 	}
 
@@ -7501,6 +7531,7 @@ static unsigned int ecm_front_end_ipv4_bridge_post_routing_hook(unsigned int hoo
 	result = ecm_front_end_ipv4_ip_process((struct net_device *)out, in,
 				skb_eth_hdr->h_source, skb_eth_hdr->h_dest, can_accel, false, skb);
 	dev_put(in);
+	dev_put(bridge);
 	return result;
 }
 
@@ -7750,7 +7781,11 @@ sync_conntrack:
 		spin_unlock_bh(&ct->lock);
 	}
 
+#if (LINUX_VERSION_CODE <= KERNEL_VERSION(3,6,0))
 	acct = nf_conn_acct_find(ct);
+#else
+	acct = nf_conn_acct_find(ct)->counter;
+#endif
 	if (acct) {
 		spin_lock_bh(&ct->lock);
 		atomic64_add(sync->flow_rx_packet_count, &acct[IP_CT_DIR_ORIGINAL].packets);
@@ -7913,7 +7948,7 @@ static void ecm_front_end_ipv4_conntrack_event_destroy(struct nf_conn *ct)
 static void ecm_front_end_ipv4_conntrack_event_mark(struct nf_conn *ct)
 {
 	struct ecm_db_connection_instance *ci;
-	struct ecm_classifier_instance *cls;
+	struct ecm_classifier_instance *__attribute__((unused))cls;
 
 	DEBUG_INFO("Mark event for ct: %p\n", ct);
 

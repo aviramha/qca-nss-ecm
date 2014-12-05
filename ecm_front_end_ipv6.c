@@ -7204,7 +7204,7 @@ static unsigned int ecm_front_end_ipv6_bridge_post_routing_hook(unsigned int hoo
 		dev_put(in);
 		return NF_ACCEPT;
 	}
-	if (!compare_ether_addr(skb_eth_hdr->h_source, bridge->dev_addr)) {
+	if (!ecm_mac_addr_equal(skb_eth_hdr->h_source, bridge->dev_addr)) {
 		/*
 		 * Case 2: Routed trafffic would be handled by the INET post routing.
 		 */

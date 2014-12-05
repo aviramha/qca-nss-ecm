@@ -14,6 +14,7 @@
  **************************************************************************
  */
 
+#include <linux/version.h>
 #include <linux/types.h>
 #include <linux/ip.h>
 #include <linux/tcp.h>
@@ -43,7 +44,9 @@
 
 
 #include <linux/inetdevice.h>
+#if (LINUX_VERSION_CODE <= KERNEL_VERSION(3,6,0))
 #include <net/ipip.h>
+#endif
 #include <net/ip6_tunnel.h>
 #include <net/addrconf.h>
 #include <linux/if_arp.h>
@@ -114,6 +117,33 @@ static int ecm_interface_stopped = 0;			/* When non-zero further traffic will no
  * Management thread control
  */
 static bool ecm_interface_terminate_pending = false;		/* True when the user has signalled we should quit */
+
+/*
+ * ecm_interface_get_and_hold_dev_master()
+ *	Returns the master device of a net device if any.
+ */
+struct net_device *ecm_interface_get_and_hold_dev_master(struct net_device *dev)
+{
+	struct net_device *master;
+#if (LINUX_VERSION_CODE > KERNEL_VERSION(3,6,0))
+	rcu_read_lock();
+	master = netdev_master_upper_dev_get_rcu(dev);
+	if (!master) {
+		rcu_read_unlock();
+		return NULL;
+	}
+	dev_hold(master);
+	rcu_read_unlock();
+#else
+	master = dev->master;
+	if (!master) {
+		return NULL;
+	}
+	dev_hold(master);
+#endif
+	return master;
+}
+EXPORT_SYMBOL(ecm_interface_get_and_hold_dev_master);
 
 /*
  * ecm_interface_dev_find_by_local_addr_ipv4()
@@ -328,12 +358,17 @@ static bool ecm_interface_mac_addr_get_ipv4(ip_addr_t addr, uint8_t *mac_addr, b
 		return false;
 	}
 	DEBUG_ASSERT(ecm_rt.v4_route, "Did not locate a v4 route!\n");
+	DEBUG_TRACE("Found route\n");
 
 	/*
 	 * Is this destination on link or off-link via a gateway?
 	 */
 	rt = ecm_rt.rt.rtv4;
+#if (LINUX_VERSION_CODE <= KERNEL_VERSION(3,6,0))
 	if ((rt->rt_dst != rt->rt_gateway) || (rt->rt_flags & RTF_GATEWAY)) {
+#else
+	if (rt->rt_uses_gateway || (rt->rt_flags & RTF_GATEWAY)) {
+#endif
 		*on_link = false;
 		ECM_NIN4_ADDR_TO_IP_ADDR(gw_addr, rt->rt_gateway)
 	} else {
@@ -345,27 +380,35 @@ static bool ecm_interface_mac_addr_get_ipv4(ip_addr_t addr, uint8_t *mac_addr, b
 	 */
 	rcu_read_lock();
 	dst = ecm_rt.dst;
+#if (LINUX_VERSION_CODE <= KERNEL_VERSION(3,6,0))
 	neigh = dst_get_neighbour_noref(dst);
 	if (neigh) {
 		neigh_hold(neigh);
-	} else {
+	}
+#else
+	neigh = dst_neigh_lookup(dst, &ipv4_addr);
+#endif
+	if (!neigh) {
 		neigh = neigh_lookup(&arp_tbl, &ipv4_addr, dst->dev);
 	}
 	if (!neigh) {
 		rcu_read_unlock();
 		ecm_interface_route_release(&ecm_rt);
+		DEBUG_WARN("no neigh\n");
 		return false;
 	}
 	if (!(neigh->nud_state & NUD_VALID)) {
 		rcu_read_unlock();
 		neigh_release(neigh);
 		ecm_interface_route_release(&ecm_rt);
+		DEBUG_WARN("neigh nud state is not valid\n");
 		return false;
 	}
 	if (!neigh->dev) {
 		rcu_read_unlock();
 		neigh_release(neigh);
 		ecm_interface_route_release(&ecm_rt);
+		DEBUG_WARN("neigh has no device\n");
 		return false;
 	}
 
@@ -929,6 +972,7 @@ static struct ecm_db_iface_instance *ecm_interface_ipsec_tunnel_interface_establ
 }
 
 #ifdef CONFIG_IPV6_SIT_6RD
+#ifdef ECM_INTERFACE_SIT_ENABLE
 /*
  * ecm_interface_sit_interface_establish()
  *	Returns a reference to a iface of the SIT type, possibly creating one if necessary.
@@ -978,6 +1022,7 @@ static struct ecm_db_iface_instance *ecm_interface_sit_interface_establish(struc
 	DEBUG_TRACE("%p: sit iface established\n", nii);
 	return nii;
 }
+#endif
 #endif
 
 /*
@@ -1192,6 +1237,7 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct net_device 
 	}
 
 #ifdef CONFIG_IPV6_SIT_6RD
+#ifdef ECM_INTERFACE_SIT_ENABLE
 	/*
 	 * SIT (6-in-4)?
 	 */
@@ -1225,6 +1271,7 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct net_device 
 		ii = ecm_interface_sit_interface_establish(&type_info.sit, dev_name, dev_interface_num, nss_interface_num, dev_mtu);
 		return ii;
 	}
+#endif
 #endif
 
 	/*
@@ -1685,14 +1732,14 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfac
 					DEBUG_TRACE("Net device: %p is BRIDGE, next_dev: %p (%s)\n", dest_dev, next_dev, next_dev->name);
 					break;
 				}
-
+#ifdef ECM_INTERFACE_BOND_ENABLE
 				/*
 				 * LAG?
 				 */
 				if (ecm_front_end_is_lag_master(dest_dev)) {
 					/*
 					 * Link aggregation
-					 * Figure out which slave device of the link aggregation will be used to reach the destination.
+					 * Figure out whiich slave device of the link aggregation will be used to reach the destination.
 					 */
 					bool dest_on_link = false;
 					ip_addr_t dest_gw_addr = ECM_IP_ADDR_NULL;
@@ -1712,11 +1759,14 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfac
 						memcpy(src_mac_addr, src_node_addr, ETH_ALEN);
 						memcpy(dest_mac_addr, dest_node_addr, ETH_ALEN);
 					} else {
+						struct net_device *dest_dev_master;
+
 						/*
 						 * Use appropriate source MAC address for routed packets
 						 */
-						if (dest_dev->master) {
-							memcpy(src_mac_addr, dest_dev->master->dev_addr, ETH_ALEN);
+						dest_dev_master = ecm_interface_get_and_hold_dev_master(dest_dev);
+						if (dest_dev_master) {
+							memcpy(src_mac_addr, dest_dev_master->dev_addr, ETH_ALEN);
 						} else {
 							memcpy(src_mac_addr, dest_dev->dev_addr, ETH_ALEN);
 						}
@@ -1739,13 +1789,17 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfac
 							/*
 							 * find proper interfce from which to issue ARP
 							 */
-							if (dest_dev->master) {
-								master_dev = dest_dev->master;
+							if (dest_dev_master) {
+								master_dev = dest_dev_master;
 							} else {
 								master_dev = dest_dev;
 							}
 
 							dev_hold(master_dev);
+
+							if (dest_dev_master) {
+								dev_put(dest_dev_master);
+							}
 
 							ECM_IP_ADDR_TO_NIN4_ADDR(ipv4_addr, dest_addr);
 							src_ip = inet_select_addr(master_dev, ipv4_addr, RT_SCOPE_LINK);
@@ -1780,6 +1834,10 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfac
 							ecm_db_connection_interfaces_deref(interfaces, current_interface_index);
 							return ECM_DB_IFACE_HEIRARCHY_MAX;
 						}
+
+						if (dest_dev_master) {
+							dev_put(dest_dev_master);
+						}
 					}
 
 					next_dev = bond_get_tx_dev(NULL, src_mac_addr, dest_mac_addr,
@@ -1802,6 +1860,7 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfac
 					DEBUG_TRACE("Net device: %p is LAG, slave dev: %p (%s)\n", dest_dev, next_dev, next_dev->name);
 					break;
 				}
+#endif
 
 				/*
 				 * ETHERNET!
@@ -2256,7 +2315,11 @@ static int ecm_interface_netdev_notifier_callback(struct notifier_block *this, u
 		if (!netif_carrier_ok(dev)) {
 			DEBUG_INFO("Net device: %p, CARRIER BAD\n", dev);
 			if (netif_is_bond_slave(dev)) {
-				ecm_interface_dev_regenerate_connections(dev->master);
+				struct net_device *master;
+				master = ecm_interface_get_and_hold_dev_master(dev);
+				DEBUG_ASSERT(master, "Expected a master\n");
+				ecm_interface_dev_regenerate_connections(master);
+				dev_put(master);
 			} else {
 				ecm_interface_dev_regenerate_connections(dev);
 			}

@@ -25,8 +25,12 @@ enum ecm_classifier_types {
 #ifdef ECM_CLASSIFIER_HYFI_ENABLE
 	ECM_CLASSIFIER_TYPE_HYFI,		/* HyFi classifier */
 #endif
+#ifdef ECM_CLASSIFIER_DSCP_ENABLE
 	ECM_CLASSIFIER_TYPE_DSCP,		/* Provides DSCP and DSCP remarking support */
+#endif
+#ifdef ECM_CLASSIFIER_NL_ENABLE
 	ECM_CLASSIFIER_TYPE_NL,			/* Provides netlink interface */
+#endif
 	ECM_CLASSIFIER_TYPES,			/* MUST BE LAST */
 };
 typedef enum ecm_classifier_types ecm_classifier_type_t;
