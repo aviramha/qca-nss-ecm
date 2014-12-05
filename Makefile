@@ -34,7 +34,7 @@ ecm-y := \
 # Define ECM_INTERFACE_BOND_ENABLE=y in order to enable
 # Bonding / Link Aggregation support.
 # #############################################################################
-ifeq ("$(KERNELVERSION)","3.4.0")
+ifneq ($(findstring 3.4, $(KERNELVERSION)),)
 ECM_INTERFACE_BOND_ENABLE=y
 endif
 ecm-$(ECM_INTERFACE_BOND_ENABLE) += ecm_bond_notifier.o
@@ -44,7 +44,7 @@ ccflags-$(ECM_INTERFACE_BOND_ENABLE) += -DECM_INTERFACE_BOND_ENABLE
 # Define ECM_INTERFACE_PPP_ENABLE=y in order
 # to enable support for PPP and, specifically, PPPoE acceleration.
 # #############################################################################
-ifeq ("$(KERNELVERSION)","3.4.0")
+ifneq ($(findstring 3.4, $(KERNELVERSION)),)
 ECM_INTERFACE_PPP_ENABLE=y
 endif
 ccflags-$(ECM_INTERFACE_PPP_ENABLE) += -DECM_INTERFACE_PPP_ENABLE
@@ -53,7 +53,7 @@ ccflags-$(ECM_INTERFACE_PPP_ENABLE) += -DECM_INTERFACE_PPP_ENABLE
 # Define ECM_INTERFACE_SIT_ENABLE=y in order
 # to enable support for SIT interface.
 # #############################################################################
-ifeq ("$(KERNELVERSION)","3.4.0")
+ifneq ($(findstring 3.4, $(KERNELVERSION)),)
 ECM_INTERFACE_SIT_ENABLE=y
 endif
 ccflags-$(ECM_INTERFACE_SIT_ENABLE) += -DECM_INTERFACE_SIT_ENABLE
@@ -61,7 +61,7 @@ ccflags-$(ECM_INTERFACE_SIT_ENABLE) += -DECM_INTERFACE_SIT_ENABLE
 # #############################################################################
 # Define ECM_INTERFACE_VLAN_ENABLE=y in order to enable support for VLAN
 # #############################################################################
-ifeq ("$(KERNELVERSION)","3.4.0")
+ifneq ($(findstring 3.4, $(KERNELVERSION)),)
 ECM_INTERFACE_VLAN_ENABLE=y
 endif
 ccflags-$(ECM_INTERFACE_VLAN_ENABLE) += -DECM_INTERFACE_VLAN_ENABLE
@@ -69,7 +69,7 @@ ccflags-$(ECM_INTERFACE_VLAN_ENABLE) += -DECM_INTERFACE_VLAN_ENABLE
 # #############################################################################
 # Define ECM_FRONT_END_IPV6_ENABLE=y in order to enable IPv6 front end.
 # #############################################################################
-ifeq ("$(KERNELVERSION)","3.4.0")
+ifneq ($(findstring 3.4, $(KERNELVERSION)),)
 ECM_FRONT_END_IPV6_ENABLE=y
 endif
 ecm-$(ECM_FRONT_END_IPV6_ENABLE) += ecm_front_end_ipv6.o
@@ -78,7 +78,7 @@ ccflags-$(ECM_FRONT_END_IPV6_ENABLE) += -DECM_FRONT_END_IPV6_ENABLE
 # #############################################################################
 # Define ECM_CLASSIFIER_NL_ENABLE=y in order to enable NL classifier.
 # #############################################################################
-ifeq ("$(KERNELVERSION)","3.4.0")
+ifneq ($(findstring 3.4, $(KERNELVERSION)),)
 ECM_CLASSIFIER_NL_ENABLE=y
 endif
 ecm-$(ECM_CLASSIFIER_NL_ENABLE) += ecm_classifier_nl.o
@@ -87,7 +87,7 @@ ccflags-$(ECM_CLASSIFIER_NL_ENABLE) += -DECM_CLASSIFIER_NL_ENABLE
 # #############################################################################
 # Define ECM_CLASSIFIER_DSCP_ENABLE=y in order to enable DSCP classifier.
 # #############################################################################
-ifeq ("$(KERNELVERSION)","3.4.0")
+ifneq ($(findstring 3.4, $(KERNELVERSION)),)
 ECM_CLASSIFIER_DSCP_ENABLE=y
 endif
 ecm-$(ECM_CLASSIFIER_DSCP_ENABLE) += ecm_classifier_dscp.o
