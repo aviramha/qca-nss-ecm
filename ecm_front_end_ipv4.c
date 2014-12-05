@@ -222,20 +222,23 @@ static struct ecm_db_node_instance *ecm_front_end_ipv4_node_establish_and_ref(st
 		ecm_db_iface_type_t type;
 		ip_addr_t gw_addr = ECM_IP_ADDR_NULL;
 		bool on_link = false;
+#ifdef ECM_INTERFACE_PPP_ENABLE
 		struct ecm_db_interface_info_pppoe pppoe_info;
-
+#endif
 		type = ecm_db_connection_iface_type_get(interface_list[i]);
 		DEBUG_INFO("Lookup node address, interface @ %d is type: %d\n", i, type);
 
 		switch (type) {
 
 		case ECM_DB_IFACE_TYPE_PPPOE:
+#ifdef ECM_INTERFACE_PPP_ENABLE
 			/*
 			 * Node address is the address of the remote PPPoE server
 			 */
 			ecm_db_iface_pppoe_session_info_get(interface_list[i], &pppoe_info);
 			memcpy(node_addr, pppoe_info.remote_mac, ETH_ALEN);
 			done = true;
+#endif
 			break;
 
 		case ECM_DB_IFACE_TYPE_SIT:
@@ -808,7 +811,9 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_accelerate(struct ecm_fr
 		 * Conflicting information may cause accel to be unsupported.
 		 */
 		switch (ii_type) {
+#ifdef ECM_INTERFACE_PPP_ENABLE
 			struct ecm_db_interface_info_pppoe pppoe_info;
+#endif
 			struct ecm_db_interface_info_vlan vlan_info;
 			uint32_t vlan_value = 0;
 			struct net_device *vlan_in_dev = NULL;
@@ -844,6 +849,7 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_accelerate(struct ecm_fr
 			DEBUG_TRACE("%p: Ethernet - mac: %pM\n", fecti, from_nss_iface_address);
 			break;
 		case ECM_DB_IFACE_TYPE_PPPOE:
+#ifdef ECM_INTERFACE_PPP_ENABLE
 			/*
 			 * More than one PPPoE in the list is not valid!
 			 */
@@ -865,6 +871,9 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_accelerate(struct ecm_fr
 			DEBUG_TRACE("%p: PPPoE - session: %x, mac: %pM\n", fecti,
 					nircm->pppoe_rule.flow_pppoe_session_id,
 					nircm->pppoe_rule.flow_pppoe_remote_mac);
+#else
+			rule_invalid = true;
+#endif
 			break;
 		case ECM_DB_IFACE_TYPE_VLAN:
 			DEBUG_TRACE("%p: VLAN\n", fecti);
@@ -958,7 +967,9 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_accelerate(struct ecm_fr
 		 * Conflicting information may cause accel to be unsupported.
 		 */
 		switch (ii_type) {
+#ifdef ECM_INTERFACE_PPP_ENABLE
 			struct ecm_db_interface_info_pppoe pppoe_info;
+#endif
 			struct ecm_db_interface_info_vlan vlan_info;
 			uint32_t vlan_value = 0;
 			struct net_device *vlan_out_dev = NULL;
@@ -994,6 +1005,7 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_accelerate(struct ecm_fr
 			DEBUG_TRACE("%p: Ethernet - mac: %pM\n", fecti, to_nss_iface_address);
 			break;
 		case ECM_DB_IFACE_TYPE_PPPOE:
+#ifdef ECM_INTERFACE_PPP_ENABLE
 			/*
 			 * More than one PPPoE in the list is not valid!
 			 */
@@ -1014,6 +1026,9 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_accelerate(struct ecm_fr
 			DEBUG_TRACE("%p: PPPoE - session: %x, mac: %pM\n", fecti,
 				    nircm->pppoe_rule.return_pppoe_session_id,
 				    nircm->pppoe_rule.return_pppoe_remote_mac);
+#else
+			rule_invalid = true;
+#endif
 			break;
 		case ECM_DB_IFACE_TYPE_VLAN:
 			DEBUG_TRACE("%p: VLAN\n", fecti);
@@ -2213,7 +2228,9 @@ static void ecm_front_end_ipv4_connection_udp_front_end_accelerate(struct ecm_fr
 		 * Conflicting information may cause accel to be unsupported.
 		 */
 		switch (ii_type) {
+#ifdef ECM_INTERFACE_PPP_ENABLE
 			struct ecm_db_interface_info_pppoe pppoe_info;
+#endif
 			struct ecm_db_interface_info_vlan vlan_info;
 			uint32_t vlan_value = 0;
 			struct net_device *vlan_in_dev = NULL;
@@ -2249,6 +2266,7 @@ static void ecm_front_end_ipv4_connection_udp_front_end_accelerate(struct ecm_fr
 			DEBUG_TRACE("%p: Ethernet - mac: %pM\n", fecui, from_nss_iface_address);
 			break;
 		case ECM_DB_IFACE_TYPE_PPPOE:
+#ifdef ECM_INTERFACE_PPP_ENABLE
 			/*
 			 * More than one PPPoE in the list is not valid!
 			 */
@@ -2270,6 +2288,9 @@ static void ecm_front_end_ipv4_connection_udp_front_end_accelerate(struct ecm_fr
 			DEBUG_TRACE("%p: PPPoE - session: %x, mac: %pM\n", fecui,
 					nircm->pppoe_rule.flow_pppoe_session_id,
 					nircm->pppoe_rule.flow_pppoe_remote_mac);
+#else
+			rule_invalid = true;
+#endif
 			break;
 		case ECM_DB_IFACE_TYPE_VLAN:
 			DEBUG_TRACE("%p: VLAN\n", fecui);
@@ -2363,7 +2384,9 @@ static void ecm_front_end_ipv4_connection_udp_front_end_accelerate(struct ecm_fr
 		 * Conflicting information may cause accel to be unsupported.
 		 */
 		switch (ii_type) {
+#ifdef ECM_INTERFACE_PPP_ENABLE
 			struct ecm_db_interface_info_pppoe pppoe_info;
+#endif
 			struct ecm_db_interface_info_vlan vlan_info;
 			uint32_t vlan_value = 0;
 			struct net_device *vlan_out_dev = NULL;
@@ -2399,6 +2422,7 @@ static void ecm_front_end_ipv4_connection_udp_front_end_accelerate(struct ecm_fr
 			DEBUG_TRACE("%p: Ethernet - mac: %pM\n", fecui, to_nss_iface_address);
 			break;
 		case ECM_DB_IFACE_TYPE_PPPOE:
+#ifdef ECM_INTERFACE_PPP_ENABLE
 			/*
 			 * More than one PPPoE in the list is not valid!
 			 */
@@ -2419,6 +2443,9 @@ static void ecm_front_end_ipv4_connection_udp_front_end_accelerate(struct ecm_fr
 			DEBUG_TRACE("%p: PPPoE - session: %x, mac: %pM\n", fecui,
 				    nircm->pppoe_rule.return_pppoe_session_id,
 				    nircm->pppoe_rule.return_pppoe_remote_mac);
+#else
+			rule_invalid = true;
+#endif
 			break;
 		case ECM_DB_IFACE_TYPE_VLAN:
 			DEBUG_TRACE("%p: VLAN\n", fecui);
@@ -3660,7 +3687,9 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_accelerate(struct
 		 * Conflicting information may cause accel to be unsupported.
 		 */
 		switch (ii_type) {
+#ifdef ECM_INTERFACE_PPP_ENABLE
 			struct ecm_db_interface_info_pppoe pppoe_info;
+#endif
 			struct ecm_db_interface_info_vlan vlan_info;
 			uint32_t vlan_value = 0;
 			struct net_device *vlan_in_dev = NULL;
@@ -3696,6 +3725,7 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_accelerate(struct
 			DEBUG_TRACE("%p: Ethernet - mac: %pM\n", fecnpi, from_nss_iface_address);
 			break;
 		case ECM_DB_IFACE_TYPE_PPPOE:
+#ifdef ECM_INTERFACE_PPP_ENABLE
 			/*
 			 * More than one PPPoE in the list is not valid!
 			 */
@@ -3717,6 +3747,9 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_accelerate(struct
 			DEBUG_TRACE("%p: PPPoE - session: %x, mac: %pM\n", fecnpi,
 					nircm->pppoe_rule.flow_pppoe_session_id,
 					nircm->pppoe_rule.flow_pppoe_remote_mac);
+#else
+			rule_invalid = true;
+#endif
 			break;
 		case ECM_DB_IFACE_TYPE_VLAN:
 			DEBUG_TRACE("%p: VLAN\n", fecnpi);
@@ -3810,7 +3843,9 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_accelerate(struct
 		 * Conflicting information may cause accel to be unsupported.
 		 */
 		switch (ii_type) {
+#ifdef ECM_INTERFACE_PPP_ENABLE
 			struct ecm_db_interface_info_pppoe pppoe_info;
+#endif
 			struct ecm_db_interface_info_vlan vlan_info;
 			uint32_t vlan_value = 0;
 			struct net_device *vlan_out_dev = NULL;
@@ -3846,6 +3881,7 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_accelerate(struct
 			DEBUG_TRACE("%p: Ethernet - mac: %pM\n", fecnpi, to_nss_iface_address);
 			break;
 		case ECM_DB_IFACE_TYPE_PPPOE:
+#ifdef ECM_INTERFACE_PPP_ENABLE
 			/*
 			 * More than one PPPoE in the list is not valid!
 			 */
@@ -3866,6 +3902,9 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_accelerate(struct
 			DEBUG_TRACE("%p: PPPoE - session: %x, mac: %pM\n", fecnpi,
 				    nircm->pppoe_rule.return_pppoe_session_id,
 				    nircm->pppoe_rule.return_pppoe_remote_mac);
+#else
+			rule_invalid = true;
+#endif
 			break;
 		case ECM_DB_IFACE_TYPE_VLAN:
 			DEBUG_TRACE("%p: VLAN\n", fecnpi);
