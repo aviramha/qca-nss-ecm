@@ -457,7 +457,7 @@ int32_t ecm_front_end_ipv6_interface_heirarchy_construct(struct ecm_db_iface_ins
 		 * will use to emit to the destination address.
 		 */
 		do {
-#ifdef ECM_INTERFACE_PPP_SUPPORT
+#ifdef ECM_INTERFACE_PPP_ENABLE
 			int channel_count;
 			struct ppp_channel *ppp_chan[1];
 			int channel_protocol;
@@ -657,7 +657,7 @@ int32_t ecm_front_end_ipv6_interface_heirarchy_construct(struct ecm_db_iface_ins
 				break;
 			}
 
-#ifndef ECM_INTERFACE_PPP_SUPPORT
+#ifndef ECM_INTERFACE_PPP_ENABLE
 			DEBUG_TRACE("Net device: %p is UNKNOWN (PPP Unsupported) type: %d\n", dest_dev, dest_dev_type);
 #else
 			/*

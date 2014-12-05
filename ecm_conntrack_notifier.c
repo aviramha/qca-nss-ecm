@@ -81,7 +81,9 @@
 #include "ecm_db.h"
 #include "ecm_classifier_default.h"
 #include "ecm_front_end_ipv4.h"
+#ifdef ECM_CLASSIFIER_FRONT_END_IPV6
 #include "ecm_front_end_ipv6.h"
+#endif
 
 /*
  * Locking of the classifier - concurrency control
@@ -143,10 +145,14 @@ static int ecm_conntrack_event(unsigned int events, struct nf_ct_event *item)
 	 */
 	if (nf_ct_l3num(ct) == AF_INET) {
 		return ecm_front_end_ipv4_conntrack_event(events, ct);
+	}
+#ifndef ECM_CLASSIFIER_FRONT_END_IPV6
+	}
+#else
 	} else if (nf_ct_l3num(ct) == AF_INET6) {
 		return ecm_front_end_ipv6_conntrack_event(events, ct);
 	}
-
+#endif
 	return NOTIFY_DONE;
 }
 
