@@ -14,6 +14,7 @@
  **************************************************************************
  */
 
+#include <linux/version.h>
 #include <linux/types.h>
 #include <linux/ip.h>
 #include <linux/tcp.h>
@@ -1114,7 +1115,6 @@ static bool _ecm_tracker_tcp_stream_segment_add(struct ecm_tracker_tcp_internal_
 static bool ecm_tracker_tcp_extract_mss(struct sk_buff *skb, uint16_t *mss, struct ecm_tracker_ip_protocol_header *ecm_tcp_header)
 {
 	struct tcp_options_received opt_rx;
-	const u8 *hash_location;
 
 	/*
 	 * Set he transport header offset (tcp) - unlikely not to be set BUT we don't take the chance
@@ -1125,7 +1125,16 @@ static bool ecm_tracker_tcp_extract_mss(struct sk_buff *skb, uint16_t *mss, stru
 	 * Parse the TCP header options
 	 */
 	memset(&opt_rx, 0, sizeof(opt_rx));
-	tcp_parse_options(skb, &opt_rx, &hash_location, 0);
+	{
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(3,6,0))
+		const u8 *hash_location;
+		tcp_parse_options(skb, &opt_rx, &hash_location, 0);
+#elif (LINUX_VERSION_CODE >= KERNEL_VERSION(3,10,0))
+		tcp_parse_options(skb, &opt_rx, 0, NULL);
+#else
+#error "Unsupported kernel version for tcp_parse_options()"
+#endif
+	}
 
 	/*
 	 * Was there an MSS?
