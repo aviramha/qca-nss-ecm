@@ -77,8 +77,12 @@
 #include "ecm_tracker_tcp.h"
 #include "ecm_db.h"
 #include "ecm_classifier_default.h"
+#ifdef ECM_CLASSIFIER_NL_ENABLE
 #include "ecm_classifier_nl.h"
+#endif
+#ifdef ECM_CLASSIFIER_HYFI_ENABLE
 #include "ecm_classifier_hyfi.h"
+#endif
 #include "ecm_classifier_dscp.h"
 #include "ecm_interface.h"
 
@@ -4745,6 +4749,7 @@ static struct ecm_classifier_instance *ecm_front_end_ipv4_assign_classifier(stru
 	DEBUG_TRACE("%p: Assign classifier of type: %d\n", ci, type);
 	DEBUG_ASSERT(type != ECM_CLASSIFIER_TYPE_DEFAULT, "Must never need to instantiate default type in this way");
 
+#ifdef ECM_CLASSIFIER_NL_ENABLE
 	if (type == ECM_CLASSIFIER_TYPE_NL) {
 		struct ecm_classifier_nl_instance *cnli;
 		cnli = ecm_classifier_nl_instance_alloc(ci);
@@ -4756,7 +4761,7 @@ static struct ecm_classifier_instance *ecm_front_end_ipv4_assign_classifier(stru
 		ecm_db_connection_classifier_assign(ci, (struct ecm_classifier_instance *)cnli);
 		return (struct ecm_classifier_instance *)cnli;
 	}
-
+#endif
 	if (type == ECM_CLASSIFIER_TYPE_DSCP) {
 		struct ecm_classifier_dscp_instance *cdscpi;
 		cdscpi = ecm_classifier_dscp_instance_alloc(ci);
@@ -7870,6 +7875,7 @@ static void ecm_front_end_ipv4_conntrack_event_mark(struct nf_conn *ct)
 		return;
 	}
 
+#ifdef ECM_CLASSIFIER_NL_ENABLE
 	/*
 	 * As of now, only the Netlink classifier is interested in conmark changes
 	 * GGG TODO Add a classifier method to propagate this information to any and all types of classifier.
@@ -7879,6 +7885,7 @@ static void ecm_front_end_ipv4_conntrack_event_mark(struct nf_conn *ct)
 		ecm_classifier_nl_process_mark((struct ecm_classifier_nl_instance *)cls, ct->mark);
 		cls->deref(cls);
 	}
+#endif
 
 	/*
 	 * All done
