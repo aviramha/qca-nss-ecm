@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2014, The Linux Foundation.  All rights reserved.
+ * Copyright (c) 2014,2015 The Linux Foundation.  All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -2030,7 +2030,6 @@ static void ecm_front_end_ipv6_connection_tcp_destroy_callback(void *app_data, s
 		fecti->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DEFUNCT;
 	}
 	spin_unlock_bh(&fecti->lock);
- 
 
 	/*
 	 * TCP acceleration ends
@@ -5373,11 +5372,19 @@ static bool ecm_front_end_ipv6_connection_regenerate(struct ecm_db_connection_in
 
 	DEBUG_TRACE("%p: Update the 'from' interface heirarchy list\n", ci);
 	from_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, protocol, in_dev, is_routed, in_dev, src_node_addr, dest_node_addr);
+	if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
+		goto ecm_ipv6_retry_regen;
+	}
+
 	ecm_db_connection_from_interfaces_reset(ci, from_list, from_list_first);
 	ecm_db_connection_interfaces_deref(from_list, from_list_first);
 
 	DEBUG_TRACE("%p: Update the 'to' interface heirarchy list\n", ci);
 	to_list_first = ecm_front_end_ipv6_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, protocol, out_dev, is_routed, in_dev, dest_node_addr, src_node_addr);
+	if (to_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
+		goto ecm_ipv6_retry_regen;
+	}
+
 	ecm_db_connection_to_interfaces_reset(ci, to_list, to_list_first);
 	ecm_db_connection_interfaces_deref(to_list, to_list_first);
 
@@ -5432,6 +5439,10 @@ static bool ecm_front_end_ipv6_connection_regenerate(struct ecm_db_connection_in
 	 */
 	ecm_db_connection_assignments_release(assignment_count, assignments);
 	return true;
+
+ecm_ipv6_retry_regen:
+	ecm_db_connection_classifier_generation_change(ci);
+	return false;
 }
 
 /*
