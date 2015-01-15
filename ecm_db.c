@@ -831,6 +831,11 @@ static void ecm_db_connection_defunct_callback(void *arg)
 	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed", ci);
 
 	DEBUG_INFO("%p: defunct timer expired\n", ci);
+
+	if (ci->defunct) {
+		ci->defunct(ci->feci);
+	}
+
 	ecm_db_connection_deref(ci);
 }
 
