@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2014, The Linux Foundation.  All rights reserved.
+ * Copyright (c) 2014,2015 The Linux Foundation.  All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -4798,6 +4798,49 @@ static struct ecm_front_end_ipv4_connection_non_ported_instance *ecm_front_end_i
 	return fecnpi;
 }
 
+#ifdef ECM_INTERFACE_PPP_ENABLE
+/*
+ * ecm_front_end_ipv4_skip_l2tp_pptp()
+ *	skip l2tp/pptp tunnel encapsulated traffic
+ *
+ * ECM does not handle L2TP or PPTP encapsulated packets,
+ * this function detects packets of that type so they can be skipped over to improve their throughput.
+ */
+static inline bool ecm_front_end_ipv4_skip_l2tp_pptp(struct sk_buff *skb, const struct net_device *out)
+{
+	struct ppp_channel *ppp_chan[1];
+	int px_proto;
+
+	/*
+	 * skip first pass of l2tp/pptp tunnel encapsulated traffic
+	 */
+	if (out->type == ARPHRD_PPP) {
+		if (ppp_hold_channels((struct net_device *)out, ppp_chan, 1) == 1) {
+			px_proto = ppp_channel_get_protocol(ppp_chan[0]);
+			ppp_release_channels(ppp_chan, 1);
+			return ((px_proto == PX_PROTO_OL2TP) || (px_proto == PX_PROTO_PPTP));
+		}
+	}
+
+	/*
+	 * skip second pass of l2tp tunnel encapsulated traffic
+	 */
+	if (!skb->sk) {
+		return false;
+	}
+
+	if (skb->sk->sk_protocol != IPPROTO_UDP) {
+		return false;
+	}
+
+	if (unlikely(udp_sk(skb->sk)->encap_type == UDP_ENCAP_L2TPINUDP)) {
+		return true;
+	}
+
+	return false;
+}
+#endif
+
 /*
  * ecm_front_end_ipv4_assign_classifier()
  *	Instantiate and assign classifier of type upon the connection, also returning it if it could be allocated.
@@ -5750,21 +5793,6 @@ static unsigned int ecm_front_end_ipv4_udp_process(struct net_device *out_dev, s
 	if (unlikely(!udp_hdr)) {
 		DEBUG_WARN("Invalid UDP header in skb %p\n", skb);
 		return NF_ACCEPT;
-	}
-
-	/*
-	 * Deny acceleration for L2TP-over-UDP tunnel
-	 */
-	if (skb->sk) {
-		if(skb->sk->sk_protocol == IPPROTO_UDP) {
-			struct udp_sock *usk = udp_sk(skb->sk);
-			if (usk) {
-				if (unlikely(usk->encap_type == UDP_ENCAP_L2TPINUDP)) {
-					DEBUG_TRACE("Skip packets for L2TP tunnel in skb %p\n", skb);
-					can_accel = false;
-				}
-			}
-		}
 	}
 
 	/*
@@ -7399,6 +7427,15 @@ static unsigned int ecm_front_end_ipv4_post_routing_hook(const struct nf_hook_op
 	}
 	spin_unlock_bh(&ecm_front_end_ipv4_lock);
 
+#ifdef ECM_INTERFACE_PPP_ENABLE
+	/*
+	 * skip l2tp/pptp because we don't accelerate them
+	 */
+	if (ecm_front_end_ipv4_skip_l2tp_pptp(skb, out)) {
+		return NF_ACCEPT;
+	}
+#endif
+
 	/*
 	 * Identify interface from where this packet came
 	 */
@@ -7457,6 +7494,15 @@ static unsigned int ecm_front_end_ipv4_bridge_post_routing_hook(const struct nf_
 		return NF_ACCEPT;
 	}
 	spin_unlock_bh(&ecm_front_end_ipv4_lock);
+
+#ifdef ECM_INTERFACE_PPP_ENABLE
+	/*
+	 * skip l2tp/pptp because we don't accelerate them
+	 */
+	if (ecm_front_end_ipv4_skip_l2tp_pptp(skb, out)) {
+		return NF_ACCEPT;
+	}
+#endif
 
 	/*
 	 * Check packet is an IP Ethernet packet
