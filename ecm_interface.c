@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2014, The Linux Foundation.  All rights reserved.
+ * Copyright (c) 2014,2015 The Linux Foundation.  All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -2241,7 +2241,7 @@ static void ecm_interface_regenerate_connections(struct ecm_db_iface_instance *i
  * ecm_interface_dev_regenerate_connections()
  *	Cause regeneration of all connections that are using the specified interface.
  */
-static void ecm_interface_dev_regenerate_connections(struct net_device *dev)
+void ecm_interface_dev_regenerate_connections(struct net_device *dev)
 {
 	struct ecm_db_iface_instance *ii;
 

@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2014, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014,2015 The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -83,6 +83,7 @@
 #include "ecm_db.h"
 #include "ecm_classifier_default.h"
 #include "ecm_front_end_ipv4.h"
+#include "ecm_interface.h"
 // GGG #include "ecm_front_end_ipv6.h"
 
 /*
@@ -222,6 +223,8 @@ static void ecm_bond_notifier_bond_enslave(struct net_device *slave_dev)
  */
 static void ecm_bond_notifier_bond_link_up(struct net_device *slave_dev)
 {
+	struct net_device *master;
+
 	/*
 	 * If operations have stopped then do not process event
 	 */
@@ -238,13 +241,12 @@ static void ecm_bond_notifier_bond_link_up(struct net_device *slave_dev)
 	 * A net device that is a LAG slave has become active.
 	 * Due to the heiarchical nature of network topologies, this can change the packet transmit path
 	 * for any connection that is using a device that it sitting "higher" in the heirarchy.
-	 * Now, we could get the lag master, iterate all of the connections looking for this master in the connection heirarchy lists of those connections.
-	 * This would be INCREDIBLY SLOW.
-	 * GGG TODO Interface heirarchy construct is in its infancy right now, eventually you will be able to say
-	 * "given this LAG master I want to iterate all depending connections irrespective of where in the heirarchy the master is or any heiarchical relationship there is"
- 	 * Anyway, for simplicity and speed right now, just cause a system wide regeneration!
+	 * Regenerate all connections using the LAG master.
 	 */
-	ecm_db_classifier_generation_change();
+
+	master = ecm_interface_get_and_hold_dev_master(slave_dev);
+	ecm_interface_dev_regenerate_connections(master);
+	dev_put(master);
 }
 
 /*

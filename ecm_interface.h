@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2014, The Linux Foundation.  All rights reserved.
+ * Copyright (c) 2014,2015 The Linux Foundation.  All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -52,3 +52,4 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfac
 void ecm_interface_stats_update(struct ecm_db_connection_instance *ci, uint32_t from_tx_packets, uint32_t from_tx_bytes, uint32_t from_rx_packets, uint32_t from_rx_bytes, uint32_t to_tx_packets, uint32_t to_tx_bytes, uint32_t to_rx_packets, uint32_t to_rx_bytes);
 struct net_device *ecm_interface_dev_find_by_addr(ip_addr_t addr, bool *from_local_addr);
 struct net_device *ecm_interface_get_and_hold_dev_master(struct net_device *dev);
+void ecm_interface_dev_regenerate_connections(struct net_device *dev);
