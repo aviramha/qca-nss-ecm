@@ -288,12 +288,18 @@ static bool ecm_interface_mac_addr_get_ipv6(ip_addr_t addr, uint8_t *mac_addr, b
 
 	rcu_read_lock();
 	dst = ecm_rt.dst;
+#if (LINUX_VERSION_CODE <= KERNEL_VERSION(3,6,0))
 	neigh = dst_get_neighbour_noref(dst);
 	if (neigh) {
 		neigh_hold(neigh);
-	} else {
+	}
+#else
+	neigh = dst_neigh_lookup(dst, &daddr);
+#endif
+	if (!neigh) {
 		neigh = neigh_lookup(&nd_tbl, &daddr, dst->dev);
 	}
+
 	if (!neigh) {
 		rcu_read_unlock();
 		ecm_interface_route_release(&ecm_rt);

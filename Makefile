@@ -1,5 +1,5 @@
 ##########################################################################
-# Copyright (c) 2014, The Linux Foundation. All rights reserved.
+# Copyright (c) 2014-2015, The Linux Foundation. All rights reserved.
 # Permission to use, copy, modify, and/or distribute this software for
 # any purpose with or without fee is hereby granted, provided that the
 # above copyright notice and this permission notice appear in all copies.
@@ -69,9 +69,7 @@ ccflags-$(ECM_INTERFACE_VLAN_ENABLE) += -DECM_INTERFACE_VLAN_ENABLE
 # #############################################################################
 # Define ECM_FRONT_END_IPV6_ENABLE=y in order to enable IPv6 front end.
 # #############################################################################
-ifneq ($(findstring 3.4, $(KERNELVERSION)),)
 ECM_FRONT_END_IPV6_ENABLE=y
-endif
 ecm-$(ECM_FRONT_END_IPV6_ENABLE) += ecm_front_end_ipv6.o
 ccflags-$(ECM_FRONT_END_IPV6_ENABLE) += -DECM_FRONT_END_IPV6_ENABLE
 
