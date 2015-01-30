@@ -7112,6 +7112,15 @@ static unsigned int ecm_front_end_ipv6_post_routing_hook(unsigned int hooknum,
 	}
 	spin_unlock_bh(&ecm_front_end_ipv6_lock);
 
+#ifdef ECM_INTERFACE_PPP_ENABLE
+	/*
+	 * skip l2tp/pptp because we don't accelerate them
+	 */
+	if (ecm_interface_skip_l2tp_pptp(skb, out)) {
+		return NF_ACCEPT;
+	}
+#endif
+
 	/*
 	 * Identify interface from where this packet came
 	 */
@@ -7161,6 +7170,15 @@ static unsigned int ecm_front_end_ipv6_bridge_post_routing_hook(unsigned int hoo
 		return NF_ACCEPT;
 	}
 	spin_unlock_bh(&ecm_front_end_ipv6_lock);
+
+#ifdef ECM_INTERFACE_PPP_ENABLE
+	/*
+	 * skip l2tp/pptp because we don't accelerate them
+	 */
+	if (ecm_interface_skip_l2tp_pptp(skb, out)) {
+		return NF_ACCEPT;
+	}
+#endif
 
 	/*
 	 * Check packet is an IP Ethernet packet

@@ -564,6 +564,49 @@ void ecm_interface_route_release(struct ecm_interface_route *rt)
 }
 EXPORT_SYMBOL(ecm_interface_route_release);
 
+#ifdef ECM_INTERFACE_PPP_ENABLE
+/*
+ * ecm_interface_skip_l2tp_pptp()
+ *	skip l2tp/pptp tunnel encapsulated traffic
+ *
+ * ECM does not handle L2TP or PPTP encapsulated packets,
+ * this function detects packets of that type so they can be skipped over to improve their throughput.
+ */
+bool ecm_interface_skip_l2tp_pptp(struct sk_buff *skb, const struct net_device *out)
+{
+	struct ppp_channel *ppp_chan[1];
+	int px_proto;
+
+	/*
+	 * skip first pass of l2tp/pptp tunnel encapsulated traffic
+	 */
+	if (out->type == ARPHRD_PPP) {
+		if (ppp_hold_channels((struct net_device *)out, ppp_chan, 1) == 1) {
+			px_proto = ppp_channel_get_protocol(ppp_chan[0]);
+			ppp_release_channels(ppp_chan, 1);
+			return ((px_proto == PX_PROTO_OL2TP) || (px_proto == PX_PROTO_PPTP));
+		}
+	}
+
+	/*
+	 * skip second pass of l2tp tunnel encapsulated traffic
+	 */
+	if (!skb->sk) {
+		return false;
+	}
+
+	if (skb->sk->sk_protocol != IPPROTO_UDP) {
+		return false;
+	}
+
+	if (unlikely(udp_sk(skb->sk)->encap_type == UDP_ENCAP_L2TPINUDP)) {
+		return true;
+	}
+
+	return false;
+}
+#endif
+
 #ifdef ECM_INTERFACE_VLAN_ENABLE
 /*
  * ecm_interface_vlan_interface_establish()
