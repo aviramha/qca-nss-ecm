@@ -2343,7 +2343,11 @@ static void ecm_interface_mtu_change(struct net_device *dev)
  */
 static int ecm_interface_netdev_notifier_callback(struct notifier_block *this, unsigned long event, void *ptr)
 {
+#if (LINUX_VERSION_CODE <= KERNEL_VERSION(3, 10, 0))
 	struct net_device *dev __attribute__ ((unused)) = (struct net_device *)ptr;
+#else
+	struct net_device *dev = netdev_notifier_info_to_dev(ptr);
+#endif
 
 	DEBUG_INFO("Net device notifier for: %p, name: %s, event: %lx\n", dev, dev->name, event);
 
