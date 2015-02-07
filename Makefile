@@ -44,9 +44,7 @@ ccflags-$(ECM_INTERFACE_BOND_ENABLE) += -DECM_INTERFACE_BOND_ENABLE
 # Define ECM_INTERFACE_PPP_ENABLE=y in order
 # to enable support for PPP and, specifically, PPPoE acceleration.
 # #############################################################################
-ifneq ($(findstring 3.4, $(KERNELVERSION)),)
 ECM_INTERFACE_PPP_ENABLE=y
-endif
 ccflags-$(ECM_INTERFACE_PPP_ENABLE) += -DECM_INTERFACE_PPP_ENABLE
 
 # #############################################################################
