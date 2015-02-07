@@ -67,9 +67,7 @@ ccflags-$(ECM_INTERFACE_VLAN_ENABLE) += -DECM_INTERFACE_VLAN_ENABLE
 # #############################################################################
 # Define ECM_FRONT_END_IPV6_ENABLE=y in order to enable IPv6 front end.
 # #############################################################################
-ifneq ($(findstring 3.4, $(KERNELVERSION)),)
 ECM_FRONT_END_IPV6_ENABLE=y
-endif
 ecm-$(ECM_FRONT_END_IPV6_ENABLE) += ecm_front_end_ipv6.o
 ccflags-$(ECM_FRONT_END_IPV6_ENABLE) += -DECM_FRONT_END_IPV6_ENABLE
 
