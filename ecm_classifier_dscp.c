@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2014, The Linux Foundation.  All rights reserved.
+ * Copyright (c) 2014-2015, The Linux Foundation.  All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -208,7 +208,6 @@ static void ecm_classifier_dscp_process(struct ecm_classifier_instance *aci, ecm
 	struct nf_conn *ct;
 	enum ip_conntrack_info ctinfo;
 	struct nf_ct_dscpremark_ext *dscpcte;
-	enum ip_conntrack_dir ct_dir;
 	uint32_t flow_qos_tag;
 	uint32_t return_qos_tag;
 	uint8_t flow_dscp;
@@ -319,8 +318,7 @@ static void ecm_classifier_dscp_process(struct ecm_classifier_instance *aci, ecm
 	 *    direction.
 	 *
 	 */
-	ct_dir = CTINFO2DIR(ctinfo);
-	if (ct_dir == IP_CT_DIR_ORIGINAL) {
+	if (sender == ECM_TRACKER_SENDER_TYPE_SRC) {
 		/*
 		 * Record latest flow
 		 */
