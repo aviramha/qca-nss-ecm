@@ -67,6 +67,9 @@
 #include <linux/../../net/8021q/vlan.h>
 #include <linux/if_vlan.h>
 #endif
+#ifdef ECM_INTERFACE_PPP_ENABLE
+#include <linux/if_pppox.h>
+#endif
 
 /*
  * Debug output levels
@@ -2130,6 +2133,13 @@ static void ecm_interface_list_stats_update(int iface_list_first, struct ecm_db_
 				stats.tx_bytes = tx_bytes;
 				br_dev_update_stats(dev, &stats);
 				break;
+
+#ifdef ECM_INTERFACE_PPP_ENABLE
+			case ECM_DB_IFACE_TYPE_PPPOE:
+				DEBUG_INFO("PPPOE\n");
+				ppp_update_stats(dev, rx_packets, rx_bytes, tx_packets, tx_bytes);
+				break;
+#endif
 			default:
 				/*
 				 * TODO: Extend it accordingly
