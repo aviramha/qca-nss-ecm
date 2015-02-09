@@ -59,9 +59,7 @@ ccflags-$(ECM_INTERFACE_SIT_ENABLE) += -DECM_INTERFACE_SIT_ENABLE
 # #############################################################################
 # Define ECM_INTERFACE_VLAN_ENABLE=y in order to enable support for VLAN
 # #############################################################################
-ifneq ($(findstring 3.4, $(KERNELVERSION)),)
 ECM_INTERFACE_VLAN_ENABLE=y
-endif
 ccflags-$(ECM_INTERFACE_VLAN_ENABLE) += -DECM_INTERFACE_VLAN_ENABLE
 
 # #############################################################################
