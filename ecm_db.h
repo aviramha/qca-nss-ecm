@@ -20,6 +20,8 @@
 uint32_t ecm_db_time_get(void);
 void ecm_db_connection_defunct_all(void);
 
+int ecm_db_connection_count_get(void);
+
 void ecm_db_connection_data_totals_update_dropped(struct ecm_db_connection_instance *ci, bool is_from, uint64_t size, uint64_t packets);
 void ecm_db_connection_data_totals_update(struct ecm_db_connection_instance *ci, bool is_from, uint64_t size, uint64_t packets);
 
