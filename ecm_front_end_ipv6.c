@@ -7145,6 +7145,19 @@ static unsigned int ecm_front_end_ipv6_post_routing_hook(const struct nf_hook_op
 	}
 	spin_unlock_bh(&ecm_front_end_ipv6_lock);
 
+	/*
+	 * Don't process broadcast or multicast
+	 */
+	if (skb->pkt_type == PACKET_BROADCAST) {
+		DEBUG_TRACE("Broadcast, ignoring: %p\n", skb);
+		return NF_ACCEPT;
+	}
+
+	if (skb->pkt_type == PACKET_MULTICAST) {
+		DEBUG_TRACE("Multicast, ignoring: %p\n", skb);
+		return NF_ACCEPT;
+	}
+
 #ifdef ECM_INTERFACE_PPP_ENABLE
 	/*
 	 * skip l2tp/pptp because we don't accelerate them
@@ -7211,6 +7224,19 @@ static unsigned int ecm_front_end_ipv6_bridge_post_routing_hook(const struct nf_
 		return NF_ACCEPT;
 	}
 	spin_unlock_bh(&ecm_front_end_ipv6_lock);
+
+	/*
+	 * Don't process broadcast or multicast
+	 */
+	if (skb->pkt_type == PACKET_BROADCAST) {
+		DEBUG_TRACE("Broadcast, ignoring: %p\n", skb);
+		return NF_ACCEPT;
+	}
+
+	if (skb->pkt_type == PACKET_MULTICAST) {
+		DEBUG_TRACE("Multicast, ignoring: %p\n", skb);
+		return NF_ACCEPT;
+	}
 
 #ifdef ECM_INTERFACE_PPP_ENABLE
 	/*
