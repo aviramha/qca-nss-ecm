@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2014, The Linux Foundation.  All rights reserved.
+ * Copyright (c) 2014,2015, The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -225,7 +225,9 @@ struct ecm_db_iface_instance {
 		struct ecm_db_interface_info_vlan vlan;			/* type == ECM_DB_IFACE_TYPE_VLAN */
 		struct ecm_db_interface_info_lag lag;			/* type == ECM_DB_IFACE_TYPE_LAG */
 		struct ecm_db_interface_info_bridge bridge;		/* type == ECM_DB_IFACE_TYPE_BRIDGE */
+#ifdef ECM_INTERFACE_PPP_ENABLE
 		struct ecm_db_interface_info_pppoe pppoe;		/* type == ECM_DB_IFACE_TYPE_PPPOE */
+#endif
 		struct ecm_db_interface_info_unknown unknown;		/* type == ECM_DB_IFACE_TYPE_UNKNOWN */
 		struct ecm_db_interface_info_loopback loopback;		/* type == ECM_DB_IFACE_TYPE_LOOPBACK */
 		struct ecm_db_interface_info_ipsec_tunnel ipsec_tunnel;	/* type == ECM_DB_IFACE_TYPE_IPSEC_TUNNEL */
@@ -3390,6 +3392,7 @@ static inline ecm_db_iface_hash_t ecm_db_iface_generate_hash_index_ethernet(uint
 	return (ecm_db_iface_hash_t)(address[5] & (ECM_DB_IFACE_HASH_SLOTS - 1));
 }
 
+#ifdef ECM_INTERFACE_PPP_ENABLE
 /*
  * ecm_db_iface_generate_hash_index_pppoe()
  * 	Calculate the hash index.
@@ -3398,6 +3401,7 @@ static inline ecm_db_iface_hash_t ecm_db_iface_generate_hash_index_pppoe(uint16_
 {
 	return (ecm_db_iface_hash_t)(pppoe_session_id & (ECM_DB_IFACE_HASH_SLOTS - 1));
 }
+#endif
 
 /*
  * ecm_db_iface_generate_hash_index_unknown()
@@ -3701,6 +3705,7 @@ struct ecm_db_iface_instance *ecm_db_iface_find_and_ref_lag(uint8_t *address)
 }
 EXPORT_SYMBOL(ecm_db_iface_find_and_ref_lag);
 
+#ifdef ECM_INTERFACE_PPP_ENABLE
 /*
  * ecm_db_iface_pppoe_session_info_get()
  *	Get vlan interface specific information
@@ -3755,6 +3760,7 @@ struct ecm_db_iface_instance *ecm_db_iface_find_and_ref_pppoe(uint16_t pppoe_ses
 	return NULL;
 }
 EXPORT_SYMBOL(ecm_db_iface_find_and_ref_pppoe);
+#endif
 
 /*
  * ecm_db_iface_find_and_ref_unknown()
@@ -7162,6 +7168,7 @@ void ecm_db_iface_add_vlan(struct ecm_db_iface_instance *ii, uint8_t *address, u
 }
 EXPORT_SYMBOL(ecm_db_iface_add_vlan);
 
+#ifdef ECM_INTERFACE_PPP_ENABLE
 /*
  * ecm_db_iface_pppoe_xml_state_get()
  * 	Return interface type specific state
@@ -7306,6 +7313,7 @@ void ecm_db_iface_add_pppoe(struct ecm_db_iface_instance *ii, uint16_t pppoe_ses
 	}
 }
 EXPORT_SYMBOL(ecm_db_iface_add_pppoe);
+#endif
 
 /*
  * ecm_db_iface_unknown_xml_state_get()
