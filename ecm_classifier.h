@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2014, The Linux Foundation.  All rights reserved.
+ * Copyright (c) 2014,2015 The Linux Foundation.  All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -69,8 +69,11 @@ typedef enum ecm_classifier_acceleration_modes ecm_classifier_acceleration_mode_
 #define ECM_CLASSIFIER_PROCESS_ACTION_QOS_TAG 0x00000002	/* Contains flow & return qos tags */
 #define ECM_CLASSIFIER_PROCESS_ACTION_ACCEL_MODE 0x00000004	/* Contains an accel mode */
 #define ECM_CLASSIFIER_PROCESS_ACTION_TIMER_GROUP 0x00000008	/* Contains a timer group change */
+
+#ifdef ECM_CLASSIFIER_DSCP_ENABLE
 #define ECM_CLASSIFIER_PROCESS_ACTION_DSCP 0x00000010		/* Contains DSCP marking information */
 #define ECM_CLASSIFIER_PROCESS_ACTION_DSCP_DENY 0x00000020	/* Denies any DSCP changes */
+#endif
 
 /*
  * struct ecm_classifier_process_response
@@ -88,8 +91,10 @@ struct ecm_classifier_process_response {
 	bool drop;					/* Drop packet at hand */
 	uint32_t flow_qos_tag;				/* QoS tag to use for the packet */
 	uint32_t return_qos_tag;			/* QoS tag to use for the packet */
+#ifdef ECM_CLASSIFIER_DSCP_ENABLE
 	uint8_t flow_dscp;				/* DSCP mark for flow */
 	uint8_t return_dscp;				/* DSCP mark for return */
+#endif
 	ecm_classifier_acceleration_mode_t accel_mode;	/* Acceleration needed for this connection */
 	ecm_db_timer_group_t timer_group;		/* Timer group the connection should be in */
 };
@@ -194,12 +199,12 @@ static inline int ecm_classifier_process_response_xml_state_get(char *buf, int b
 		snprintf(qos_tag_str, sizeof(qos_tag_str), " flow_qos_tag=\"%u\" return_qos_tag=\"%u\"",
 				pr->flow_qos_tag, pr->return_qos_tag);
 	}
-
+#ifdef ECM_CLASSIFIER_DSCP_ENABLE
 	if (pr->process_actions & ECM_CLASSIFIER_PROCESS_ACTION_DSCP) {
 		snprintf(dscp_str, sizeof(dscp_str), " flow_dscp=\"%u\" return_dscp=\"%u\"",
 				pr->flow_dscp, pr->return_dscp);
 	}
-
+#endif
 	if (pr->process_actions & ECM_CLASSIFIER_PROCESS_ACTION_TIMER_GROUP) {
 		snprintf(timer_group_str, sizeof(timer_group_str), " timer_group=\"%d\"", pr->timer_group);
 	}
