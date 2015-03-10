@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2014, The Linux Foundation.  All rights reserved.
+ * Copyright (c) 2014,2015 The Linux Foundation.  All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -72,6 +72,13 @@ typedef int (*ecm_front_end_connection_xml_state_get_callback_t)(struct ecm_fron
 											 */
 
 /*
+ * Acceleration limiting modes.
+ *	Used to apply limiting to accelerated connections.
+ */
+#define ECM_FRONT_END_ACCEL_LIMIT_MODE_UNLIMITED 0x00	/* No limits on acceleration rule creation */
+#define ECM_FRONT_END_ACCEL_LIMIT_MODE_FIXED 0x01	/* Fixed upper limit for connection acceleration based on information from driver */
+
+/*
  * Accel/decel mode statistics data structure.
  */
 struct ecm_front_end_connection_mode_stats {
@@ -87,6 +94,8 @@ struct ecm_front_end_connection_mode_stats {
 	uint32_t nss_nack_total;		/* Total times NSS NAK's an accel command */
 	uint32_t nss_nack;			/* Count of consecutive times driver failed to ack */
 	uint32_t nss_nack_limit;		/* Limit on consecutive nacks at which point offload permanently fails out */
+	unsigned long cmd_time_begun;		/* Time captured when an accel or decel request begun */
+	unsigned long cmd_time_completed;	/* Time captured when request finished */
 };
 
 /*
@@ -106,5 +115,16 @@ struct ecm_front_end_connection_instance {
 	 * Accel/decel mode statistics.
 	 */
 	struct ecm_front_end_connection_mode_stats stats;
+
+	/*
+	 * Common control items to all front end instances
+	 */
+	struct ecm_db_connection_instance *ci;			/* RO: The connection instance relating to this instance. */
+	bool can_accel;						/* RO: True when the connection can be accelerated */
+	bool is_defunct;					/* True if the connection has become defunct */
+	ecm_front_end_acceleration_mode_t accel_mode;		/* Indicates the type of acceleration being applied to a connection, if any. */
+	spinlock_t lock;					/* Lock for structure data */
+	int refs;						/* Integer to trap we never go negative */
+
 };
 

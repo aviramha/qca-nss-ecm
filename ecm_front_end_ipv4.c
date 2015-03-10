@@ -102,12 +102,6 @@
  */
 struct ecm_front_end_ipv4_connection_tcp_instance {
 	struct ecm_front_end_connection_instance base;		/* Base class */
-	struct ecm_db_connection_instance *ci;			/* RO: The connection instance relating to this instance. */
-	bool can_accel;						/* RO: True when the connection can be accelerated */
-	bool is_defunct;					/* True if the connection has become defunct */
-	ecm_front_end_acceleration_mode_t accel_mode;		/* Indicates  the type of acceleration being applied to a connection, if any. */
-	spinlock_t lock;					/* Lock for structure data */
-	int refs;						/* Integer to trap we never go negative */
 #if (DEBUG_LEVEL > 0)
 	uint16_t magic;
 #endif
@@ -119,12 +113,6 @@ struct ecm_front_end_ipv4_connection_tcp_instance {
  */
 struct ecm_front_end_ipv4_connection_udp_instance {
 	struct ecm_front_end_connection_instance base;		/* Base class */
-	struct ecm_db_connection_instance *ci;			/* RO: The connection instance relating to this instance. */
-	bool can_accel;						/* RO: True when the connection can be accelerated */
-	bool is_defunct;					/* True if the connection has become defunct */
-	ecm_front_end_acceleration_mode_t accel_mode;		/* Indicates the type of acceleration being applied to a connection, if any. */
-	spinlock_t lock;					/* Lock for structure data */
-	int refs;						/* Integer to trap we never go negative */
 #if (DEBUG_LEVEL > 0)
 	uint16_t magic;
 #endif
@@ -136,12 +124,6 @@ struct ecm_front_end_ipv4_connection_udp_instance {
  */
 struct ecm_front_end_ipv4_connection_non_ported_instance {
 	struct ecm_front_end_connection_instance base;		/* Base class */
-	struct ecm_db_connection_instance *ci;			/* RO: The connection instance relating to this instance. */
-	bool can_accel;						/* RO: True when the connection can be accelerated */
-	bool is_defunct;					/* True if the connection has become defunct */
-	ecm_front_end_acceleration_mode_t accel_mode;		/* Indicates the type of acceleration being applied to a connection, if any. */
-	spinlock_t lock;					/* Lock for structure data */
-	int refs;						/* Integer to trap we never go negative */
 #if (DEBUG_LEVEL > 0)
 	uint16_t magic;
 #endif
@@ -154,6 +136,24 @@ static int ecm_front_end_ipv4_udp_accelerated_count = 0;		/* Number of UDP conne
 static int ecm_front_end_ipv4_tcp_accelerated_count = 0;		/* Number of TCP connections currently offloaded */
 static int ecm_front_end_ipv4_non_ported_accelerated_count = 0;		/* Number of Non-Ported connections currently offloaded */
 static int ecm_front_end_ipv4_accelerated_count = 0;			/* Total offloads */
+static int ecm_front_end_ipv4_pending_accel_count = 0;			/* Total pending offloads issued to the NSS / awaiting completion */
+static int ecm_front_end_ipv4_pending_decel_count = 0;			/* Total pending deceleration requests issued to the NSS / awaiting completion */
+static unsigned long ecm_front_end_ipv4_accel_cmd_time_avg_samples = 0;	/* Sum of time taken for the set of accel command samples, used to compute average time for an accel command to complete */
+static unsigned long ecm_front_end_ipv4_accel_cmd_time_avg_set = 1;	/* How many samples in the set */
+static unsigned long ecm_front_end_ipv4_decel_cmd_time_avg_samples = 0;	/* Sum of time taken for the set of accel command samples, used to compute average time for an accel command to complete */
+static unsigned long ecm_front_end_ipv4_decel_cmd_time_avg_set = 1;	/* How many samples in the set */
+
+/*
+ * Limiting the acceleration of connections.
+ *
+ * By default there is no acceleration limiting.
+ * This means that when ECM has more connections (that can be accelerated) than the acceleration
+ * engine will allow the ECM will continue to try to accelerate.
+ * In this scenario the acceleration engine will begin removal of existing rules to make way for new ones.
+ * When the accel_limit_mode is set to FIXED ECM will not permit more rules to be issued than the engine will allow.
+ */
+uint32_t ecm_front_end_ipv4_accel_limit_mode = ECM_FRONT_END_ACCEL_LIMIT_MODE_UNLIMITED;
+								/* Limiting mode for acceleration. Default: UNLIMITED */
 
 /*
  * Locking of the classifier - concurrency control for file global parameters.
@@ -497,6 +497,154 @@ static struct ecm_db_mapping_instance *ecm_front_end_ipv4_mapping_establish_and_
 }
 
 /*
+ * ecm_front_end_ipv4_accel_pending_set()
+ *	Set pending acceleration for the connection object.
+ *
+ * Return false if the acceleration is not permitted or is already in progress.
+ */
+static inline bool ecm_front_end_ipv4_accel_pending_set(struct ecm_front_end_connection_instance *feci)
+{
+	/*
+	 * Can this connection be accelerated at all?
+	 */
+	DEBUG_INFO("%p: Accel conn: %p\n", feci, feci->ci);
+	spin_lock_bh(&feci->lock);
+	if (ECM_FRONT_END_ACCELERATION_FAILED(feci->accel_mode)) {
+		spin_unlock_bh(&feci->lock);
+		DEBUG_TRACE("%p: accel %p failed\n", feci, feci->ci);
+		return false;
+	}
+
+	/*
+	 * If acceleration mode is anything other than "not accelerated" then ignore.
+	 */
+	if (feci->accel_mode != ECM_FRONT_END_ACCELERATION_MODE_DECEL) {
+		spin_unlock_bh(&feci->lock);
+		DEBUG_TRACE("%p: Ignoring wrong mode accel for conn: %p\n", feci, feci->ci);
+		return false;
+	}
+
+	/*
+	 * Do we have a fixed upper limit for acceleration?
+	 */
+	spin_lock_bh(&ecm_front_end_ipv4_lock);
+	if (ecm_front_end_ipv4_accel_limit_mode & ECM_FRONT_END_ACCEL_LIMIT_MODE_FIXED) {
+		if ((ecm_front_end_ipv4_pending_accel_count + ecm_front_end_ipv4_accelerated_count) >= nss_ipv4_max_conn_count()) {
+			spin_unlock_bh(&ecm_front_end_ipv4_lock);
+			spin_unlock_bh(&feci->lock);
+			DEBUG_INFO("%p: Accel limit reached, accel denied: %p\n", feci, feci->ci);
+			return false;
+		}
+	}
+
+	/*
+	 * Okay to accelerate
+	 */
+	ecm_front_end_ipv4_pending_accel_count++;
+	spin_unlock_bh(&ecm_front_end_ipv4_lock);
+
+	/*
+	 * Okay connection can be set to pending acceleration
+	 */
+	feci->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING;
+	spin_unlock_bh(&feci->lock);
+	return true;
+}
+
+/*
+ * _ecm_front_end_ipv4_accel_pending_clear()
+ *	Clear pending acceleration for the connection object, setting it to the desired state.
+ *
+ * Returns true if "decelerate was pending".
+ *
+ * The feci->lock AND ecm_front_end_ipv4_lock must be held on entry.
+ */
+static inline bool _ecm_front_end_ipv4_accel_pending_clear(struct ecm_front_end_connection_instance *feci, ecm_front_end_acceleration_mode_t mode)
+{
+	bool decel_pending;
+
+	/*
+	 * Set the mode away from its accel pending state.
+	 */
+	DEBUG_ASSERT(feci->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING, "%p: Accel mode unexpected: %d\n", feci, feci->accel_mode);
+	feci->accel_mode = mode;
+
+	/*
+	 * Clear decelerate pending flag.
+	 * This flag is only set when we are ACCEL_PENDING -
+	 * and we are moving from that to the given mode anyway.
+	 */
+	decel_pending = feci->stats.decelerate_pending;
+	feci->stats.decelerate_pending = false;
+
+	/*
+	 * Decrement pending counter
+	 */
+	ecm_front_end_ipv4_pending_accel_count--;
+	DEBUG_ASSERT(ecm_front_end_ipv4_pending_accel_count >= 0, "Accel pending underflow\n");
+	return decel_pending;
+}
+
+/*
+ * ecm_front_end_ipv4_accel_pending_clear()
+ *	Clear pending acceleration for the connection object, setting it to the desired state.
+ */
+static inline bool ecm_front_end_ipv4_accel_pending_clear(struct ecm_front_end_connection_instance *feci, ecm_front_end_acceleration_mode_t mode)
+{
+	bool decel_pending;
+	spin_lock_bh(&feci->lock);
+	spin_lock_bh(&ecm_front_end_ipv4_lock);
+	decel_pending = _ecm_front_end_ipv4_accel_pending_clear(feci, mode);
+	spin_unlock_bh(&ecm_front_end_ipv4_lock);
+	spin_unlock_bh(&feci->lock);
+	return decel_pending;
+}
+
+/*
+ * ecm_front_end_ipv4_accel_done_time_update()
+ *	Record how long the command took to complete, updating average samples
+ */
+static void ecm_front_end_ipv4_accel_done_time_update(struct ecm_front_end_connection_instance *feci)
+{
+	unsigned long delta;
+
+	/*
+	 * How long did it take the command to complete?
+	 */
+	spin_lock_bh(&feci->lock);
+	feci->stats.cmd_time_completed = jiffies;
+	delta = feci->stats.cmd_time_completed - feci->stats.cmd_time_begun;
+	spin_unlock_bh(&feci->lock);
+
+	spin_lock_bh(&ecm_front_end_ipv4_lock);
+	ecm_front_end_ipv4_accel_cmd_time_avg_samples += delta;
+	ecm_front_end_ipv4_accel_cmd_time_avg_set++;
+	spin_unlock_bh(&ecm_front_end_ipv4_lock);
+}
+
+/*
+ * ecm_front_end_ipv4_deccel_done_time_update()
+ *	Record how long the command took to complete, updating average samples
+ */
+static void ecm_front_end_ipv4_decel_done_time_update(struct ecm_front_end_connection_instance *feci)
+{
+	unsigned long delta;
+
+	/*
+	 * How long did it take the command to complete?
+	 */
+	spin_lock_bh(&feci->lock);
+	feci->stats.cmd_time_completed = jiffies;
+	delta = feci->stats.cmd_time_completed - feci->stats.cmd_time_begun;
+	spin_unlock_bh(&feci->lock);
+
+	spin_lock_bh(&ecm_front_end_ipv4_lock);
+	ecm_front_end_ipv4_decel_cmd_time_avg_samples += delta;
+	ecm_front_end_ipv4_decel_cmd_time_avg_set++;
+	spin_unlock_bh(&ecm_front_end_ipv4_lock);
+}
+
+/*
  * ecm_front_end_ipv4_connection_tcp_callback()
  *	Callback for handling create ack/nack calls.
  */
@@ -507,6 +655,7 @@ static void ecm_front_end_ipv4_connection_tcp_callback(void *app_data, struct ns
 	struct ecm_db_connection_instance *ci;
 	struct ecm_front_end_connection_instance *feci;
 	struct ecm_front_end_ipv4_connection_tcp_instance *fecti;
+	ecm_front_end_acceleration_mode_t result_mode;
 
 	/*
 	 * Is this a response to a create message?
@@ -540,9 +689,14 @@ static void ecm_front_end_ipv4_connection_tcp_callback(void *app_data, struct ns
 	DEBUG_CHECK_MAGIC(fecti, ECM_FRONT_END_IPV4_CONNECTION_TCP_INSTANCE_MAGIC, "%p: magic failed", fecti);
 
 	/*
+	 * Record command duration
+	 */
+	ecm_front_end_ipv4_accel_done_time_update(feci);
+
+	/*
 	 * Dump some useful trace information.
 	 */
-	DEBUG_TRACE("%p: accelerate response for connection: %p, serial: %u\n", fecti, fecti->ci, serial);
+	DEBUG_TRACE("%p: accelerate response for connection: %p, serial: %u\n", fecti, feci->ci, serial);
 	DEBUG_TRACE("%p: rule_flags: %x, valid_flags: %x\n", fecti, nircm->rule_flags, nircm->valid_flags);
 	DEBUG_TRACE("%p: flow_ip: %pI4h:%d\n", fecti, &nircm->tuple.flow_ip, nircm->tuple.flow_ident);
 	DEBUG_TRACE("%p: return_ip: %pI4h:%d\n", fecti, &nircm->tuple.return_ip, nircm->tuple.return_ident);
@@ -557,34 +711,34 @@ static void ecm_front_end_ipv4_connection_tcp_callback(void *app_data, struct ns
 		 * Creation command failed (specific reason ignored).
 		 */
 		DEBUG_TRACE("%p: accel nack: %d\n", fecti, nim->cm.error);
-		spin_lock_bh(&fecti->lock);
-		DEBUG_ASSERT(fecti->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING, "%p: Unexpected mode: %d\n", ci, fecti->accel_mode);
-		fecti->base.stats.nss_nack++;
-		fecti->base.stats.nss_nack_total++;
-		if (fecti->base.stats.nss_nack >= fecti->base.stats.nss_nack_limit) {
+		spin_lock_bh(&feci->lock);
+		DEBUG_ASSERT(feci->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING, "%p: Unexpected mode: %d\n", ci, feci->accel_mode);
+		feci->stats.nss_nack++;
+		feci->stats.nss_nack_total++;
+		if (feci->stats.nss_nack >= feci->stats.nss_nack_limit) {
 			/*
 			 * Too many NSS rejections
 			 */
-			fecti->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_NSS;
+			result_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_NSS;
 		} else {
 			/*
 			 * Revert to decelerated
 			 */
-			fecti->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_DECEL;
+			result_mode = ECM_FRONT_END_ACCELERATION_MODE_DECEL;
 		}
-
-		/*
-		 * Clear any decelerate pending flag since we aren't accelerated anyway we can just clear this whether it is set or not
-		 */
-		fecti->base.stats.decelerate_pending = false;
 
 		/*
 		 * If connection is now defunct then set mode to ensure no further accel attempts occur
 		 */
-		if (fecti->is_defunct) {
-			fecti->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DEFUNCT;
+		if (feci->is_defunct) {
+			result_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DEFUNCT;
 		}
-		spin_unlock_bh(&fecti->lock);
+
+		spin_lock_bh(&ecm_front_end_ipv4_lock);
+		_ecm_front_end_ipv4_accel_pending_clear(feci, result_mode);
+		spin_unlock_bh(&ecm_front_end_ipv4_lock);
+
+		spin_unlock_bh(&feci->lock);
 
 		/*
 		 * Release the connection.
@@ -594,27 +748,26 @@ static void ecm_front_end_ipv4_connection_tcp_callback(void *app_data, struct ns
 		return;
 	}
 
-	spin_lock_bh(&fecti->lock);
-	DEBUG_ASSERT(fecti->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING, "%p: Unexpected mode: %d\n", ci, fecti->accel_mode);
+	spin_lock_bh(&feci->lock);
+	DEBUG_ASSERT(feci->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING, "%p: Unexpected mode: %d\n", ci, feci->accel_mode);
 
 	/*
 	 * If a flush occured before we got the ACK then our acceleration was effectively cancelled on us
 	 * GGG TODO This is a workaround for a NSS message OOO quirk, this should eventually be removed.
 	 */
-	if (fecti->base.stats.flush_happened) {
-		fecti->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_DECEL;
-		fecti->base.stats.flush_happened = false;
+	if (feci->stats.flush_happened) {
+		feci->stats.flush_happened = false;
 
 		/*
-		 * We are decelerated, clear any pending flag as that is meaningless now.
+		 * Increment the no-action counter.  Our connection was decelerated on us with no action occurring.
 		 */
-		fecti->base.stats.decelerate_pending = false;
+		feci->stats.no_action_seen++;
 
-		/*
-		 * Increement the no-action counter.  Our connectin was decelerated on us with no action occurring.
-		 */
-		fecti->base.stats.no_action_seen++;
-		spin_unlock_bh(&fecti->lock);
+		spin_lock_bh(&ecm_front_end_ipv4_lock);
+		_ecm_front_end_ipv4_accel_pending_clear(feci, ECM_FRONT_END_ACCELERATION_MODE_DECEL);
+		spin_unlock_bh(&ecm_front_end_ipv4_lock);
+
+		spin_unlock_bh(&feci->lock);
 
 		/*
 		 * Release the connection.
@@ -625,34 +778,35 @@ static void ecm_front_end_ipv4_connection_tcp_callback(void *app_data, struct ns
 	}
 
 	/*
-	 * We got an ACK - we are accelerated.
+	 * Create succeeded
 	 */
-	fecti->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_ACCEL;
-
-	/*
-	 * Create succeeded, declare that we are accelerated.
-	 */
-	spin_lock_bh(&ecm_front_end_ipv4_lock);
-	ecm_front_end_ipv4_tcp_accelerated_count++;	/* Protocol specific counter */
-	ecm_front_end_ipv4_accelerated_count++;		/* General running counter */
-	spin_unlock_bh(&ecm_front_end_ipv4_lock);
 
 	/*
 	 * Clear any nack count
 	 */
-	fecti->base.stats.nss_nack = 0;
+	feci->stats.nss_nack = 0;
 
 	/*
-	 * Decelerate may have been attempted while we were accel pending.
-	 * If decelerate is pending then we need to begin deceleration :-(
+	 * Clear the "accelerate pending" state and move to "accelerated" state bumping
+	 * the accelerated counters to match our new state.
+	 *
+	 * Decelerate may have been attempted while we were "pending accel" and
+	 * this function will return true if that was the case.
+	 * If decelerate was pending then we need to begin deceleration :-(
 	 */
-	if (!fecti->base.stats.decelerate_pending) {
-		/*
-		 * Increement the no-action counter, this is reset if offload action is seen
-		 */
-		fecti->base.stats.no_action_seen++;
+	spin_lock_bh(&ecm_front_end_ipv4_lock);
 
-		spin_unlock_bh(&fecti->lock);
+	ecm_front_end_ipv4_tcp_accelerated_count++;	/* Protocol specific counter */
+	ecm_front_end_ipv4_accelerated_count++;		/* General running counter */
+
+	if (!_ecm_front_end_ipv4_accel_pending_clear(feci, ECM_FRONT_END_ACCELERATION_MODE_ACCEL)) {
+		/*
+		 * Increment the no-action counter, this is reset if offload action is seen
+		 */
+		feci->stats.no_action_seen++;
+
+		spin_unlock_bh(&ecm_front_end_ipv4_lock);
+		spin_unlock_bh(&feci->lock);
 
 		/*
 		 * Release the connection.
@@ -663,8 +817,9 @@ static void ecm_front_end_ipv4_connection_tcp_callback(void *app_data, struct ns
 	}
 
 	DEBUG_INFO("%p: Decelerate was pending\n", ci);
-	fecti->base.stats.decelerate_pending = false;
-	spin_unlock_bh(&fecti->lock);
+
+	spin_unlock_bh(&ecm_front_end_ipv4_lock);
+	spin_unlock_bh(&feci->lock);
 
 	feci->decelerate(feci);
 
@@ -709,30 +864,17 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_accelerate(struct ecm_fr
 	bool rule_invalid;
 	uint8_t dest_mac_xlate[ETH_ALEN];
 	ecm_db_direction_t ecm_dir;
+	ecm_front_end_acceleration_mode_t result_mode;
 
 	DEBUG_CHECK_MAGIC(fecti, ECM_FRONT_END_IPV4_CONNECTION_TCP_INSTANCE_MAGIC, "%p: magic failed", fecti);
 
 	/*
-	 * Can this connection be accelerated at all?
+	 * Test if acceleration is permitted
 	 */
-	DEBUG_INFO("%p: Accel conn: %p\n", fecti, fecti->ci);
-	spin_lock_bh(&fecti->lock);
-	if (ECM_FRONT_END_ACCELERATION_FAILED(fecti->accel_mode)) {
-		spin_unlock_bh(&fecti->lock);
-		DEBUG_TRACE("%p: accel %p failed\n", fecti, fecti->ci);
+	if (!ecm_front_end_ipv4_accel_pending_set(feci)) {
+		DEBUG_TRACE("%p: Acceleration not permitted: %p\n", feci, feci->ci);
 		return;
 	}
-
-	/*
-	 * If acceleration mode is anything other than "not accelerated" then ignore.
-	 */
-	if (fecti->accel_mode != ECM_FRONT_END_ACCELERATION_MODE_DECEL) {
-		spin_unlock_bh(&fecti->lock);
-		DEBUG_TRACE("%p: Ignoring wrong mode accel for conn: %p\n", fecti, fecti->ci);
-		return;
-	}
-	fecti->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING;
-	spin_unlock_bh(&fecti->lock);
 
 	/*
 	 * Okay construct an accel command.
@@ -744,7 +886,7 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_accelerate(struct ecm_fr
 	nss_ipv4_msg_init(&nim, NSS_IPV4_RX_INTERFACE, NSS_IPV4_TX_CREATE_RULE_MSG,
 			sizeof(struct nss_ipv4_rule_create_msg),
 			(nss_ipv4_msg_callback_t *)ecm_front_end_ipv4_connection_tcp_callback,
-			(void *)ecm_db_connection_serial_get(fecti->ci));
+			(void *)ecm_db_connection_serial_get(feci->ci));
 
 	nircm = &nim.msg.rule_create;
 	nircm->valid_flags = 0;
@@ -761,13 +903,13 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_accelerate(struct ecm_fr
 	/*
 	 * Get the interface lists of the connection, we must have at least one interface in the list to continue
 	 */
-	from_ifaces_first = ecm_db_connection_from_interfaces_get_and_ref(fecti->ci, from_ifaces);
+	from_ifaces_first = ecm_db_connection_from_interfaces_get_and_ref(feci->ci, from_ifaces);
 	if (from_ifaces_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
-		DEBUG_WARN("%p: Accel attempt failed - no interfaces in from_interfaces list!\n", fecti);
+		DEBUG_WARN("%p: Accel attempt failed - no interfaces in from_interfaces list!\n", feci);
 		goto tcp_accel_bad_rule;
 	}
 
-	to_ifaces_first = ecm_db_connection_to_interfaces_get_and_ref(fecti->ci, to_ifaces);
+	to_ifaces_first = ecm_db_connection_to_interfaces_get_and_ref(feci->ci, to_ifaces);
 	if (to_ifaces_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 		DEBUG_WARN("%p: Accel attempt failed - no interfaces in to_interfaces list!\n", fecti);
 		ecm_db_connection_interfaces_deref(from_ifaces, from_ifaces_first);
@@ -1136,7 +1278,7 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_accelerate(struct ecm_fr
 	/*
 	 * Routed or bridged?
 	 */
-	if (ecm_db_connection_is_routed_get(fecti->ci)) {
+	if (ecm_db_connection_is_routed_get(feci->ci)) {
 		nircm->rule_flags |= NSS_IPV4_RULE_CREATE_FLAG_ROUTED;
 	} else {
 		nircm->rule_flags |= NSS_IPV4_RULE_CREATE_FLAG_BRIDGE_FLOW;
@@ -1167,7 +1309,7 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_accelerate(struct ecm_fr
 	/*
 	 * The flow_ip is where the connection established from
 	 */
-	ecm_db_connection_from_address_get(fecti->ci, addr);
+	ecm_db_connection_from_address_get(feci->ci, addr);
 	ECM_IP_ADDR_TO_HIN4_ADDR(nircm->tuple.flow_ip, addr);
 
 	/*
@@ -1176,7 +1318,7 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_accelerate(struct ecm_fr
 	 * Getting the NAT'ed version here works for ingress or egress packets, for egress
 	 * the NAT'ed version would be the same as the normal address
 	 */
-	ecm_db_connection_to_address_nat_get(fecti->ci, addr);
+	ecm_db_connection_to_address_nat_get(feci->ci, addr);
 	ECM_IP_ADDR_TO_HIN4_ADDR(nircm->tuple.return_ip, addr);
 
 	/*
@@ -1184,45 +1326,45 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_accelerate(struct ecm_fr
 	 * packet should be translated to.  For egress this is the NAT'ed from address.
 	 * This also works for ingress as the NAT'ed version of the WAN host would be the same as non-NAT'ed
 	 */
-	ecm_db_connection_from_address_nat_get(fecti->ci, addr);
+	ecm_db_connection_from_address_nat_get(feci->ci, addr);
 	ECM_IP_ADDR_TO_HIN4_ADDR(nircm->conn_rule.flow_ip_xlate, addr);
 
 	/*
 	 * The destination address is what the destination IP is translated to as it is forwarded to the next interface.
 	 * For egress this would yield the normal wan host and for ingress this would correctly NAT back to the LAN host
 	 */
-	ecm_db_connection_to_address_get(fecti->ci, addr);
+	ecm_db_connection_to_address_get(feci->ci, addr);
 	ECM_IP_ADDR_TO_HIN4_ADDR(nircm->conn_rule.return_ip_xlate, addr);
 
 	/*
 	 * Same approach as above for port information
 	 */
-	nircm->tuple.flow_ident = ecm_db_connection_from_port_get(fecti->ci);
-	nircm->tuple.return_ident = ecm_db_connection_to_port_nat_get(fecti->ci);
-	nircm->conn_rule.flow_ident_xlate = ecm_db_connection_from_port_nat_get(fecti->ci);
-	nircm->conn_rule.return_ident_xlate = ecm_db_connection_to_port_get(fecti->ci);
+	nircm->tuple.flow_ident = ecm_db_connection_from_port_get(feci->ci);
+	nircm->tuple.return_ident = ecm_db_connection_to_port_nat_get(feci->ci);
+	nircm->conn_rule.flow_ident_xlate = ecm_db_connection_from_port_nat_get(feci->ci);
+	nircm->conn_rule.return_ident_xlate = ecm_db_connection_to_port_get(feci->ci);
 
 	/*
 	 * Get mac addresses.
 	 * The src_mac is the mac address of the node that established the connection.
 	 * This will work whether the from_node is LAN (egress) or WAN (ingress).
 	 */
-	ecm_db_connection_from_node_address_get(fecti->ci, (uint8_t *)nircm->conn_rule.flow_mac);
+	ecm_db_connection_from_node_address_get(feci->ci, (uint8_t *)nircm->conn_rule.flow_mac);
 
 	/*
 	 * The dest_mac is more complex.  For egress it is the node address of the 'to' side of the connection.
 	 * For ingress it is the node adress of the NAT'ed 'to' IP.
 	 * Essentially it is the MAC of node associated with create.dest_ip and this is "to nat" side.
 	 */
-	ecm_db_connection_to_nat_node_address_get(fecti->ci, (uint8_t *)nircm->conn_rule.return_mac);
+	ecm_db_connection_to_nat_node_address_get(feci->ci, (uint8_t *)nircm->conn_rule.return_mac);
 
 	/*
 	 * The dest_mac_xlate is the mac address to replace the pkt.dst_mac when a packet is sent to->from
 	 * For bridged connections this does not change.
 	 * For routed connections this is the mac of the 'to' node side of the connection.
 	 */
-	if (ecm_db_connection_is_routed_get(fecti->ci)) {
-		ecm_db_connection_to_node_address_get(fecti->ci, dest_mac_xlate);
+	if (ecm_db_connection_is_routed_get(feci->ci)) {
+		ecm_db_connection_to_node_address_get(feci->ci, dest_mac_xlate);
 	} else {
 		/*
 		 * Bridge flows preserve the MAC addressing
@@ -1236,7 +1378,7 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_accelerate(struct ecm_fr
 	 * ip_dest_addr. So, above we get the mac address of this host and use that mac address
 	 * for the destination node address in NAT'ed cases.
 	 */
-	ecm_dir = ecm_db_connection_direction_get(fecti->ci);
+	ecm_dir = ecm_db_connection_direction_get(feci->ci);
 	if ((ecm_dir == ECM_DB_DIRECTION_INGRESS_NAT) || (ecm_dir == ECM_DB_DIRECTION_EGRESS_NAT)) {
 		memcpy(nircm->conn_rule.return_mac, dest_mac_xlate, ETH_ALEN);
 	}
@@ -1244,8 +1386,8 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_accelerate(struct ecm_fr
 	/*
 	 * Get MTU information
 	 */
-	nircm->conn_rule.flow_mtu = (uint32_t)ecm_db_connection_from_iface_mtu_get(fecti->ci);
-	nircm->conn_rule.return_mtu = (uint32_t)ecm_db_connection_to_iface_mtu_get(fecti->ci);
+	nircm->conn_rule.flow_mtu = (uint32_t)ecm_db_connection_from_iface_mtu_get(feci->ci);
+	nircm->conn_rule.return_mtu = (uint32_t)ecm_db_connection_to_iface_mtu_get(feci->ci);
 
 	/*
 	 * Need window scaling and remarking information if available
@@ -1255,11 +1397,11 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_accelerate(struct ecm_fr
 		/*
 		 * No conntrack so no need to check window sequence space
 		 */
-		DEBUG_TRACE("%p: TCP Accel no ct from conn %p to get window data\n", fecti, fecti->ci);
+		DEBUG_TRACE("%p: TCP Accel no ct from conn %p to get window data\n", fecti, feci->ci);
 		nircm->rule_flags |= NSS_IPV4_RULE_CREATE_FLAG_NO_SEQ_CHECK;
 	} else {
 		spin_lock_bh(&ct->lock);
-		DEBUG_TRACE("%p: TCP Accel Get window data from ct %p for conn %p\n", fecti, ct, fecti->ci);
+		DEBUG_TRACE("%p: TCP Accel Get window data from ct %p for conn %p\n", fecti, ct, feci->ci);
 
 		nircm->tcp_rule.flow_window_scale = ct->proto.tcp.seen[0].td_scale;
 		nircm->tcp_rule.flow_max_window = ct->proto.tcp.seen[0].td_maxwin;
@@ -1285,7 +1427,7 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_accelerate(struct ecm_fr
 	 * override any preceding classifiers.
 	 * This also gives the classifiers a chance to see that acceleration is being attempted.
 	 */
-	assignment_count = ecm_db_connection_classifier_assignments_get_and_ref(fecti->ci, assignments);
+	assignment_count = ecm_db_connection_classifier_assignments_get_and_ref(feci->ci, assignments);
 	for (aci_index = 0; aci_index < assignment_count; ++aci_index) {
 		struct ecm_classifier_instance *aci;
 
@@ -1336,7 +1478,7 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_accelerate(struct ecm_fr
 			"flow_dscp: %x\n"
 			"return_dscp: %x\n",
 			fecti,
-			fecti->ci,
+			feci->ci,
 			nircm->tuple.protocol,
 			nircm->conn_rule.flow_mtu,
 			nircm->conn_rule.return_mtu,
@@ -1377,37 +1519,45 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_accelerate(struct ecm_fr
 	 * the callback function can trust the correct ref was taken for its purpose.
 	 * NOTE: remember that this will also implicitly hold the feci.
 	 */
-	ecm_db_connection_ref(fecti->ci);
+	ecm_db_connection_ref(feci->ci);
 
 	/*
 	 * Call the rule create function
 	 */
 	nss_tx_status = nss_ipv4_tx(ecm_front_end_ipv4_nss_ipv4_mgr, &nim);
 	if (nss_tx_status == NSS_TX_SUCCESS) {
-		spin_lock_bh(&fecti->lock);
-		DEBUG_ASSERT(fecti->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING, "%p: Accel mode unexpected: %d\n", fecti, fecti->accel_mode);
-		fecti->base.stats.driver_fail = 0;		/* Reset */
-		spin_unlock_bh(&fecti->lock);
+		spin_lock_bh(&feci->lock);
+		DEBUG_ASSERT(feci->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING, "%p: Accel mode unexpected: %d\n", feci, feci->accel_mode);
+		feci->stats.driver_fail = 0;			/* Reset */
+		feci->stats.cmd_time_begun = jiffies;		/* Capture time we issued the command */
+		spin_unlock_bh(&feci->lock);
 		return;
 	}
 
 	/*
 	 * Release that ref!
 	 */
-	ecm_db_connection_deref(fecti->ci);
+	ecm_db_connection_deref(feci->ci);
 
 	/*
 	 * TX failed
 	 */
-	spin_lock_bh(&fecti->lock);
-	DEBUG_ASSERT(fecti->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING, "%p: Accel mode unexpected: %d\n", fecti, fecti->accel_mode);
-	fecti->base.stats.driver_fail_total++;
-	fecti->base.stats.driver_fail++;
-	if (fecti->base.stats.driver_fail >= fecti->base.stats.driver_fail_limit) {
+	spin_lock_bh(&feci->lock);
+	DEBUG_ASSERT(feci->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING, "%p: Accel mode unexpected: %d\n", feci, feci->accel_mode);
+	feci->stats.driver_fail_total++;
+	feci->stats.driver_fail++;
+	if (feci->stats.driver_fail >= feci->stats.driver_fail_limit) {
 		DEBUG_WARN("%p: Accel failed - driver fail limit\n", fecti);
-		fecti->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DRIVER;
+		result_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DRIVER;
+	} else {
+		result_mode = ECM_FRONT_END_ACCELERATION_MODE_DECEL;
 	}
-	spin_unlock_bh(&fecti->lock);
+
+	spin_lock_bh(&ecm_front_end_ipv4_lock);
+	_ecm_front_end_ipv4_accel_pending_clear(feci, result_mode);
+	spin_unlock_bh(&ecm_front_end_ipv4_lock);
+
+	spin_unlock_bh(&feci->lock);
 	return;
 
 tcp_accel_bad_rule:
@@ -1417,10 +1567,7 @@ tcp_accel_bad_rule:
 	 * Jump to here when rule data is bad and an offload command cannot be constructed
 	 */
 	DEBUG_WARN("%p: Accel failed - bad rule\n", fecti);
-	spin_lock_bh(&fecti->lock);
-	DEBUG_ASSERT(fecti->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING, "%p: Accel mode unexpected: %d\n", fecti, fecti->accel_mode);
-	fecti->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_RULE;
-	spin_unlock_bh(&fecti->lock);
+	ecm_front_end_ipv4_accel_pending_clear(feci, ECM_FRONT_END_ACCELERATION_MODE_FAIL_RULE);
 }
 
 /*
@@ -1467,21 +1614,34 @@ static void ecm_front_end_ipv4_connection_tcp_destroy_callback(void *app_data, s
 	DEBUG_CHECK_MAGIC(fecti, ECM_FRONT_END_IPV4_CONNECTION_TCP_INSTANCE_MAGIC, "%p: magic failed", fecti);
 
 	/*
+	 * Record command duration
+	 */
+	ecm_front_end_ipv4_decel_done_time_update(feci);
+
+	/*
 	 * Dump some useful trace information.
 	 */
-	DEBUG_TRACE("%p: decelerate response for connection: %p\n", fecti, fecti->ci);
+	DEBUG_TRACE("%p: decelerate response for connection: %p\n", fecti, feci->ci);
 	DEBUG_TRACE("%p: flow_ip: %pI4h:%d\n", fecti, &nirdm->tuple.flow_ip, nirdm->tuple.flow_ident);
 	DEBUG_TRACE("%p: return_ip: %pI4h:%d\n", fecti, &nirdm->tuple.return_ip, nirdm->tuple.return_ident);
 	DEBUG_TRACE("%p: protocol: %d\n", fecti, nirdm->tuple.protocol);
 
-	spin_lock_bh(&fecti->lock);
+	/*
+	 * Drop decel pending counter
+	 */
+	spin_lock_bh(&ecm_front_end_ipv4_lock);
+	ecm_front_end_ipv4_pending_decel_count--;
+	DEBUG_ASSERT(ecm_front_end_ipv4_pending_decel_count >= 0, "Bad decel pending counter\n");
+	spin_unlock_bh(&ecm_front_end_ipv4_lock);
+
+	spin_lock_bh(&feci->lock);
 
 	/*
 	 * If decel is not still pending then it's possible that the NSS ended acceleration by some other reason e.g. flush
 	 * In which case we cannot rely on the response we get here.
 	 */
-	if (fecti->accel_mode != ECM_FRONT_END_ACCELERATION_MODE_DECEL_PENDING) {
-		spin_unlock_bh(&fecti->lock);
+	if (feci->accel_mode != ECM_FRONT_END_ACCELERATION_MODE_DECEL_PENDING) {
+		spin_unlock_bh(&feci->lock);
 
 		/*
 		 * Release the connections.
@@ -1493,18 +1653,19 @@ static void ecm_front_end_ipv4_connection_tcp_destroy_callback(void *app_data, s
 
 	DEBUG_TRACE("%p: response: %d\n", fecti, nim->cm.response);
 	if (nim->cm.response != NSS_CMN_RESPONSE_ACK) {
-		fecti->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DECEL;
+		feci->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DECEL;
 	} else {
-		fecti->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_DECEL;
+		feci->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_DECEL;
 	}
 
 	/*
 	 * If connection became defunct then set mode so that no further accel/decel attempts occur.
 	 */
-	if (fecti->is_defunct) {
-		fecti->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DEFUNCT;
+	if (feci->is_defunct) {
+		feci->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DEFUNCT;
 	}
-	spin_unlock_bh(&fecti->lock);
+
+	spin_unlock_bh(&feci->lock);
 
 	/*
 	 * TCP acceleration ends
@@ -1540,9 +1701,9 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_decelerate(struct ecm_fr
 	/*
 	 * If decelerate is in error or already pending then ignore
 	 */
-	spin_lock_bh(&fecti->lock);
-	if (fecti->base.stats.decelerate_pending) {
-		spin_unlock_bh(&fecti->lock);
+	spin_lock_bh(&feci->lock);
+	if (feci->stats.decelerate_pending) {
+		spin_unlock_bh(&feci->lock);
 		return;
 	}
 
@@ -1550,9 +1711,9 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_decelerate(struct ecm_fr
 	 * If acceleration is pending then we cannot decelerate right now or we will race with it
 	 * Set a decelerate pending flag that will be actioned when the acceleration command is complete.
 	 */
-	if (fecti->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING) {
-		fecti->base.stats.decelerate_pending = true;
-		spin_unlock_bh(&fecti->lock);
+	if (feci->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING) {
+		feci->stats.decelerate_pending = true;
+		spin_unlock_bh(&feci->lock);
 		return;
 	}
 
@@ -1560,16 +1721,23 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_decelerate(struct ecm_fr
 	 * Can only decelerate if accelerated
 	 * NOTE: This will also deny accel when the connection is in fail condition too.
 	 */
-	if (fecti->accel_mode != ECM_FRONT_END_ACCELERATION_MODE_ACCEL) {
-		spin_unlock_bh(&fecti->lock);
+	if (feci->accel_mode != ECM_FRONT_END_ACCELERATION_MODE_ACCEL) {
+		spin_unlock_bh(&feci->lock);
 		return;
 	}
 
 	/*
 	 * Initiate deceleration
 	 */
-	fecti->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_DECEL_PENDING;
-	spin_unlock_bh(&fecti->lock);
+	feci->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_DECEL_PENDING;
+	spin_unlock_bh(&feci->lock);
+
+	/*
+	 * Increment the decel pending counter
+	 */
+	spin_lock_bh(&ecm_front_end_ipv4_lock);
+	ecm_front_end_ipv4_pending_decel_count++;
+	spin_unlock_bh(&ecm_front_end_ipv4_lock);
 
 	/*
 	 * Prepare deceleration message
@@ -1577,7 +1745,7 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_decelerate(struct ecm_fr
 	nss_ipv4_msg_init(&nim, NSS_IPV4_RX_INTERFACE, NSS_IPV4_TX_DESTROY_RULE_MSG,
 			sizeof(struct nss_ipv4_rule_destroy_msg),
 			(nss_ipv4_msg_callback_t *)ecm_front_end_ipv4_connection_tcp_destroy_callback,
-			(void *)ecm_db_connection_serial_get(fecti->ci));
+			(void *)ecm_db_connection_serial_get(feci->ci));
 
 	nirdm = &nim.msg.rule_destroy;
 	nirdm->tuple.protocol = (int32_t)IPPROTO_TCP;
@@ -1585,17 +1753,17 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_decelerate(struct ecm_fr
 	/*
 	 * Get addressing information
 	 */
-	ecm_db_connection_from_address_get(fecti->ci, addr);
+	ecm_db_connection_from_address_get(feci->ci, addr);
 	ECM_IP_ADDR_TO_HIN4_ADDR(nirdm->tuple.flow_ip, addr);
-	ecm_db_connection_to_address_nat_get(fecti->ci, addr);
+	ecm_db_connection_to_address_nat_get(feci->ci, addr);
 	ECM_IP_ADDR_TO_HIN4_ADDR(nirdm->tuple.return_ip, addr);
-	nirdm->tuple.flow_ident = ecm_db_connection_from_port_get(fecti->ci);
-	nirdm->tuple.return_ident = ecm_db_connection_to_port_nat_get(fecti->ci);
+	nirdm->tuple.flow_ident = ecm_db_connection_from_port_get(feci->ci);
+	nirdm->tuple.return_ident = ecm_db_connection_to_port_nat_get(feci->ci);
 
 	DEBUG_INFO("%p: TCP Connection %p decelerate\n"
 			"src_ip: %pI4:%d\n"
 			"dest_ip: %pI4:%d\n",
-			fecti, fecti->ci,
+			fecti, feci->ci,
 			&nirdm->tuple.flow_ip, nirdm->tuple.flow_ident,
 			&nirdm->tuple.return_ip, nirdm->tuple.return_ident);
 
@@ -1603,35 +1771,44 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_decelerate(struct ecm_fr
 	 * Take a ref to the feci->ci so that it will persist until we get a response from the NSS.
 	 * NOTE: This will implicitly hold the feci too.
 	 */
-	ecm_db_connection_ref(fecti->ci);
+	ecm_db_connection_ref(feci->ci);
 
 	/*
 	 * Destroy the NSS connection cache entry.
 	 */
 	nss_tx_status = nss_ipv4_tx(ecm_front_end_ipv4_nss_ipv4_mgr, &nim);
 	if (nss_tx_status == NSS_TX_SUCCESS) {
-		spin_lock_bh(&fecti->lock);
-		fecti->base.stats.driver_fail = 0;		/* Reset */
-		spin_unlock_bh(&fecti->lock);
+		spin_lock_bh(&feci->lock);
+		feci->stats.driver_fail = 0;			/* Reset */
+		feci->stats.cmd_time_begun = jiffies;		/* Capture time we issued the command */
+		spin_unlock_bh(&feci->lock);
 		return;
 	}
 
 	/*
 	 * Release the ref take, NSS driver did not accept our command.
 	 */
-	ecm_db_connection_deref(fecti->ci);
+	ecm_db_connection_deref(feci->ci);
 
 	/*
 	 * TX failed
 	 */
-	spin_lock_bh(&fecti->lock);
-	fecti->base.stats.driver_fail_total++;
-	fecti->base.stats.driver_fail++;
-	if (fecti->base.stats.driver_fail >= fecti->base.stats.driver_fail_limit) {
+	spin_lock_bh(&feci->lock);
+	feci->stats.driver_fail_total++;
+	feci->stats.driver_fail++;
+	if (feci->stats.driver_fail >= feci->stats.driver_fail_limit) {
 		DEBUG_WARN("%p: Decel failed - driver fail limit\n", fecti);
-		fecti->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DRIVER;
+		feci->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DRIVER;
 	}
-	spin_unlock_bh(&fecti->lock);
+	spin_unlock_bh(&feci->lock);
+
+	/*
+	 * Could not send the request, decrement the decel pending counter
+	 */
+	spin_lock_bh(&ecm_front_end_ipv4_lock);
+	ecm_front_end_ipv4_pending_decel_count--;
+	DEBUG_ASSERT(ecm_front_end_ipv4_pending_decel_count >= 0, "Bad decel pending counter\n");
+	spin_unlock_bh(&ecm_front_end_ipv4_lock);
 }
 
 /*
@@ -1645,48 +1822,48 @@ static void ecm_front_end_ipv4_connection_tcp_defunct_callback(void *arg)
 
 	DEBUG_CHECK_MAGIC(fecti, ECM_FRONT_END_IPV4_CONNECTION_TCP_INSTANCE_MAGIC, "%p: magic failed", fecti);
 
-	spin_lock_bh(&fecti->lock);
+	spin_lock_bh(&feci->lock);
 
 	/*
 	 * If connection has already become defunct, do nothing.
 	 */
-	if (fecti->is_defunct) {
-		spin_unlock_bh(&fecti->lock);
+	if (feci->is_defunct) {
+		spin_unlock_bh(&feci->lock);
 		return;
 	}
-	fecti->is_defunct = true;
+	feci->is_defunct = true;
 
 	/*
 	 * If the connection is already in one of the fail modes, do nothing, keep the current accel_mode.
 	 */
-	if (ECM_FRONT_END_ACCELERATION_FAILED(fecti->accel_mode)) {
-		spin_unlock_bh(&fecti->lock);
+	if (ECM_FRONT_END_ACCELERATION_FAILED(feci->accel_mode)) {
+		spin_unlock_bh(&feci->lock);
 		return;
 	}
 
 	/*
 	 * If the connection is decel then ensure it will not attempt accel while defunct.
 	 */
-	if (fecti->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_DECEL) {
-		fecti->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DEFUNCT;
-		spin_unlock_bh(&fecti->lock);
+	if (feci->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_DECEL) {
+		feci->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DEFUNCT;
+		spin_unlock_bh(&feci->lock);
 		return;
 	}
 
 	/*
 	 * If the connection is decel pending then decel operation is in progress anyway.
 	 */
-	if (fecti->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_DECEL_PENDING) {
-		spin_unlock_bh(&fecti->lock);
+	if (feci->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_DECEL_PENDING) {
+		spin_unlock_bh(&feci->lock);
 		return;
 	}
 
 	/*
-	 * If none of the cases mathes above, this means the connection is in one of the
+	 * If none of the cases matched above, this means the connection is in one of the
 	 * accel modes (accel or accel_pending) so we force a deceleration.
 	 * NOTE: If the mode is accel pending then the decel will be actioned when that is completed.
 	 */
-	spin_unlock_bh(&fecti->lock);
+	spin_unlock_bh(&feci->lock);
 	ecm_front_end_ipv4_connection_tcp_front_end_decelerate(feci);
 }
 
@@ -1700,9 +1877,9 @@ static ecm_front_end_acceleration_mode_t ecm_front_end_ipv4_connection_tcp_front
 	ecm_front_end_acceleration_mode_t state;
 
 	DEBUG_CHECK_MAGIC(fecti, ECM_FRONT_END_IPV4_CONNECTION_TCP_INSTANCE_MAGIC, "%p: magic failed", fecti);
-	spin_lock_bh(&fecti->lock);
-	state = fecti->accel_mode;
-	spin_unlock_bh(&fecti->lock);
+	spin_lock_bh(&feci->lock);
+	state = feci->accel_mode;
+	spin_unlock_bh(&feci->lock);
 	return state;
 }
 
@@ -1718,9 +1895,9 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_action_seen(struct ecm_f
 
 	DEBUG_CHECK_MAGIC(fecti, ECM_FRONT_END_IPV4_CONNECTION_TCP_INSTANCE_MAGIC, "%p: magic failed", fecti);
 	DEBUG_INFO("%p: Action seen\n", fecti);
-	spin_lock_bh(&fecti->lock);
-	fecti->base.stats.no_action_seen = 0;
-	spin_unlock_bh(&fecti->lock);
+	spin_lock_bh(&feci->lock);
+	feci->stats.no_action_seen = 0;
+	spin_unlock_bh(&feci->lock);
 }
 
 /*
@@ -1737,7 +1914,7 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_accel_ceased(struct ecm_
 	DEBUG_CHECK_MAGIC(fecti, ECM_FRONT_END_IPV4_CONNECTION_TCP_INSTANCE_MAGIC, "%p: magic failed", fecti);
 	DEBUG_INFO("%p: accel ceased\n", fecti);
 
-	spin_lock_bh(&fecti->lock);
+	spin_lock_bh(&feci->lock);
 
 	/*
 	 * If we are in accel-pending state then the NSS has issued a flush out-of-order
@@ -1745,38 +1922,38 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_accel_ceased(struct ecm_
 	 * To work around this we record a "flush has already happened" and will action it when we finally get that ACK/NACK.
 	 * GGG TODO This should eventually be removed when the NSS honours messaging sequence.
 	 */
-	if (fecti->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING) {
-		fecti->base.stats.flush_happened = true;
-		fecti->base.stats.flush_happened_total++;
-		spin_unlock_bh(&fecti->lock);
+	if (feci->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING) {
+		feci->stats.flush_happened = true;
+		feci->stats.flush_happened_total++;
+		spin_unlock_bh(&feci->lock);
 		return;
 	}
 
 	/*
 	 * If connection is no longer accelerated by the time we get here just ignore the command
 	 */
-	if (fecti->accel_mode != ECM_FRONT_END_ACCELERATION_MODE_ACCEL) {
-		spin_unlock_bh(&fecti->lock);
+	if (feci->accel_mode != ECM_FRONT_END_ACCELERATION_MODE_ACCEL) {
+		spin_unlock_bh(&feci->lock);
 		return;
 	}
 
 	/*
 	 * If the no_action_seen counter was not reset then acceleration ended without any offload action
 	 */
-	if (fecti->base.stats.no_action_seen) {
-		fecti->base.stats.no_action_seen_total++;
+	if (feci->stats.no_action_seen) {
+		feci->stats.no_action_seen_total++;
 	}
 
 	/*
 	 * If the no_action_seen indicates successive cessations of acceleration without any offload action occuring
 	 * then we fail out this connection
 	 */
-	if (fecti->base.stats.no_action_seen >= fecti->base.stats.no_action_seen_limit) {
-		fecti->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_NO_ACTION;
+	if (feci->stats.no_action_seen >= feci->stats.no_action_seen_limit) {
+		feci->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_NO_ACTION;
 	} else {
-		fecti->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_DECEL;
+		feci->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_DECEL;
 	}
-	spin_unlock_bh(&fecti->lock);
+	spin_unlock_bh(&feci->lock);
 
 	/*
 	 * TCP acceleration ends
@@ -1798,11 +1975,11 @@ static void ecm_front_end_ipv4_connection_tcp_front_end_ref(struct ecm_front_end
 	struct ecm_front_end_ipv4_connection_tcp_instance *fecti = (struct ecm_front_end_ipv4_connection_tcp_instance *)feci;
 
 	DEBUG_CHECK_MAGIC(fecti, ECM_FRONT_END_IPV4_CONNECTION_TCP_INSTANCE_MAGIC, "%p: magic failed", fecti);
-	spin_lock_bh(&fecti->lock);
-	fecti->refs++;
-	DEBUG_TRACE("%p: fecti ref %d\n", fecti, fecti->refs);
-	DEBUG_ASSERT(fecti->refs > 0, "%p: ref wrap\n", fecti);
-	spin_unlock_bh(&fecti->lock);
+	spin_lock_bh(&feci->lock);
+	feci->refs++;
+	DEBUG_TRACE("%p: fecti ref %d\n", feci, feci->refs);
+	DEBUG_ASSERT(feci->refs > 0, "%p: ref wrap\n", feci);
+	spin_unlock_bh(&feci->lock);
 }
 
 /*
@@ -1815,17 +1992,17 @@ static int ecm_front_end_ipv4_connection_tcp_front_end_deref(struct ecm_front_en
 
 	DEBUG_CHECK_MAGIC(fecti, ECM_FRONT_END_IPV4_CONNECTION_TCP_INSTANCE_MAGIC, "%p: magic failed", fecti);
 
-	spin_lock_bh(&fecti->lock);
-	fecti->refs--;
-	DEBUG_ASSERT(fecti->refs >= 0, "%p: ref wrap\n", fecti);
+	spin_lock_bh(&feci->lock);
+	feci->refs--;
+	DEBUG_ASSERT(feci->refs >= 0, "%p: ref wrap\n", feci);
 
-	if (fecti->refs > 0) {
-		int refs = fecti->refs;
-		spin_unlock_bh(&fecti->lock);
+	if (feci->refs > 0) {
+		int refs = feci->refs;
+		spin_unlock_bh(&feci->lock);
 		DEBUG_TRACE("%p: fecti deref %d\n", fecti, refs);
 		return refs;
 	}
-	spin_unlock_bh(&fecti->lock);
+	spin_unlock_bh(&feci->lock);
 
 	/*
 	 * We can now destroy the instance
@@ -1833,10 +2010,6 @@ static int ecm_front_end_ipv4_connection_tcp_front_end_deref(struct ecm_front_en
 	DEBUG_TRACE("%p: fecti final\n", fecti);
 	DEBUG_CLEAR_MAGIC(fecti);
 	kfree(fecti);
-
-	/*
-	 * Thread may be able to exit on object destruction
-	 */
 	return 0;
 }
 
@@ -1853,11 +2026,11 @@ static int ecm_front_end_ipv4_connection_tcp_front_end_xml_state_get(struct ecm_
 
 	DEBUG_CHECK_MAGIC(fecti, ECM_FRONT_END_IPV4_CONNECTION_TCP_INSTANCE_MAGIC, "%p: magic failed", fecti);
 
-	spin_lock_bh(&fecti->lock);
-	can_accel = fecti->can_accel;
-	accel_mode = fecti->accel_mode;
+	spin_lock_bh(&feci->lock);
+	can_accel = feci->can_accel;
+	accel_mode = feci->accel_mode;
 	memcpy(&stats, &feci->stats, sizeof(struct ecm_front_end_connection_mode_stats));
-	spin_unlock_bh(&fecti->lock);
+	spin_unlock_bh(&feci->lock);
 
 	return snprintf(buf, buf_sz, "<front_end_tcp can_accel=\"%d\" accel_mode=\"%d\" decelerate_pending=\"%d\" flush_happened_total=\"%d\" no_action_seen_total=\"%d\" no_action_seen=\"%d\" no_action_seen_limit=\"%d\""
 				" driver_fail_total=\"%d\" driver_fail=\"%d\" driver_fail_limit=\"%d\" nss_nack_total=\"%d\" nss_nack=\"%d\" nss_nack_limit=\"%d\"/>\n",
@@ -1887,6 +2060,7 @@ static struct ecm_front_end_ipv4_connection_tcp_instance *ecm_front_end_ipv4_con
 								bool can_accel)
 {
 	struct ecm_front_end_ipv4_connection_tcp_instance *fecti;
+	struct ecm_front_end_connection_instance *feci;
 
 	fecti = (struct ecm_front_end_ipv4_connection_tcp_instance *)kzalloc(sizeof(struct ecm_front_end_ipv4_connection_tcp_instance), GFP_ATOMIC | __GFP_NOWARN);
 	if (!fecti) {
@@ -1897,33 +2071,34 @@ static struct ecm_front_end_ipv4_connection_tcp_instance *ecm_front_end_ipv4_con
 	/*
 	 * Refs is 1 for the creator of the connection
 	 */
-	fecti->refs = 1;
+	feci = (struct ecm_front_end_connection_instance *)fecti;
+	feci->refs = 1;
 	DEBUG_SET_MAGIC(fecti, ECM_FRONT_END_IPV4_CONNECTION_TCP_INSTANCE_MAGIC);
-	spin_lock_init(&fecti->lock);
+	spin_lock_init(&feci->lock);
 
-	fecti->can_accel = can_accel;
-	fecti->accel_mode = (can_accel)? ECM_FRONT_END_ACCELERATION_MODE_DECEL : ECM_FRONT_END_ACCELERATION_MODE_FAIL_DENIED;
+	feci->can_accel = can_accel;
+	feci->accel_mode = (can_accel)? ECM_FRONT_END_ACCELERATION_MODE_DECEL : ECM_FRONT_END_ACCELERATION_MODE_FAIL_DENIED;
 	spin_lock_bh(&ecm_front_end_ipv4_lock);
-	fecti->base.stats.no_action_seen_limit = ecm_front_end_ipv4_no_action_limit_default;
-	fecti->base.stats.driver_fail_limit = ecm_front_end_ipv4_driver_fail_limit_default;
-	fecti->base.stats.nss_nack_limit = ecm_front_end_ipv4_nack_limit_default;
+	feci->stats.no_action_seen_limit = ecm_front_end_ipv4_no_action_limit_default;
+	feci->stats.driver_fail_limit = ecm_front_end_ipv4_driver_fail_limit_default;
+	feci->stats.nss_nack_limit = ecm_front_end_ipv4_nack_limit_default;
 	spin_unlock_bh(&ecm_front_end_ipv4_lock);
 
 	/*
 	 * Copy reference to connection - no need to ref ci as ci maintains a ref to this instance instead (this instance persists for as long as ci does)
 	 */
-	fecti->ci = ci;
+	feci->ci = ci;
 
 	/*
 	 * Populate the methods and callbacks
 	 */
-	fecti->base.ref = ecm_front_end_ipv4_connection_tcp_front_end_ref;
-	fecti->base.deref = ecm_front_end_ipv4_connection_tcp_front_end_deref;
-	fecti->base.decelerate = ecm_front_end_ipv4_connection_tcp_front_end_decelerate;
-	fecti->base.accel_state_get = ecm_front_end_ipv4_connection_tcp_front_end_accel_state_get;
-	fecti->base.action_seen = ecm_front_end_ipv4_connection_tcp_front_end_action_seen;
-	fecti->base.accel_ceased = ecm_front_end_ipv4_connection_tcp_front_end_accel_ceased;
-	fecti->base.xml_state_get = ecm_front_end_ipv4_connection_tcp_front_end_xml_state_get;
+	feci->ref = ecm_front_end_ipv4_connection_tcp_front_end_ref;
+	feci->deref = ecm_front_end_ipv4_connection_tcp_front_end_deref;
+	feci->decelerate = ecm_front_end_ipv4_connection_tcp_front_end_decelerate;
+	feci->accel_state_get = ecm_front_end_ipv4_connection_tcp_front_end_accel_state_get;
+	feci->action_seen = ecm_front_end_ipv4_connection_tcp_front_end_action_seen;
+	feci->accel_ceased = ecm_front_end_ipv4_connection_tcp_front_end_accel_ceased;
+	feci->xml_state_get = ecm_front_end_ipv4_connection_tcp_front_end_xml_state_get;
 
 	return fecti;
 }
@@ -1939,6 +2114,7 @@ static void ecm_front_end_ipv4_connection_udp_callback(void *app_data, struct ns
 	struct ecm_db_connection_instance *ci;
 	struct ecm_front_end_connection_instance *feci;
 	struct ecm_front_end_ipv4_connection_udp_instance *fecui;
+	ecm_front_end_acceleration_mode_t result_mode;
 
 	/*
 	 * Is this a response to a create message?
@@ -1972,9 +2148,14 @@ static void ecm_front_end_ipv4_connection_udp_callback(void *app_data, struct ns
 	DEBUG_CHECK_MAGIC(fecui, ECM_FRONT_END_IPV4_CONNECTION_UDP_INSTANCE_MAGIC, "%p: magic failed", fecui);
 
 	/*
+	 * Record command duration
+	 */
+	ecm_front_end_ipv4_accel_done_time_update(feci);
+
+	/*
 	 * Dump some useful trace information.
 	 */
-	DEBUG_TRACE("%p: accelerate response for connection: %p, serial: %u\n", fecui, fecui->ci, serial);
+	DEBUG_TRACE("%p: accelerate response for connection: %p, serial: %u\n", fecui, feci->ci, serial);
 	DEBUG_TRACE("%p: rule_flags: %x, valid_flags: %x\n", fecui, nircm->rule_flags, nircm->valid_flags);
 	DEBUG_TRACE("%p: flow_ip: %pI4h:%d\n", fecui, &nircm->tuple.flow_ip, nircm->tuple.flow_ident);
 	DEBUG_TRACE("%p: return_ip: %pI4h:%d\n", fecui, &nircm->tuple.return_ip, nircm->tuple.return_ident);
@@ -1989,34 +2170,34 @@ static void ecm_front_end_ipv4_connection_udp_callback(void *app_data, struct ns
 		 * Creation command failed (specific reason ignored).
 		 */
 		DEBUG_TRACE("%p: accel nack: %d\n", fecui, nim->cm.error);
-		spin_lock_bh(&fecui->lock);
-		DEBUG_ASSERT(fecui->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING, "%p: Unexpected mode: %d\n", ci, fecui->accel_mode);
-		fecui->base.stats.nss_nack++;
-		fecui->base.stats.nss_nack_total++;
-		if (fecui->base.stats.nss_nack >= fecui->base.stats.nss_nack_limit) {
+		spin_lock_bh(&feci->lock);
+		DEBUG_ASSERT(feci->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING, "%p: Unexpected mode: %d\n", ci, feci->accel_mode);
+		feci->stats.nss_nack++;
+		feci->stats.nss_nack_total++;
+		if (feci->stats.nss_nack >= feci->stats.nss_nack_limit) {
 			/*
 			 * Too many NSS rejections
 			 */
-			fecui->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_NSS;
+			result_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_NSS;
 		} else {
 			/*
 			 * Revert to decelerated
 			 */
-			fecui->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_DECEL;
+			result_mode = ECM_FRONT_END_ACCELERATION_MODE_DECEL;
 		}
-
-		/*
-		 * Clear any decelerate pending flag since we aren't accelerated anyway we can just clear this whether it is set or not
-		 */
-		fecui->base.stats.decelerate_pending = false;
 
 		/*
 		 * If connection is now defunct then set mode to ensure no further accel attempts occur
 		 */
-		if (fecui->is_defunct) {
-			fecui->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DEFUNCT;
+		if (feci->is_defunct) {
+			result_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DEFUNCT;
 		}
-		spin_unlock_bh(&fecui->lock);
+
+		spin_lock_bh(&ecm_front_end_ipv4_lock);
+		_ecm_front_end_ipv4_accel_pending_clear(feci, result_mode);
+		spin_unlock_bh(&ecm_front_end_ipv4_lock);
+
+		spin_unlock_bh(&feci->lock);
 
 		/*
 		 * Release the connection.
@@ -2026,27 +2207,26 @@ static void ecm_front_end_ipv4_connection_udp_callback(void *app_data, struct ns
 		return;
 	}
 
-	spin_lock_bh(&fecui->lock);
-	DEBUG_ASSERT(fecui->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING, "%p: Unexpected mode: %d\n", ci, fecui->accel_mode);
+	spin_lock_bh(&feci->lock);
+	DEBUG_ASSERT(feci->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING, "%p: Unexpected mode: %d\n", ci, feci->accel_mode);
 
 	/*
 	 * If a flush occured before we got the ACK then our acceleration was effectively cancelled on us
 	 * GGG TODO This is a workaround for a NSS message OOO quirk, this should eventually be removed.
 	 */
-	if (fecui->base.stats.flush_happened) {
-		fecui->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_DECEL;
-		fecui->base.stats.flush_happened = false;
+	if (feci->stats.flush_happened) {
+		feci->stats.flush_happened = false;
 
 		/*
-		 * We are decelerated, clear any pending flag as that is meaningless now.
+		 * Increment the no-action counter.  Our connectin was decelerated on us with no action occurring.
 		 */
-		fecui->base.stats.decelerate_pending = false;
+		feci->stats.no_action_seen++;
 
-		/*
-		 * Increement the no-action counter.  Our connectin was decelerated on us with no action occurring.
-		 */
-		fecui->base.stats.no_action_seen++;
-		spin_unlock_bh(&fecui->lock);
+		spin_lock_bh(&ecm_front_end_ipv4_lock);
+		_ecm_front_end_ipv4_accel_pending_clear(feci, ECM_FRONT_END_ACCELERATION_MODE_DECEL);
+		spin_unlock_bh(&ecm_front_end_ipv4_lock);
+
+		spin_unlock_bh(&feci->lock);
 
 		/*
 		 * Release the connection.
@@ -2057,34 +2237,35 @@ static void ecm_front_end_ipv4_connection_udp_callback(void *app_data, struct ns
 	}
 
 	/*
-	 * We got an ACK - we are accelerated.
+	 * Create succeeded
 	 */
-	fecui->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_ACCEL;
-
-	/*
-	 * Create succeeded, declare that we are accelerated.
-	 */
-	spin_lock_bh(&ecm_front_end_ipv4_lock);
-	ecm_front_end_ipv4_udp_accelerated_count++;	/* Protocol specific counter */
-	ecm_front_end_ipv4_accelerated_count++;		/* General running counter */
-	spin_unlock_bh(&ecm_front_end_ipv4_lock);
 
 	/*
 	 * Clear any nack count
 	 */
-	fecui->base.stats.nss_nack = 0;
+	feci->stats.nss_nack = 0;
 
 	/*
-	 * Decelerate may have been attempted while we were accel pending.
-	 * If decelerate is pending then we need to begin deceleration :-(
+	 * Clear the "accelerate pending" state and move to "accelerated" state bumping
+	 * the accelerated counters to match our new state.
+	 *
+	 * Decelerate may have been attempted while we were "pending accel" and
+	 * this function will return true if that was the case.
+	 * If decelerate was pending then we need to begin deceleration :-(
 	 */
-	if (!fecui->base.stats.decelerate_pending) {
-		/*
-		 * Increement the no-action counter, this is reset if offload action is seen
-		 */
-		fecui->base.stats.no_action_seen++;
+	spin_lock_bh(&ecm_front_end_ipv4_lock);
 
-		spin_unlock_bh(&fecui->lock);
+	ecm_front_end_ipv4_udp_accelerated_count++;	/* Protocol specific counter */
+	ecm_front_end_ipv4_accelerated_count++;		/* General running counter */
+
+	if (!_ecm_front_end_ipv4_accel_pending_clear(feci, ECM_FRONT_END_ACCELERATION_MODE_ACCEL)) {
+		/*
+		 * Increment the no-action counter, this is reset if offload action is seen
+		 */
+		feci->stats.no_action_seen++;
+
+		spin_unlock_bh(&ecm_front_end_ipv4_lock);
+		spin_unlock_bh(&feci->lock);
 
 		/*
 		 * Release the connection.
@@ -2095,8 +2276,9 @@ static void ecm_front_end_ipv4_connection_udp_callback(void *app_data, struct ns
 	}
 
 	DEBUG_INFO("%p: Decelerate was pending\n", ci);
-	fecui->base.stats.decelerate_pending = false;
-	spin_unlock_bh(&fecui->lock);
+
+	spin_unlock_bh(&ecm_front_end_ipv4_lock);
+	spin_unlock_bh(&feci->lock);
 
 	feci->decelerate(feci);
 
@@ -2140,30 +2322,17 @@ static void ecm_front_end_ipv4_connection_udp_front_end_accelerate(struct ecm_fr
 	bool rule_invalid;
 	uint8_t dest_mac_xlate[ETH_ALEN];
 	ecm_db_direction_t ecm_dir;
+	ecm_front_end_acceleration_mode_t result_mode;
 
 	DEBUG_CHECK_MAGIC(fecui, ECM_FRONT_END_IPV4_CONNECTION_UDP_INSTANCE_MAGIC, "%p: magic failed", fecui);
 
 	/*
-	 * Can this connection be accelerated at all?
+	 * Test if acceleration is permitted
 	 */
-	DEBUG_INFO("%p: Accel conn: %p\n", fecui, fecui->ci);
-	spin_lock_bh(&fecui->lock);
-	if (ECM_FRONT_END_ACCELERATION_FAILED(fecui->accel_mode)) {
-		spin_unlock_bh(&fecui->lock);
-		DEBUG_TRACE("%p: accel %p failed\n", fecui, fecui->ci);
+	if (!ecm_front_end_ipv4_accel_pending_set(feci)) {
+		DEBUG_TRACE("%p: Acceleration not permitted: %p\n", feci, feci->ci);
 		return;
 	}
-
-	/*
-	 * If acceleration mode is anything other than "not accelerated" then ignore.
-	 */
-	if (fecui->accel_mode != ECM_FRONT_END_ACCELERATION_MODE_DECEL) {
-		spin_unlock_bh(&fecui->lock);
-		DEBUG_TRACE("%p: Ignoring wrong mode accel for conn: %p\n", fecui, fecui->ci);
-		return;
-	}
-	fecui->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING;
-	spin_unlock_bh(&fecui->lock);
 
 	/*
 	 * Okay construct an accel command.
@@ -2175,7 +2344,7 @@ static void ecm_front_end_ipv4_connection_udp_front_end_accelerate(struct ecm_fr
 	nss_ipv4_msg_init(&nim, NSS_IPV4_RX_INTERFACE, NSS_IPV4_TX_CREATE_RULE_MSG,
 			sizeof(struct nss_ipv4_rule_create_msg),
 			(nss_ipv4_msg_callback_t *)ecm_front_end_ipv4_connection_udp_callback,
-			(void *)ecm_db_connection_serial_get(fecui->ci));
+			(void *)ecm_db_connection_serial_get(feci->ci));
 
 	nircm = &nim.msg.rule_create;
 	nircm->valid_flags = 0;
@@ -2192,13 +2361,13 @@ static void ecm_front_end_ipv4_connection_udp_front_end_accelerate(struct ecm_fr
 	/*
 	 * Get the interface lists of the connection, we must have at least one interface in the list to continue
 	 */
-	from_ifaces_first = ecm_db_connection_from_interfaces_get_and_ref(fecui->ci, from_ifaces);
+	from_ifaces_first = ecm_db_connection_from_interfaces_get_and_ref(feci->ci, from_ifaces);
 	if (from_ifaces_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 		DEBUG_WARN("%p: Accel attempt failed - no interfaces in from_interfaces list!\n", fecui);
 		goto udp_accel_bad_rule;
 	}
 
-	to_ifaces_first = ecm_db_connection_to_interfaces_get_and_ref(fecui->ci, to_ifaces);
+	to_ifaces_first = ecm_db_connection_to_interfaces_get_and_ref(feci->ci, to_ifaces);
 	if (to_ifaces_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 		DEBUG_WARN("%p: Accel attempt failed - no interfaces in to_interfaces list!\n", fecui);
 		ecm_db_connection_interfaces_deref(from_ifaces, from_ifaces_first);
@@ -2567,7 +2736,7 @@ static void ecm_front_end_ipv4_connection_udp_front_end_accelerate(struct ecm_fr
 	/*
 	 * Routed or bridged?
 	 */
-	if (ecm_db_connection_is_routed_get(fecui->ci)) {
+	if (ecm_db_connection_is_routed_get(feci->ci)) {
 		nircm->rule_flags |= NSS_IPV4_RULE_CREATE_FLAG_ROUTED;
 	} else {
 		nircm->rule_flags |= NSS_IPV4_RULE_CREATE_FLAG_BRIDGE_FLOW;
@@ -2598,7 +2767,7 @@ static void ecm_front_end_ipv4_connection_udp_front_end_accelerate(struct ecm_fr
 	/*
 	 * The flow_ip is where the connection established from
 	 */
-	ecm_db_connection_from_address_get(fecui->ci, addr);
+	ecm_db_connection_from_address_get(feci->ci, addr);
 	ECM_IP_ADDR_TO_HIN4_ADDR(nircm->tuple.flow_ip, addr);
 
 	/*
@@ -2607,7 +2776,7 @@ static void ecm_front_end_ipv4_connection_udp_front_end_accelerate(struct ecm_fr
 	 * Getting the NAT'ed version here works for ingress or egress packets, for egress
 	 * the NAT'ed version would be the same as the normal address
 	 */
-	ecm_db_connection_to_address_nat_get(fecui->ci, addr);
+	ecm_db_connection_to_address_nat_get(feci->ci, addr);
 	ECM_IP_ADDR_TO_HIN4_ADDR(nircm->tuple.return_ip, addr);
 
 	/*
@@ -2615,45 +2784,45 @@ static void ecm_front_end_ipv4_connection_udp_front_end_accelerate(struct ecm_fr
 	 * packet should be translated to.  For egress this is the NAT'ed from address.
 	 * This also works for ingress as the NAT'ed version of the WAN host would be the same as non-NAT'ed
 	 */
-	ecm_db_connection_from_address_nat_get(fecui->ci, addr);
+	ecm_db_connection_from_address_nat_get(feci->ci, addr);
 	ECM_IP_ADDR_TO_HIN4_ADDR(nircm->conn_rule.flow_ip_xlate, addr);
 
 	/*
 	 * The destination address is what the destination IP is translated to as it is forwarded to the next interface.
 	 * For egress this would yield the normal wan host and for ingress this would correctly NAT back to the LAN host
 	 */
-	ecm_db_connection_to_address_get(fecui->ci, addr);
+	ecm_db_connection_to_address_get(feci->ci, addr);
 	ECM_IP_ADDR_TO_HIN4_ADDR(nircm->conn_rule.return_ip_xlate, addr);
 
 	/*
 	 * Same approach as above for port information
 	 */
-	nircm->tuple.flow_ident = ecm_db_connection_from_port_get(fecui->ci);
-	nircm->tuple.return_ident = ecm_db_connection_to_port_nat_get(fecui->ci);
-	nircm->conn_rule.flow_ident_xlate = ecm_db_connection_from_port_nat_get(fecui->ci);
-	nircm->conn_rule.return_ident_xlate = ecm_db_connection_to_port_get(fecui->ci);
+	nircm->tuple.flow_ident = ecm_db_connection_from_port_get(feci->ci);
+	nircm->tuple.return_ident = ecm_db_connection_to_port_nat_get(feci->ci);
+	nircm->conn_rule.flow_ident_xlate = ecm_db_connection_from_port_nat_get(feci->ci);
+	nircm->conn_rule.return_ident_xlate = ecm_db_connection_to_port_get(feci->ci);
 
 	/*
 	 * Get mac addresses.
 	 * The src_mac is the mac address of the node that established the connection.
 	 * This will work whether the from_node is LAN (egress) or WAN (ingress).
 	 */
-	ecm_db_connection_from_node_address_get(fecui->ci, (uint8_t *)nircm->conn_rule.flow_mac);
+	ecm_db_connection_from_node_address_get(feci->ci, (uint8_t *)nircm->conn_rule.flow_mac);
 
 	/*
 	 * The dest_mac is more complex.  For egress it is the node address of the 'to' side of the connection.
 	 * For ingress it is the node adress of the NAT'ed 'to' IP.
 	 * Essentially it is the MAC of node associated with create.dest_ip and this is "to nat" side.
 	 */
-	ecm_db_connection_to_nat_node_address_get(fecui->ci, (uint8_t *)nircm->conn_rule.return_mac);
+	ecm_db_connection_to_nat_node_address_get(feci->ci, (uint8_t *)nircm->conn_rule.return_mac);
 
 	/*
 	 * The dest_mac_xlate is the mac address to replace the pkt.dst_mac when a packet is sent to->from
 	 * For bridged connections this does not change.
 	 * For routed connections this is the mac of the 'to' node side of the connection.
 	 */
-	if (ecm_db_connection_is_routed_get(fecui->ci)) {
-		ecm_db_connection_to_node_address_get(fecui->ci, dest_mac_xlate);
+	if (ecm_db_connection_is_routed_get(feci->ci)) {
+		ecm_db_connection_to_node_address_get(feci->ci, dest_mac_xlate);
 	} else {
 		/*
 		 * Bridge flows preserve the MAC addressing
@@ -2667,7 +2836,7 @@ static void ecm_front_end_ipv4_connection_udp_front_end_accelerate(struct ecm_fr
 	 * ip_dest_addr. So, above we get the mac address of this host and use that mac address
 	 * for the destination node address in NAT'ed cases.
 	 */
-	ecm_dir = ecm_db_connection_direction_get(fecui->ci);
+	ecm_dir = ecm_db_connection_direction_get(feci->ci);
 	if ((ecm_dir == ECM_DB_DIRECTION_INGRESS_NAT) || (ecm_dir == ECM_DB_DIRECTION_EGRESS_NAT)) {
 		memcpy(nircm->conn_rule.return_mac, dest_mac_xlate, ETH_ALEN);
 	}
@@ -2675,8 +2844,8 @@ static void ecm_front_end_ipv4_connection_udp_front_end_accelerate(struct ecm_fr
 	/*
 	 * Get MTU information
 	 */
-	nircm->conn_rule.flow_mtu = (uint32_t)ecm_db_connection_from_iface_mtu_get(fecui->ci);
-	nircm->conn_rule.return_mtu = (uint32_t)ecm_db_connection_to_iface_mtu_get(fecui->ci);
+	nircm->conn_rule.flow_mtu = (uint32_t)ecm_db_connection_from_iface_mtu_get(feci->ci);
+	nircm->conn_rule.return_mtu = (uint32_t)ecm_db_connection_to_iface_mtu_get(feci->ci);
 
 	/*
 	 * Sync our creation command from the assigned classifiers to get specific additional creation rules.
@@ -2684,12 +2853,12 @@ static void ecm_front_end_ipv4_connection_udp_front_end_accelerate(struct ecm_fr
 	 * override any preceding classifiers.
 	 * This also gives the classifiers a chance to see that acceleration is being attempted.
 	 */
-	assignment_count = ecm_db_connection_classifier_assignments_get_and_ref(fecui->ci, assignments);
+	assignment_count = ecm_db_connection_classifier_assignments_get_and_ref(feci->ci, assignments);
 	for (aci_index = 0; aci_index < assignment_count; ++aci_index) {
 		struct ecm_classifier_instance *aci;
 
 		aci = assignments[aci_index];
-		DEBUG_TRACE("%p: sync from: %p, type: %d\n", fecui, aci, aci->type_get(aci));
+		DEBUG_TRACE("%p: sync from: %p, type: %d\n", feci, aci, aci->type_get(aci));
 		aci->sync_from_v4(aci, nircm);
 	}
 	ecm_db_connection_assignments_release(assignment_count, assignments);
@@ -2727,7 +2896,7 @@ static void ecm_front_end_ipv4_connection_udp_front_end_accelerate(struct ecm_fr
 			"flow_dscp: %x\n"
 			"return_dscp: %x\n",
 			fecui,
-			fecui->ci,
+			feci->ci,
 			nircm->tuple.protocol,
 			nircm->conn_rule.flow_mtu,
 			nircm->conn_rule.return_mtu,
@@ -2760,37 +2929,45 @@ static void ecm_front_end_ipv4_connection_udp_front_end_accelerate(struct ecm_fr
 	 * the callback function can trust the correct ref was taken for its purpose.
 	 * NOTE: remember that this will also implicitly hold the feci.
 	 */
-	ecm_db_connection_ref(fecui->ci);
+	ecm_db_connection_ref(feci->ci);
 
 	/*
 	 * Call the rule create function
 	 */
 	nss_tx_status = nss_ipv4_tx(ecm_front_end_ipv4_nss_ipv4_mgr, &nim);
 	if (nss_tx_status == NSS_TX_SUCCESS) {
-		spin_lock_bh(&fecui->lock);
-		DEBUG_ASSERT(fecui->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING, "%p: Accel mode unexpected: %d\n", fecui, fecui->accel_mode);
-		fecui->base.stats.driver_fail = 0;		/* Reset */
-		spin_unlock_bh(&fecui->lock);
+		spin_lock_bh(&feci->lock);
+		DEBUG_ASSERT(feci->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING, "%p: Accel mode unexpected: %d\n", fecui, feci->accel_mode);
+		feci->stats.driver_fail = 0;			/* Reset */
+		feci->stats.cmd_time_begun = jiffies;		/* Capture time we issued the command */
+		spin_unlock_bh(&feci->lock);
 		return;
 	}
 
 	/*
 	 * Release that ref!
 	 */
-	ecm_db_connection_deref(fecui->ci);
+	ecm_db_connection_deref(feci->ci);
 
 	/*
 	 * TX failed
 	 */
-	spin_lock_bh(&fecui->lock);
-	DEBUG_ASSERT(fecui->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING, "%p: Accel mode unexpected: %d\n", fecui, fecui->accel_mode);
-	fecui->base.stats.driver_fail_total++;
-	fecui->base.stats.driver_fail++;
-	if (fecui->base.stats.driver_fail >= fecui->base.stats.driver_fail_limit) {
+	spin_lock_bh(&feci->lock);
+	DEBUG_ASSERT(feci->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING, "%p: Accel mode unexpected: %d\n", fecui, feci->accel_mode);
+	feci->stats.driver_fail_total++;
+	feci->stats.driver_fail++;
+	if (feci->stats.driver_fail >= feci->stats.driver_fail_limit) {
 		DEBUG_WARN("%p: Accel failed - driver fail limit\n", fecui);
-		fecui->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DRIVER;
+		result_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DRIVER;
+	} else {
+		result_mode = ECM_FRONT_END_ACCELERATION_MODE_DECEL;
 	}
-	spin_unlock_bh(&fecui->lock);
+
+	spin_lock_bh(&ecm_front_end_ipv4_lock);
+	_ecm_front_end_ipv4_accel_pending_clear(feci, result_mode);
+	spin_unlock_bh(&ecm_front_end_ipv4_lock);
+
+	spin_unlock_bh(&feci->lock);
 	return;
 
 udp_accel_bad_rule:
@@ -2800,10 +2977,7 @@ udp_accel_bad_rule:
 	 * Jump to here when rule data is bad and an offload command cannot be constructed
 	 */
 	DEBUG_WARN("%p: Accel failed - bad rule\n", fecui);
-	spin_lock_bh(&fecui->lock);
-	DEBUG_ASSERT(fecui->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING, "%p: Accel mode unexpected: %d\n", fecui, fecui->accel_mode);
-	fecui->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_RULE;
-	spin_unlock_bh(&fecui->lock);
+	ecm_front_end_ipv4_accel_pending_clear(feci, ECM_FRONT_END_ACCELERATION_MODE_FAIL_RULE);
 }
 
 /*
@@ -2850,21 +3024,34 @@ static void ecm_front_end_ipv4_connection_udp_destroy_callback(void *app_data, s
 	DEBUG_CHECK_MAGIC(fecui, ECM_FRONT_END_IPV4_CONNECTION_UDP_INSTANCE_MAGIC, "%p: magic failed", fecui);
 
 	/*
+	 * Record command duration
+	 */
+	ecm_front_end_ipv4_decel_done_time_update(feci);
+
+	/*
 	 * Dump some useful trace information.
 	 */
-	DEBUG_TRACE("%p: decelerate response for connection: %p\n", fecui, fecui->ci);
+	DEBUG_TRACE("%p: decelerate response for connection: %p\n", fecui, feci->ci);
 	DEBUG_TRACE("%p: flow_ip: %pI4h:%d\n", fecui, &nirdm->tuple.flow_ip, nirdm->tuple.flow_ident);
 	DEBUG_TRACE("%p: return_ip: %pI4h:%d\n", fecui, &nirdm->tuple.return_ip, nirdm->tuple.return_ident);
 	DEBUG_TRACE("%p: protocol: %d\n", fecui, nirdm->tuple.protocol);
 
-	spin_lock_bh(&fecui->lock);
+	/*
+	 * Drop decel pending counter
+	 */
+	spin_lock_bh(&ecm_front_end_ipv4_lock);
+	ecm_front_end_ipv4_pending_decel_count--;
+	DEBUG_ASSERT(ecm_front_end_ipv4_pending_decel_count >= 0, "Bad decel pending counter\n");
+	spin_unlock_bh(&ecm_front_end_ipv4_lock);
+
+	spin_lock_bh(&feci->lock);
 
 	/*
 	 * If decel is not still pending then it's possible that the NSS ended acceleration by some other reason e.g. flush
 	 * In which case we cannot rely on the response we get here.
 	 */
-	if (fecui->accel_mode != ECM_FRONT_END_ACCELERATION_MODE_DECEL_PENDING) {
-		spin_unlock_bh(&fecui->lock);
+	if (feci->accel_mode != ECM_FRONT_END_ACCELERATION_MODE_DECEL_PENDING) {
+		spin_unlock_bh(&feci->lock);
 
 		/*
 		 * Release the connections.
@@ -2876,18 +3063,19 @@ static void ecm_front_end_ipv4_connection_udp_destroy_callback(void *app_data, s
 
 	DEBUG_TRACE("%p: response: %d\n", fecui, nim->cm.response);
 	if (nim->cm.response != NSS_CMN_RESPONSE_ACK) {
-		fecui->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DECEL;
+		feci->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DECEL;
 	} else {
-		fecui->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_DECEL;
+		feci->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_DECEL;
 	}
 
 	/*
 	 * If connection became defunct then set mode so that no further accel/decel attempts occur.
 	 */
-	if (fecui->is_defunct) {
-		fecui->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DEFUNCT;
+	if (feci->is_defunct) {
+		feci->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DEFUNCT;
 	}
-	spin_unlock_bh(&fecui->lock);
+
+	spin_unlock_bh(&feci->lock);
 
 	/*
 	 * UDP acceleration ends
@@ -2923,9 +3111,9 @@ static void ecm_front_end_ipv4_connection_udp_front_end_decelerate(struct ecm_fr
 	/*
 	 * If decelerate is in error or already pending then ignore
 	 */
-	spin_lock_bh(&fecui->lock);
-	if (fecui->base.stats.decelerate_pending) {
-		spin_unlock_bh(&fecui->lock);
+	spin_lock_bh(&feci->lock);
+	if (feci->stats.decelerate_pending) {
+		spin_unlock_bh(&feci->lock);
 		return;
 	}
 
@@ -2933,9 +3121,9 @@ static void ecm_front_end_ipv4_connection_udp_front_end_decelerate(struct ecm_fr
 	 * If acceleration is pending then we cannot decelerate right now or we will race with it
 	 * Set a decelerate pending flag that will be actioned when the acceleration command is complete.
 	 */
-	if (fecui->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING) {
-		fecui->base.stats.decelerate_pending = true;
-		spin_unlock_bh(&fecui->lock);
+	if (feci->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING) {
+		feci->stats.decelerate_pending = true;
+		spin_unlock_bh(&feci->lock);
 		return;
 	}
 
@@ -2943,16 +3131,23 @@ static void ecm_front_end_ipv4_connection_udp_front_end_decelerate(struct ecm_fr
 	 * Can only decelerate if accelerated
 	 * NOTE: This will also deny accel when the connection is in fail condition too.
 	 */
-	if (fecui->accel_mode != ECM_FRONT_END_ACCELERATION_MODE_ACCEL) {
-		spin_unlock_bh(&fecui->lock);
+	if (feci->accel_mode != ECM_FRONT_END_ACCELERATION_MODE_ACCEL) {
+		spin_unlock_bh(&feci->lock);
 		return;
 	}
 
 	/*
 	 * Initiate deceleration
 	 */
-	fecui->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_DECEL_PENDING;
-	spin_unlock_bh(&fecui->lock);
+	feci->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_DECEL_PENDING;
+	spin_unlock_bh(&feci->lock);
+
+	/*
+	 * Increment the decel pending counter
+	 */
+	spin_lock_bh(&ecm_front_end_ipv4_lock);
+	ecm_front_end_ipv4_pending_decel_count++;
+	spin_unlock_bh(&ecm_front_end_ipv4_lock);
 
 	/*
 	 * Prepare deceleration message
@@ -2960,7 +3155,7 @@ static void ecm_front_end_ipv4_connection_udp_front_end_decelerate(struct ecm_fr
 	nss_ipv4_msg_init(&nim, NSS_IPV4_RX_INTERFACE, NSS_IPV4_TX_DESTROY_RULE_MSG,
 			sizeof(struct nss_ipv4_rule_destroy_msg),
 			(nss_ipv4_msg_callback_t *)ecm_front_end_ipv4_connection_udp_destroy_callback,
-			(void *)ecm_db_connection_serial_get(fecui->ci));
+			(void *)ecm_db_connection_serial_get(feci->ci));
 
 	nirdm = &nim.msg.rule_destroy;
 	nirdm->tuple.protocol = (int32_t)IPPROTO_UDP;
@@ -2968,17 +3163,17 @@ static void ecm_front_end_ipv4_connection_udp_front_end_decelerate(struct ecm_fr
 	/*
 	 * Get addressing information
 	 */
-	ecm_db_connection_from_address_get(fecui->ci, addr);
+	ecm_db_connection_from_address_get(feci->ci, addr);
 	ECM_IP_ADDR_TO_HIN4_ADDR(nirdm->tuple.flow_ip, addr);
-	ecm_db_connection_to_address_nat_get(fecui->ci, addr);
+	ecm_db_connection_to_address_nat_get(feci->ci, addr);
 	ECM_IP_ADDR_TO_HIN4_ADDR(nirdm->tuple.return_ip, addr);
-	nirdm->tuple.flow_ident = ecm_db_connection_from_port_get(fecui->ci);
-	nirdm->tuple.return_ident = ecm_db_connection_to_port_nat_get(fecui->ci);
+	nirdm->tuple.flow_ident = ecm_db_connection_from_port_get(feci->ci);
+	nirdm->tuple.return_ident = ecm_db_connection_to_port_nat_get(feci->ci);
 
 	DEBUG_INFO("%p: UDP Connection %p decelerate\n"
 			"src_ip: %pI4:%d\n"
 			"dest_ip: %pI4:%d\n",
-			fecui, fecui->ci,
+			fecui, feci->ci,
 			&nirdm->tuple.flow_ip, nirdm->tuple.flow_ident,
 			&nirdm->tuple.return_ip, nirdm->tuple.return_ident);
 
@@ -2986,35 +3181,44 @@ static void ecm_front_end_ipv4_connection_udp_front_end_decelerate(struct ecm_fr
 	 * Take a ref to the feci->ci so that it will persist until we get a response from the NSS.
 	 * NOTE: This will implicitly hold the feci too.
 	 */
-	ecm_db_connection_ref(fecui->ci);
+	ecm_db_connection_ref(feci->ci);
 
 	/*
 	 * Destroy the NSS connection cache entry.
 	 */
 	nss_tx_status = nss_ipv4_tx(ecm_front_end_ipv4_nss_ipv4_mgr, &nim);
 	if (nss_tx_status == NSS_TX_SUCCESS) {
-		spin_lock_bh(&fecui->lock);
-		fecui->base.stats.driver_fail = 0;		/* Reset */
-		spin_unlock_bh(&fecui->lock);
+		spin_lock_bh(&feci->lock);
+		feci->stats.driver_fail = 0;			/* Reset */
+		feci->stats.cmd_time_begun = jiffies;		/* Capture time we issued the command */
+		spin_unlock_bh(&feci->lock);
 		return;
 	}
 
 	/*
 	 * Release the ref take, NSS driver did not accept our command.
 	 */
-	ecm_db_connection_deref(fecui->ci);
+	ecm_db_connection_deref(feci->ci);
 
 	/*
 	 * TX failed
 	 */
-	spin_lock_bh(&fecui->lock);
-	fecui->base.stats.driver_fail_total++;
-	fecui->base.stats.driver_fail++;
-	if (fecui->base.stats.driver_fail >= fecui->base.stats.driver_fail_limit) {
+	spin_lock_bh(&feci->lock);
+	feci->stats.driver_fail_total++;
+	feci->stats.driver_fail++;
+	if (feci->stats.driver_fail >= feci->stats.driver_fail_limit) {
 		DEBUG_WARN("%p: Decel failed - driver fail limit\n", fecui);
-		fecui->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DRIVER;
+		feci->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DRIVER;
 	}
-	spin_unlock_bh(&fecui->lock);
+	spin_unlock_bh(&feci->lock);
+
+	/*
+	 * Could not send the request, decrement the decel pending counter
+	 */
+	spin_lock_bh(&ecm_front_end_ipv4_lock);
+	ecm_front_end_ipv4_pending_decel_count--;
+	DEBUG_ASSERT(ecm_front_end_ipv4_pending_decel_count >= 0, "Bad decel pending counter\n");
+	spin_unlock_bh(&ecm_front_end_ipv4_lock);
 }
 
 /*
@@ -3028,48 +3232,48 @@ static void ecm_front_end_ipv4_connection_udp_defunct_callback(void *arg)
 
 	DEBUG_CHECK_MAGIC(fecui, ECM_FRONT_END_IPV4_CONNECTION_UDP_INSTANCE_MAGIC, "%p: magic failed", fecui);
 
-	spin_lock_bh(&fecui->lock);
+	spin_lock_bh(&feci->lock);
 
 	/*
 	 * If connection has already become defunct, do nothing.
 	 */
-	if (fecui->is_defunct) {
-		spin_unlock_bh(&fecui->lock);
+	if (feci->is_defunct) {
+		spin_unlock_bh(&feci->lock);
 		return;
 	}
-	fecui->is_defunct = true;
+	feci->is_defunct = true;
 
 	/*
 	 * If the connection is already in one of the fail modes, do nothing, keep the current accel_mode.
 	 */
-	if (ECM_FRONT_END_ACCELERATION_FAILED(fecui->accel_mode)) {
-		spin_unlock_bh(&fecui->lock);
+	if (ECM_FRONT_END_ACCELERATION_FAILED(feci->accel_mode)) {
+		spin_unlock_bh(&feci->lock);
 		return;
 	}
 
 	/*
 	 * If the connection is decel then ensure it will not attempt accel while defunct.
 	 */
-	if (fecui->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_DECEL) {
-		fecui->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DEFUNCT;
-		spin_unlock_bh(&fecui->lock);
+	if (feci->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_DECEL) {
+		feci->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DEFUNCT;
+		spin_unlock_bh(&feci->lock);
 		return;
 	}
 
 	/*
 	 * If the connection is decel pending then decel operation is in progress anyway.
 	 */
-	if (fecui->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_DECEL_PENDING) {
-		spin_unlock_bh(&fecui->lock);
+	if (feci->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_DECEL_PENDING) {
+		spin_unlock_bh(&feci->lock);
 		return;
 	}
 
 	/*
-	 * If none of the cases mathes above, this means the connection is in one of the
+	 * If none of the cases matched above, this means the connection is in one of the
 	 * accel modes (accel or accel_pending) so we force a deceleration.
 	 * NOTE: If the mode is accel pending then the decel will be actioned when that is completed.
 	 */
-	spin_unlock_bh(&fecui->lock);
+	spin_unlock_bh(&feci->lock);
 	ecm_front_end_ipv4_connection_udp_front_end_decelerate(feci);
 }
 
@@ -3083,9 +3287,9 @@ static ecm_front_end_acceleration_mode_t ecm_front_end_ipv4_connection_udp_front
 	ecm_front_end_acceleration_mode_t state;
 
 	DEBUG_CHECK_MAGIC(fecui, ECM_FRONT_END_IPV4_CONNECTION_UDP_INSTANCE_MAGIC, "%p: magic failed", fecui);
-	spin_lock_bh(&fecui->lock);
-	state = fecui->accel_mode;
-	spin_unlock_bh(&fecui->lock);
+	spin_lock_bh(&feci->lock);
+	state = feci->accel_mode;
+	spin_unlock_bh(&feci->lock);
 	return state;
 }
 
@@ -3101,9 +3305,9 @@ static void ecm_front_end_ipv4_connection_udp_front_end_action_seen(struct ecm_f
 
 	DEBUG_CHECK_MAGIC(fecui, ECM_FRONT_END_IPV4_CONNECTION_UDP_INSTANCE_MAGIC, "%p: magic failed", fecui);
 	DEBUG_INFO("%p: Action seen\n", fecui);
-	spin_lock_bh(&fecui->lock);
-	fecui->base.stats.no_action_seen = 0;
-	spin_unlock_bh(&fecui->lock);
+	spin_lock_bh(&feci->lock);
+	feci->stats.no_action_seen = 0;
+	spin_unlock_bh(&feci->lock);
 }
 
 /*
@@ -3120,7 +3324,7 @@ static void ecm_front_end_ipv4_connection_udp_front_end_accel_ceased(struct ecm_
 	DEBUG_CHECK_MAGIC(fecui, ECM_FRONT_END_IPV4_CONNECTION_UDP_INSTANCE_MAGIC, "%p: magic failed", fecui);
 	DEBUG_INFO("%p: accel ceased\n", fecui);
 
-	spin_lock_bh(&fecui->lock);
+	spin_lock_bh(&feci->lock);
 
 	/*
 	 * If we are in accel-pending state then the NSS has issued a flush out-of-order
@@ -3128,38 +3332,38 @@ static void ecm_front_end_ipv4_connection_udp_front_end_accel_ceased(struct ecm_
 	 * To work around this we record a "flush has already happened" and will action it when we finally get that ACK/NACK.
 	 * GGG TODO This should eventually be removed when the NSS honours messaging sequence.
 	 */
-	if (fecui->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING) {
-		fecui->base.stats.flush_happened = true;
-		fecui->base.stats.flush_happened_total++;
-		spin_unlock_bh(&fecui->lock);
+	if (feci->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING) {
+		feci->stats.flush_happened = true;
+		feci->stats.flush_happened_total++;
+		spin_unlock_bh(&feci->lock);
 		return;
 	}
 
 	/*
 	 * If connection is no longer accelerated by the time we get here just ignore the command
 	 */
-	if (fecui->accel_mode != ECM_FRONT_END_ACCELERATION_MODE_ACCEL) {
-		spin_unlock_bh(&fecui->lock);
+	if (feci->accel_mode != ECM_FRONT_END_ACCELERATION_MODE_ACCEL) {
+		spin_unlock_bh(&feci->lock);
 		return;
 	}
 
 	/*
 	 * If the no_action_seen counter was not reset then acceleration ended without any offload action
 	 */
-	if (fecui->base.stats.no_action_seen) {
-		fecui->base.stats.no_action_seen_total++;
+	if (feci->stats.no_action_seen) {
+		feci->stats.no_action_seen_total++;
 	}
 
 	/*
 	 * If the no_action_seen indicates successive cessations of acceleration without any offload action occuring
 	 * then we fail out this connection
 	 */
-	if (fecui->base.stats.no_action_seen >= fecui->base.stats.no_action_seen_limit) {
-		fecui->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_NO_ACTION;
+	if (feci->stats.no_action_seen >= feci->stats.no_action_seen_limit) {
+		feci->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_NO_ACTION;
 	} else {
-		fecui->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_DECEL;
+		feci->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_DECEL;
 	}
-	spin_unlock_bh(&fecui->lock);
+	spin_unlock_bh(&feci->lock);
 
 	/*
 	 * UDP acceleration ends
@@ -3181,11 +3385,11 @@ static void ecm_front_end_ipv4_connection_udp_front_end_ref(struct ecm_front_end
 	struct ecm_front_end_ipv4_connection_udp_instance *fecui = (struct ecm_front_end_ipv4_connection_udp_instance *)feci;
 
 	DEBUG_CHECK_MAGIC(fecui, ECM_FRONT_END_IPV4_CONNECTION_UDP_INSTANCE_MAGIC, "%p: magic failed", fecui);
-	spin_lock_bh(&fecui->lock);
-	fecui->refs++;
-	DEBUG_TRACE("%p: fecui ref %d\n", fecui, fecui->refs);
-	DEBUG_ASSERT(fecui->refs > 0, "%p: ref wrap\n", fecui);
-	spin_unlock_bh(&fecui->lock);
+	spin_lock_bh(&feci->lock);
+	feci->refs++;
+	DEBUG_TRACE("%p: fecui ref %d\n", fecui, feci->refs);
+	DEBUG_ASSERT(feci->refs > 0, "%p: ref wrap\n", feci);
+	spin_unlock_bh(&feci->lock);
 }
 
 /*
@@ -3198,17 +3402,17 @@ static int ecm_front_end_ipv4_connection_udp_front_end_deref(struct ecm_front_en
 
 	DEBUG_CHECK_MAGIC(fecui, ECM_FRONT_END_IPV4_CONNECTION_UDP_INSTANCE_MAGIC, "%p: magic failed", fecui);
 
-	spin_lock_bh(&fecui->lock);
-	fecui->refs--;
-	DEBUG_ASSERT(fecui->refs >= 0, "%p: ref wrap\n", fecui);
+	spin_lock_bh(&feci->lock);
+	feci->refs--;
+	DEBUG_ASSERT(feci->refs >= 0, "%p: ref wrap\n", fecui);
 
-	if (fecui->refs > 0) {
-		int refs = fecui->refs;
-		spin_unlock_bh(&fecui->lock);
+	if (feci->refs > 0) {
+		int refs = feci->refs;
+		spin_unlock_bh(&feci->lock);
 		DEBUG_TRACE("%p: fecui deref %d\n", fecui, refs);
 		return refs;
 	}
-	spin_unlock_bh(&fecui->lock);
+	spin_unlock_bh(&feci->lock);
 
 	/*
 	 * We can now destroy the instance
@@ -3217,9 +3421,6 @@ static int ecm_front_end_ipv4_connection_udp_front_end_deref(struct ecm_front_en
 	DEBUG_CLEAR_MAGIC(fecui);
 	kfree(fecui);
 
-	/*
-	 * Thread may be able to exit on object destruction
-	 */
 	return 0;
 }
 
@@ -3236,11 +3437,11 @@ static int ecm_front_end_ipv4_connection_udp_front_end_xml_state_get(struct ecm_
 
 	DEBUG_CHECK_MAGIC(fecui, ECM_FRONT_END_IPV4_CONNECTION_UDP_INSTANCE_MAGIC, "%p: magic failed", fecui);
 
-	spin_lock_bh(&fecui->lock);
-	can_accel = fecui->can_accel;
-	accel_mode = fecui->accel_mode;
+	spin_lock_bh(&feci->lock);
+	can_accel = feci->can_accel;
+	accel_mode = feci->accel_mode;
 	memcpy(&stats, &feci->stats, sizeof(struct ecm_front_end_connection_mode_stats));
-	spin_unlock_bh(&fecui->lock);
+	spin_unlock_bh(&feci->lock);
 
 	return snprintf(buf, buf_sz, "<front_end_udp can_accel=\"%d\" accel_mode=\"%d\" decelerate_pending=\"%d\" flush_happened_total=\"%d\" no_action_seen_total=\"%d\" no_action_seen=\"%d\" no_action_seen_limit=\"%d\""
 				" driver_fail_total=\"%d\" driver_fail=\"%d\" driver_fail_limit=\"%d\" nss_nack_total=\"%d\" nss_nack=\"%d\" nss_nack_limit=\"%d\"/>\n",
@@ -3271,6 +3472,7 @@ static struct ecm_front_end_ipv4_connection_udp_instance *ecm_front_end_ipv4_con
 								bool can_accel)
 {
 	struct ecm_front_end_ipv4_connection_udp_instance *fecui;
+	struct ecm_front_end_connection_instance *feci;
 
 	fecui = (struct ecm_front_end_ipv4_connection_udp_instance *)kzalloc(sizeof(struct ecm_front_end_ipv4_connection_udp_instance), GFP_ATOMIC | __GFP_NOWARN);
 	if (!fecui) {
@@ -3281,33 +3483,34 @@ static struct ecm_front_end_ipv4_connection_udp_instance *ecm_front_end_ipv4_con
 	/*
 	 * Refs is 1 for the creator of the connection
 	 */
-	fecui->refs = 1;
+	feci = (struct ecm_front_end_connection_instance *)fecui;
+	feci->refs = 1;
 	DEBUG_SET_MAGIC(fecui, ECM_FRONT_END_IPV4_CONNECTION_UDP_INSTANCE_MAGIC);
-	spin_lock_init(&fecui->lock);
+	spin_lock_init(&feci->lock);
 
-	fecui->can_accel = can_accel;
-	fecui->accel_mode = (can_accel)? ECM_FRONT_END_ACCELERATION_MODE_DECEL : ECM_FRONT_END_ACCELERATION_MODE_FAIL_DENIED;
+	feci->can_accel = can_accel;
+	feci->accel_mode = (can_accel)? ECM_FRONT_END_ACCELERATION_MODE_DECEL : ECM_FRONT_END_ACCELERATION_MODE_FAIL_DENIED;
 	spin_lock_bh(&ecm_front_end_ipv4_lock);
-	fecui->base.stats.no_action_seen_limit = ecm_front_end_ipv4_no_action_limit_default;
-	fecui->base.stats.driver_fail_limit = ecm_front_end_ipv4_driver_fail_limit_default;
-	fecui->base.stats.nss_nack_limit = ecm_front_end_ipv4_nack_limit_default;
+	feci->stats.no_action_seen_limit = ecm_front_end_ipv4_no_action_limit_default;
+	feci->stats.driver_fail_limit = ecm_front_end_ipv4_driver_fail_limit_default;
+	feci->stats.nss_nack_limit = ecm_front_end_ipv4_nack_limit_default;
 	spin_unlock_bh(&ecm_front_end_ipv4_lock);
 
 	/*
 	 * Copy reference to connection - no need to ref ci as ci maintains a ref to this instance instead (this instance persists for as long as ci does)
 	 */
-	fecui->ci = ci;
+	feci->ci = ci;
 
 	/*
 	 * Populate the methods and callbacks
 	 */
-	fecui->base.ref = ecm_front_end_ipv4_connection_udp_front_end_ref;
-	fecui->base.deref = ecm_front_end_ipv4_connection_udp_front_end_deref;
-	fecui->base.decelerate = ecm_front_end_ipv4_connection_udp_front_end_decelerate;
-	fecui->base.accel_state_get = ecm_front_end_ipv4_connection_udp_front_end_accel_state_get;
-	fecui->base.action_seen = ecm_front_end_ipv4_connection_udp_front_end_action_seen;
-	fecui->base.accel_ceased = ecm_front_end_ipv4_connection_udp_front_end_accel_ceased;
-	fecui->base.xml_state_get = ecm_front_end_ipv4_connection_udp_front_end_xml_state_get;
+	feci->ref = ecm_front_end_ipv4_connection_udp_front_end_ref;
+	feci->deref = ecm_front_end_ipv4_connection_udp_front_end_deref;
+	feci->decelerate = ecm_front_end_ipv4_connection_udp_front_end_decelerate;
+	feci->accel_state_get = ecm_front_end_ipv4_connection_udp_front_end_accel_state_get;
+	feci->action_seen = ecm_front_end_ipv4_connection_udp_front_end_action_seen;
+	feci->accel_ceased = ecm_front_end_ipv4_connection_udp_front_end_accel_ceased;
+	feci->xml_state_get = ecm_front_end_ipv4_connection_udp_front_end_xml_state_get;
 
 	return fecui;
 }
@@ -3332,7 +3535,7 @@ static void ecm_front_end_ipv4_sit_set_peer(struct ecm_front_end_ipv4_connection
 	nss_tx_status_t nss_tx_status;
 
 	DEBUG_CHECK_MAGIC(fecnpi, ECM_FRONT_END_IPV4_CONNECTION_NON_PORTED_INSTANCE_MAGIC, "%p: magic failed", fecnpi);
-	from_ifaces_first = ecm_db_connection_from_interfaces_get_and_ref(fecnpi->ci, from_ifaces);
+	from_ifaces_first = ecm_db_connection_from_interfaces_get_and_ref(fecnpi->base.ci, from_ifaces);
 	if (from_ifaces_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 		DEBUG_WARN("%p: Accel attempt failed - no interfaces in from_interfaces list!\n", fecnpi);
 		return;
@@ -3357,7 +3560,7 @@ static void ecm_front_end_ipv4_sit_set_peer(struct ecm_front_end_ipv4_connection
 		ecm_db_connection_interfaces_deref(from_ifaces, from_ifaces_first);
 		return;
 	}
-	ecm_db_connection_to_address_get(fecnpi->ci, addr);
+	ecm_db_connection_to_address_get(fecnpi->base.ci, addr);
 
 	interface_number = ecm_db_iface_nss_interface_identifier_get(from_nss_iface);
 	nss_tun6rd_msg_init(&tun6rdmsg, interface_number, NSS_TUN6RD_ADD_UPDATE_PEER,
@@ -3398,6 +3601,7 @@ static void ecm_front_end_ipv4_connection_non_ported_callback(void *app_data, st
 	struct ecm_db_connection_instance *ci;
 	struct ecm_front_end_connection_instance *feci;
 	struct ecm_front_end_ipv4_connection_non_ported_instance *fecnpi;
+	ecm_front_end_acceleration_mode_t result_mode;
 
 	/*
 	 * Is this a response to a create message?
@@ -3431,9 +3635,14 @@ static void ecm_front_end_ipv4_connection_non_ported_callback(void *app_data, st
 	DEBUG_CHECK_MAGIC(fecnpi, ECM_FRONT_END_IPV4_CONNECTION_NON_PORTED_INSTANCE_MAGIC, "%p: magic failed", fecnpi);
 
 	/*
+	 * Record command duration
+	 */
+	ecm_front_end_ipv4_accel_done_time_update(feci);
+
+	/*
 	 * Dump some useful trace information.
 	 */
-	DEBUG_TRACE("%p: accelerate response for connection: %p, serial: %u\n", fecnpi, fecnpi->ci, serial);
+	DEBUG_TRACE("%p: accelerate response for connection: %p, serial: %u\n", fecnpi, feci->ci, serial);
 	DEBUG_TRACE("%p: rule_flags: %x, valid_flags: %x\n", fecnpi, nircm->rule_flags, nircm->valid_flags);
 	DEBUG_TRACE("%p: flow_ip: %pI4h:%d\n", fecnpi, &nircm->tuple.flow_ip, nircm->tuple.flow_ident);
 	DEBUG_TRACE("%p: return_ip: %pI4h:%d\n", fecnpi, &nircm->tuple.return_ip, nircm->tuple.return_ident);
@@ -3448,34 +3657,34 @@ static void ecm_front_end_ipv4_connection_non_ported_callback(void *app_data, st
 		 * Creation command failed (specific reason ignored).
 		 */
 		DEBUG_TRACE("%p: accel nack: %d\n", fecnpi, nim->cm.error);
-		spin_lock_bh(&fecnpi->lock);
-		DEBUG_ASSERT(fecnpi->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING, "%p: Unexpected mode: %d\n", ci, fecnpi->accel_mode);
-		fecnpi->base.stats.nss_nack++;
-		fecnpi->base.stats.nss_nack_total++;
-		if (fecnpi->base.stats.nss_nack >= fecnpi->base.stats.nss_nack_limit) {
+		spin_lock_bh(&feci->lock);
+		DEBUG_ASSERT(feci->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING, "%p: Unexpected mode: %d\n", ci, feci->accel_mode);
+		feci->stats.nss_nack++;
+		feci->stats.nss_nack_total++;
+		if (feci->stats.nss_nack >= feci->stats.nss_nack_limit) {
 			/*
 			 * Too many NSS rejections
 			 */
-			fecnpi->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_NSS;
+			result_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_NSS;
 		} else {
 			/*
 			 * Revert to decelerated
 			 */
-			fecnpi->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_DECEL;
+			result_mode = ECM_FRONT_END_ACCELERATION_MODE_DECEL;
 		}
-
-		/*
-		 * Clear any decelerate pending flag since we aren't accelerated anyway we can just clear this whether it is set or not
-		 */
-		fecnpi->base.stats.decelerate_pending = false;
 
 		/*
 		 * If connection is now defunct then set mode to ensure no further accel attempts occur
 		 */
-		if (fecnpi->is_defunct) {
-			fecnpi->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DEFUNCT;
+		if (feci->is_defunct) {
+			result_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DEFUNCT;
 		}
-		spin_unlock_bh(&fecnpi->lock);
+
+		spin_lock_bh(&ecm_front_end_ipv4_lock);
+		_ecm_front_end_ipv4_accel_pending_clear(feci, result_mode);
+		spin_unlock_bh(&ecm_front_end_ipv4_lock);
+
+		spin_unlock_bh(&feci->lock);
 
 		/*
 		 * Release the connection.
@@ -3485,27 +3694,26 @@ static void ecm_front_end_ipv4_connection_non_ported_callback(void *app_data, st
 		return;
 	}
 
-	spin_lock_bh(&fecnpi->lock);
-	DEBUG_ASSERT(fecnpi->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING, "%p: Unexpected mode: %d\n", ci, fecnpi->accel_mode);
+	spin_lock_bh(&feci->lock);
+	DEBUG_ASSERT(feci->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING, "%p: Unexpected mode: %d\n", ci, feci->accel_mode);
 
 	/*
 	 * If a flush occured before we got the ACK then our acceleration was effectively cancelled on us
 	 * GGG TODO This is a workaround for a NSS message OOO quirk, this should eventually be removed.
 	 */
-	if (fecnpi->base.stats.flush_happened) {
-		fecnpi->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_DECEL;
-		fecnpi->base.stats.flush_happened = false;
+	if (feci->stats.flush_happened) {
+		feci->stats.flush_happened = false;
 
 		/*
-		 * We are decelerated, clear any pending flag as that is meaningless now.
+		 * Increment the no-action counter.  Our connectin was decelerated on us with no action occurring.
 		 */
-		fecnpi->base.stats.decelerate_pending = false;
+		feci->stats.no_action_seen++;
 
-		/*
-		 * Increement the no-action counter.  Our connectin was decelerated on us with no action occurring.
-		 */
-		fecnpi->base.stats.no_action_seen++;
-		spin_unlock_bh(&fecnpi->lock);
+		spin_lock_bh(&ecm_front_end_ipv4_lock);
+		_ecm_front_end_ipv4_accel_pending_clear(feci, ECM_FRONT_END_ACCELERATION_MODE_DECEL);
+		spin_unlock_bh(&ecm_front_end_ipv4_lock);
+
+		spin_unlock_bh(&feci->lock);
 
 		/*
 		 * Release the connection.
@@ -3516,34 +3724,35 @@ static void ecm_front_end_ipv4_connection_non_ported_callback(void *app_data, st
 	}
 
 	/*
-	 * We got an ACK - we are accelerated.
+	 * Create succeeded
 	 */
-	fecnpi->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_ACCEL;
-
-	/*
-	 * Create succeeded, declare that we are accelerated.
-	 */
-	spin_lock_bh(&ecm_front_end_ipv4_lock);
-	ecm_front_end_ipv4_non_ported_accelerated_count++;	/* Protocol specific counter */
-	ecm_front_end_ipv4_accelerated_count++;			/* General running counter */
-	spin_unlock_bh(&ecm_front_end_ipv4_lock);
 
 	/*
 	 * Clear any nack count
 	 */
-	fecnpi->base.stats.nss_nack = 0;
+	feci->stats.nss_nack = 0;
 
 	/*
-	 * Decelerate may have been attempted while we were accel pending.
-	 * If decelerate is pending then we need to begin deceleration :-(
+	 * Clear the "accelerate pending" state and move to "accelerated" state bumping
+	 * the accelerated counters to match our new state.
+	 *
+	 * Decelerate may have been attempted while we were "pending accel" and
+	 * this function will return true if that was the case.
+	 * If decelerate was pending then we need to begin deceleration :-(
 	 */
-	if (!fecnpi->base.stats.decelerate_pending) {
-		/*
-		 * Increement the no-action counter, this is reset if offload action is seen
-		 */
-		fecnpi->base.stats.no_action_seen++;
+	spin_lock_bh(&ecm_front_end_ipv4_lock);
 
-		spin_unlock_bh(&fecnpi->lock);
+	ecm_front_end_ipv4_non_ported_accelerated_count++;	/* Protocol specific counter */
+	ecm_front_end_ipv4_accelerated_count++;			/* General running counter */
+
+	if (!_ecm_front_end_ipv4_accel_pending_clear(feci, ECM_FRONT_END_ACCELERATION_MODE_ACCEL)) {
+		/*
+		 * Increment the no-action counter, this is reset if offload action is seen
+		 */
+		feci->stats.no_action_seen++;
+
+		spin_unlock_bh(&ecm_front_end_ipv4_lock);
+		spin_unlock_bh(&feci->lock);
 
 		/*
 		 * Release the connection.
@@ -3554,8 +3763,9 @@ static void ecm_front_end_ipv4_connection_non_ported_callback(void *app_data, st
 	}
 
 	DEBUG_INFO("%p: Decelerate was pending\n", ci);
-	fecnpi->base.stats.decelerate_pending = false;
-	spin_unlock_bh(&fecnpi->lock);
+
+	spin_unlock_bh(&ecm_front_end_ipv4_lock);
+	spin_unlock_bh(&feci->lock);
 
 	feci->decelerate(feci);
 
@@ -3600,45 +3810,29 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_accelerate(struct
 	bool rule_invalid;
 	uint8_t dest_mac_xlate[ETH_ALEN];
 	ecm_db_direction_t ecm_dir;
+	ecm_front_end_acceleration_mode_t result_mode;
 
 	DEBUG_CHECK_MAGIC(fecnpi, ECM_FRONT_END_IPV4_CONNECTION_NON_PORTED_INSTANCE_MAGIC, "%p: magic failed", fecnpi);
 
 	/*
-	 * Get connection protocol
-	 */
-	protocol = ecm_db_connection_protocol_get(fecnpi->ci);
-
-	/*
-	 * Can this connection be accelerated at all?
-	 */
-	DEBUG_INFO("%p: Accel conn: %p\n", fecnpi, fecnpi->ci);
-	spin_lock_bh(&fecnpi->lock);
-	if (ECM_FRONT_END_ACCELERATION_FAILED(fecnpi->accel_mode)) {
-		spin_unlock_bh(&fecnpi->lock);
-		DEBUG_TRACE("%p: accel %p denied\n", fecnpi, fecnpi->ci);
-		return;
-	}
-
-	/*
 	 * For non-ported protocols we only support IPv6 in 4 or ESP
 	 */
+	protocol = ecm_db_connection_protocol_get(feci->ci);
 	if ((protocol != IPPROTO_IPV6) && (protocol != IPPROTO_ESP)) {
-		fecnpi->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_RULE;
-		spin_unlock_bh(&fecnpi->lock);
+		spin_lock_bh(&feci->lock);
+		feci->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_RULE;
+		spin_unlock_bh(&feci->lock);
 		DEBUG_TRACE("%p: unsupported protocol: %d\n", fecnpi, protocol);
 		return;
 	}
 
 	/*
-	 * If acceleration mode is anything other than "not accelerated" then ignore.
+	 * Test if acceleration is permitted
 	 */
-	if (fecnpi->accel_mode != ECM_FRONT_END_ACCELERATION_MODE_DECEL) {
-		spin_unlock_bh(&fecnpi->lock);
-		DEBUG_TRACE("%p: Ignoring wrong mode accel for conn: %p\n", fecnpi, fecnpi->ci);
+	if (!ecm_front_end_ipv4_accel_pending_set(feci)) {
+		DEBUG_TRACE("%p: Acceleration not permitted: %p\n", feci, feci->ci);
 		return;
 	}
-	fecnpi->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING;
-	spin_unlock_bh(&fecnpi->lock);
 
 	/*
 	 * Okay construct an accel command.
@@ -3650,7 +3844,7 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_accelerate(struct
 	nss_ipv4_msg_init(&nim, NSS_IPV4_RX_INTERFACE, NSS_IPV4_TX_CREATE_RULE_MSG,
 			sizeof(struct nss_ipv4_rule_create_msg),
 			(nss_ipv4_msg_callback_t *)ecm_front_end_ipv4_connection_non_ported_callback,
-			(void *)ecm_db_connection_serial_get(fecnpi->ci));
+			(void *)ecm_db_connection_serial_get(feci->ci));
 
 	nircm = &nim.msg.rule_create;
 	nircm->valid_flags = 0;
@@ -3667,13 +3861,13 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_accelerate(struct
 	/*
 	 * Get the interface lists of the connection, we must have at least one interface in the list to continue
 	 */
-	from_ifaces_first = ecm_db_connection_from_interfaces_get_and_ref(fecnpi->ci, from_ifaces);
+	from_ifaces_first = ecm_db_connection_from_interfaces_get_and_ref(feci->ci, from_ifaces);
 	if (from_ifaces_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 		DEBUG_WARN("%p: Accel attempt failed - no interfaces in from_interfaces list!\n", fecnpi);
 		goto non_ported_accel_bad_rule;
 	}
 
-	to_ifaces_first = ecm_db_connection_to_interfaces_get_and_ref(fecnpi->ci, to_ifaces);
+	to_ifaces_first = ecm_db_connection_to_interfaces_get_and_ref(feci->ci, to_ifaces);
 	if (to_ifaces_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 		DEBUG_WARN("%p: Accel attempt failed - no interfaces in to_interfaces list!\n", fecnpi);
 		ecm_db_connection_interfaces_deref(from_ifaces, from_ifaces_first);
@@ -4042,7 +4236,7 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_accelerate(struct
 	/*
 	 * Routed or bridged?
 	 */
-	if (ecm_db_connection_is_routed_get(fecnpi->ci)) {
+	if (ecm_db_connection_is_routed_get(feci->ci)) {
 		nircm->rule_flags |= NSS_IPV4_RULE_CREATE_FLAG_ROUTED;
 	} else {
 		nircm->rule_flags |= NSS_IPV4_RULE_CREATE_FLAG_BRIDGE_FLOW;
@@ -4073,7 +4267,7 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_accelerate(struct
 	/*
 	 * The flow_ip is where the connection established from
 	 */
-	ecm_db_connection_from_address_get(fecnpi->ci, addr);
+	ecm_db_connection_from_address_get(feci->ci, addr);
 	ECM_IP_ADDR_TO_HIN4_ADDR(nircm->tuple.flow_ip, addr);
 
 	/*
@@ -4082,7 +4276,7 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_accelerate(struct
 	 * Getting the NAT'ed version here works for ingress or egress packets, for egress
 	 * the NAT'ed version would be the same as the normal address
 	 */
-	ecm_db_connection_to_address_nat_get(fecnpi->ci, addr);
+	ecm_db_connection_to_address_nat_get(feci->ci, addr);
 	ECM_IP_ADDR_TO_HIN4_ADDR(nircm->tuple.return_ip, addr);
 
 	/*
@@ -4090,45 +4284,45 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_accelerate(struct
 	 * packet should be translated to.  For egress this is the NAT'ed from address.
 	 * This also works for ingress as the NAT'ed version of the WAN host would be the same as non-NAT'ed
 	 */
-	ecm_db_connection_from_address_nat_get(fecnpi->ci, addr);
+	ecm_db_connection_from_address_nat_get(feci->ci, addr);
 	ECM_IP_ADDR_TO_HIN4_ADDR(nircm->conn_rule.flow_ip_xlate, addr);
 
 	/*
 	 * The destination address is what the destination IP is translated to as it is forwarded to the next interface.
 	 * For egress this would yield the normal wan host and for ingress this would correctly NAT back to the LAN host
 	 */
-	ecm_db_connection_to_address_get(fecnpi->ci, addr);
+	ecm_db_connection_to_address_get(feci->ci, addr);
 	ECM_IP_ADDR_TO_HIN4_ADDR(nircm->conn_rule.return_ip_xlate, addr);
 
 	/*
 	 * Same approach as above for port information
 	 */
-	nircm->tuple.flow_ident = ecm_db_connection_from_port_get(fecnpi->ci);
-	nircm->tuple.return_ident = ecm_db_connection_to_port_nat_get(fecnpi->ci);
-	nircm->conn_rule.flow_ident_xlate = ecm_db_connection_from_port_nat_get(fecnpi->ci);
-	nircm->conn_rule.return_ident_xlate = ecm_db_connection_to_port_get(fecnpi->ci);
+	nircm->tuple.flow_ident = ecm_db_connection_from_port_get(feci->ci);
+	nircm->tuple.return_ident = ecm_db_connection_to_port_nat_get(feci->ci);
+	nircm->conn_rule.flow_ident_xlate = ecm_db_connection_from_port_nat_get(feci->ci);
+	nircm->conn_rule.return_ident_xlate = ecm_db_connection_to_port_get(feci->ci);
 
 	/*
 	 * Get mac addresses.
 	 * The src_mac is the mac address of the node that established the connection.
 	 * This will work whether the from_node is LAN (egress) or WAN (ingress).
 	 */
-	ecm_db_connection_from_node_address_get(fecnpi->ci, (uint8_t *)nircm->conn_rule.flow_mac);
+	ecm_db_connection_from_node_address_get(feci->ci, (uint8_t *)nircm->conn_rule.flow_mac);
 
 	/*
 	 * The dest_mac is more complex.  For egress it is the node address of the 'to' side of the connection.
 	 * For ingress it is the node adress of the NAT'ed 'to' IP.
 	 * Essentially it is the MAC of node associated with create.dest_ip and this is "to nat" side.
 	 */
-	ecm_db_connection_to_nat_node_address_get(fecnpi->ci, (uint8_t *)nircm->conn_rule.return_mac);
+	ecm_db_connection_to_nat_node_address_get(feci->ci, (uint8_t *)nircm->conn_rule.return_mac);
 
 	/*
 	 * The dest_mac_xlate is the mac address to replace the pkt.dst_mac when a packet is sent to->from
 	 * For bridged connections this does not change.
 	 * For routed connections this is the mac of the 'to' node side of the connection.
 	 */
-	if (ecm_db_connection_is_routed_get(fecnpi->ci)) {
-		ecm_db_connection_to_node_address_get(fecnpi->ci, dest_mac_xlate);
+	if (ecm_db_connection_is_routed_get(feci->ci)) {
+		ecm_db_connection_to_node_address_get(feci->ci, dest_mac_xlate);
 	} else {
 		/*
 		 * Bridge flows preserve the MAC addressing
@@ -4142,7 +4336,7 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_accelerate(struct
 	 * ip_dest_addr. So, above we get the mac address of this host and use that mac address
 	 * for the destination node address in NAT'ed cases.
 	 */
-	ecm_dir = ecm_db_connection_direction_get(fecnpi->ci);
+	ecm_dir = ecm_db_connection_direction_get(feci->ci);
 	if ((ecm_dir == ECM_DB_DIRECTION_INGRESS_NAT) || (ecm_dir == ECM_DB_DIRECTION_EGRESS_NAT)) {
 		memcpy(nircm->conn_rule.return_mac, dest_mac_xlate, ETH_ALEN);
 	}
@@ -4150,8 +4344,8 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_accelerate(struct
 	/*
 	 * Get MTU information
 	 */
-	nircm->conn_rule.flow_mtu = (uint32_t)ecm_db_connection_from_iface_mtu_get(fecnpi->ci);
-	nircm->conn_rule.return_mtu = (uint32_t)ecm_db_connection_to_iface_mtu_get(fecnpi->ci);
+	nircm->conn_rule.flow_mtu = (uint32_t)ecm_db_connection_from_iface_mtu_get(feci->ci);
+	nircm->conn_rule.return_mtu = (uint32_t)ecm_db_connection_to_iface_mtu_get(feci->ci);
 
 	/*
 	 * Sync our creation command from the assigned classifiers to get specific additional creation rules.
@@ -4159,7 +4353,7 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_accelerate(struct
 	 * override any preceding classifiers.
 	 * This also gives the classifiers a chance to see that acceleration is being attempted.
 	 */
-	assignment_count = ecm_db_connection_classifier_assignments_get_and_ref(fecnpi->ci, assignments);
+	assignment_count = ecm_db_connection_classifier_assignments_get_and_ref(feci->ci, assignments);
 	for (aci_index = 0; aci_index < assignment_count; ++aci_index) {
 		struct ecm_classifier_instance *aci;
 
@@ -4202,7 +4396,7 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_accelerate(struct
 			"flow_dscp: %x\n"
 			"return_dscp: %x\n",
 			fecnpi,
-			fecnpi->ci,
+			feci->ci,
 			nircm->tuple.protocol,
 			nircm->conn_rule.flow_mtu,
 			nircm->conn_rule.return_mtu,
@@ -4235,37 +4429,45 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_accelerate(struct
 	 * the callback function can trust the correct ref was taken for its purpose.
 	 * NOTE: remember that this will also implicitly hold the feci.
 	 */
-	ecm_db_connection_ref(fecnpi->ci);
+	ecm_db_connection_ref(feci->ci);
 
 	/*
 	 * Call the rule create function
 	 */
 	nss_tx_status = nss_ipv4_tx(ecm_front_end_ipv4_nss_ipv4_mgr, &nim);
 	if (nss_tx_status == NSS_TX_SUCCESS) {
-		spin_lock_bh(&fecnpi->lock);
-		DEBUG_ASSERT(fecnpi->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING, "%p: Accel mode unexpected: %d\n", fecnpi, fecnpi->accel_mode);
-		fecnpi->base.stats.driver_fail = 0;		/* Reset */
-		spin_unlock_bh(&fecnpi->lock);
+		spin_lock_bh(&feci->lock);
+		DEBUG_ASSERT(feci->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING, "%p: Accel mode unexpected: %d\n", fecnpi, feci->accel_mode);
+		feci->stats.driver_fail = 0;			/* Reset */
+		feci->stats.cmd_time_begun = jiffies;		/* Capture time we issued the command */
+		spin_unlock_bh(&feci->lock);
 		return;
 	}
 
 	/*
 	 * Release that ref!
 	 */
-	ecm_db_connection_deref(fecnpi->ci);
+	ecm_db_connection_deref(feci->ci);
 
 	/*
 	 * TX failed
 	 */
-	spin_lock_bh(&fecnpi->lock);
-	DEBUG_ASSERT(fecnpi->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING, "%p: Accel mode unexpected: %d\n", fecnpi, fecnpi->accel_mode);
-	fecnpi->base.stats.driver_fail_total++;
-	fecnpi->base.stats.driver_fail++;
-	if (fecnpi->base.stats.driver_fail >= fecnpi->base.stats.driver_fail_limit) {
+	spin_lock_bh(&feci->lock);
+	DEBUG_ASSERT(feci->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING, "%p: Accel mode unexpected: %d\n", fecnpi, feci->accel_mode);
+	feci->stats.driver_fail_total++;
+	feci->stats.driver_fail++;
+	if (feci->stats.driver_fail >= feci->stats.driver_fail_limit) {
 		DEBUG_WARN("%p: Accel failed - driver fail limit\n", fecnpi);
-		fecnpi->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DRIVER;
+		result_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DRIVER;
+	} else {
+		result_mode = ECM_FRONT_END_ACCELERATION_MODE_DECEL;
 	}
-	spin_unlock_bh(&fecnpi->lock);
+
+	spin_lock_bh(&ecm_front_end_ipv4_lock);
+	_ecm_front_end_ipv4_accel_pending_clear(feci, result_mode);
+	spin_unlock_bh(&ecm_front_end_ipv4_lock);
+
+	spin_unlock_bh(&feci->lock);
 	return;
 
 non_ported_accel_bad_rule:
@@ -4275,10 +4477,7 @@ non_ported_accel_bad_rule:
 	 * Jump to here when rule data is bad and an offload command cannot be constructed
 	 */
 	DEBUG_WARN("%p: Accel failed - bad rule\n", fecnpi);
-	spin_lock_bh(&fecnpi->lock);
-	DEBUG_ASSERT(fecnpi->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING, "%p: Accel mode unexpected: %d\n", fecnpi, fecnpi->accel_mode);
-	fecnpi->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_RULE;
-	spin_unlock_bh(&fecnpi->lock);
+	ecm_front_end_ipv4_accel_pending_clear(feci, ECM_FRONT_END_ACCELERATION_MODE_FAIL_RULE);
 }
 
 /*
@@ -4325,21 +4524,34 @@ static void ecm_front_end_ipv4_connection_non_ported_destroy_callback(void *app_
 	DEBUG_CHECK_MAGIC(fecnpi, ECM_FRONT_END_IPV4_CONNECTION_NON_PORTED_INSTANCE_MAGIC, "%p: magic failed", fecnpi);
 
 	/*
+	 * Record command duration
+	 */
+	ecm_front_end_ipv4_decel_done_time_update(feci);
+
+	/*
 	 * Dump some useful trace information.
 	 */
-	DEBUG_TRACE("%p: decelerate response for connection: %p\n", fecnpi, fecnpi->ci);
+	DEBUG_TRACE("%p: decelerate response for connection: %p\n", fecnpi, feci->ci);
 	DEBUG_TRACE("%p: flow_ip: %pI4h:%d\n", fecnpi, &nirdm->tuple.flow_ip, nirdm->tuple.flow_ident);
 	DEBUG_TRACE("%p: return_ip: %pI4h:%d\n", fecnpi, &nirdm->tuple.return_ip, nirdm->tuple.return_ident);
 	DEBUG_TRACE("%p: protocol: %d\n", fecnpi, nirdm->tuple.protocol);
 
-	spin_lock_bh(&fecnpi->lock);
+	/*
+	 * Drop decel pending counter
+	 */
+	spin_lock_bh(&ecm_front_end_ipv4_lock);
+	ecm_front_end_ipv4_pending_decel_count--;
+	DEBUG_ASSERT(ecm_front_end_ipv4_pending_decel_count >= 0, "Bad decel pending counter\n");
+	spin_unlock_bh(&ecm_front_end_ipv4_lock);
+
+	spin_lock_bh(&feci->lock);
 
 	/*
 	 * If decel is not still pending then it's possible that the NSS ended acceleration by some other reason e.g. flush
 	 * In which case we cannot rely on the response we get here.
 	 */
-	if (fecnpi->accel_mode != ECM_FRONT_END_ACCELERATION_MODE_DECEL_PENDING) {
-		spin_unlock_bh(&fecnpi->lock);
+	if (feci->accel_mode != ECM_FRONT_END_ACCELERATION_MODE_DECEL_PENDING) {
+		spin_unlock_bh(&feci->lock);
 
 		/*
 		 * Release the connections.
@@ -4351,18 +4563,18 @@ static void ecm_front_end_ipv4_connection_non_ported_destroy_callback(void *app_
 
 	DEBUG_TRACE("%p: response: %d\n", fecnpi, nim->cm.response);
 	if (nim->cm.response != NSS_CMN_RESPONSE_ACK) {
-		fecnpi->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DECEL;
+		feci->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DECEL;
 	} else {
-		fecnpi->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_DECEL;
+		feci->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_DECEL;
 	}
 
 	/*
 	 * If connection became defunct then set mode so that no further accel/decel attempts occur.
 	 */
-	if (fecnpi->is_defunct) {
-		fecnpi->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DEFUNCT;
+	if (feci->is_defunct) {
+		feci->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DEFUNCT;
 	}
-	spin_unlock_bh(&fecnpi->lock);
+	spin_unlock_bh(&feci->lock);
 
 	/*
 	 * NON_PORTED acceleration ends
@@ -4399,7 +4611,7 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_decelerate(struct
 	/*
 	 * For non-ported protocols we only support IPv6 in 4 or ESP
 	 */
-	protocol = ecm_db_connection_protocol_get(fecnpi->ci);
+	protocol = ecm_db_connection_protocol_get(feci->ci);
 	if ((protocol != IPPROTO_IPV6) && (protocol != IPPROTO_ESP)) {
 		DEBUG_TRACE("%p: unsupported protocol: %d\n", fecnpi, protocol);
 		return;
@@ -4408,9 +4620,9 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_decelerate(struct
 	/*
 	 * If decelerate is in error or already pending then ignore
 	 */
-	spin_lock_bh(&fecnpi->lock);
-	if (fecnpi->base.stats.decelerate_pending) {
-		spin_unlock_bh(&fecnpi->lock);
+	spin_lock_bh(&feci->lock);
+	if (feci->stats.decelerate_pending) {
+		spin_unlock_bh(&feci->lock);
 		return;
 	}
 
@@ -4418,9 +4630,9 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_decelerate(struct
 	 * If acceleration is pending then we cannot decelerate right now or we will race with it
 	 * Set a decelerate pending flag that will be actioned when the acceleration command is complete.
 	 */
-	if (fecnpi->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING) {
-		fecnpi->base.stats.decelerate_pending = true;
-		spin_unlock_bh(&fecnpi->lock);
+	if (feci->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING) {
+		feci->stats.decelerate_pending = true;
+		spin_unlock_bh(&feci->lock);
 		return;
 	}
 
@@ -4428,16 +4640,23 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_decelerate(struct
 	 * Can only decelerate if accelerated
 	 * NOTE: This will also deny accel when the connection is in fail condition too.
 	 */
-	if (fecnpi->accel_mode != ECM_FRONT_END_ACCELERATION_MODE_ACCEL) {
-		spin_unlock_bh(&fecnpi->lock);
+	if (feci->accel_mode != ECM_FRONT_END_ACCELERATION_MODE_ACCEL) {
+		spin_unlock_bh(&feci->lock);
 		return;
 	}
 
 	/*
 	 * Initiate deceleration
 	 */
-	fecnpi->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_DECEL_PENDING;
-	spin_unlock_bh(&fecnpi->lock);
+	feci->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_DECEL_PENDING;
+	spin_unlock_bh(&feci->lock);
+
+	/*
+	 * Increment the decel pending counter
+	 */
+	spin_lock_bh(&ecm_front_end_ipv4_lock);
+	ecm_front_end_ipv4_pending_decel_count++;
+	spin_unlock_bh(&ecm_front_end_ipv4_lock);
 
 	/*
 	 * Prepare deceleration message
@@ -4445,7 +4664,7 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_decelerate(struct
 	nss_ipv4_msg_init(&nim, NSS_IPV4_RX_INTERFACE, NSS_IPV4_TX_DESTROY_RULE_MSG,
 			sizeof(struct nss_ipv4_rule_destroy_msg),
 			(nss_ipv4_msg_callback_t *)ecm_front_end_ipv4_connection_non_ported_destroy_callback,
-			(void *)ecm_db_connection_serial_get(fecnpi->ci));
+			(void *)ecm_db_connection_serial_get(feci->ci));
 
 	nirdm = &nim.msg.rule_destroy;
 	nirdm->tuple.protocol = (int32_t)protocol;
@@ -4453,18 +4672,18 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_decelerate(struct
 	/*
 	 * Get addressing information
 	 */
-	ecm_db_connection_from_address_get(fecnpi->ci, addr);
+	ecm_db_connection_from_address_get(feci->ci, addr);
 	ECM_IP_ADDR_TO_HIN4_ADDR(nirdm->tuple.flow_ip, addr);
-	ecm_db_connection_to_address_nat_get(fecnpi->ci, addr);
+	ecm_db_connection_to_address_nat_get(feci->ci, addr);
 	ECM_IP_ADDR_TO_HIN4_ADDR(nirdm->tuple.return_ip, addr);
-	nirdm->tuple.flow_ident = ecm_db_connection_from_port_get(fecnpi->ci);
-	nirdm->tuple.return_ident = ecm_db_connection_to_port_nat_get(fecnpi->ci);
+	nirdm->tuple.flow_ident = ecm_db_connection_from_port_get(feci->ci);
+	nirdm->tuple.return_ident = ecm_db_connection_to_port_nat_get(feci->ci);
 
 	DEBUG_INFO("%p: Non-Ported Connection %p decelerate\n"
 			"protocol: %d\n"
 			"src_ip: %pI4:%d\n"
 			"dest_ip: %pI4:%d\n",
-			fecnpi, fecnpi->ci, protocol,
+			fecnpi, feci->ci, protocol,
 			&nirdm->tuple.flow_ip, nirdm->tuple.flow_ident,
 			&nirdm->tuple.return_ip, nirdm->tuple.return_ident);
 
@@ -4472,35 +4691,44 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_decelerate(struct
 	 * Take a ref to the feci->ci so that it will persist until we get a response from the NSS.
 	 * NOTE: This will implicitly hold the feci too.
 	 */
-	ecm_db_connection_ref(fecnpi->ci);
+	ecm_db_connection_ref(feci->ci);
 
 	/*
 	 * Destroy the NSS connection cache entry.
 	 */
 	nss_tx_status = nss_ipv4_tx(ecm_front_end_ipv4_nss_ipv4_mgr, &nim);
 	if (nss_tx_status == NSS_TX_SUCCESS) {
-		spin_lock_bh(&fecnpi->lock);
-		fecnpi->base.stats.driver_fail = 0;		/* Reset */
-		spin_unlock_bh(&fecnpi->lock);
+		spin_lock_bh(&feci->lock);
+		feci->stats.driver_fail = 0;			/* Reset */
+		feci->stats.cmd_time_begun = jiffies;		/* Capture time we issued the command */
+		spin_unlock_bh(&feci->lock);
 		return;
 	}
 
 	/*
 	 * Release the ref take, NSS driver did not accept our command.
 	 */
-	ecm_db_connection_deref(fecnpi->ci);
+	ecm_db_connection_deref(feci->ci);
 
 	/*
 	 * TX failed
 	 */
-	spin_lock_bh(&fecnpi->lock);
-	fecnpi->base.stats.driver_fail_total++;
-	fecnpi->base.stats.driver_fail++;
-	if (fecnpi->base.stats.driver_fail >= fecnpi->base.stats.driver_fail_limit) {
+	spin_lock_bh(&feci->lock);
+	feci->stats.driver_fail_total++;
+	feci->stats.driver_fail++;
+	if (feci->stats.driver_fail >= feci->stats.driver_fail_limit) {
 		DEBUG_WARN("%p: Decel failed - driver fail limit\n", fecnpi);
-		fecnpi->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DRIVER;
+		feci->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DRIVER;
 	}
-	spin_unlock_bh(&fecnpi->lock);
+	spin_unlock_bh(&feci->lock);
+
+	/*
+	 * Could not send the request, decrement the decel pending counter
+	 */
+	spin_lock_bh(&ecm_front_end_ipv4_lock);
+	ecm_front_end_ipv4_pending_decel_count--;
+	DEBUG_ASSERT(ecm_front_end_ipv4_pending_decel_count >= 0, "Bad decel pending counter\n");
+	spin_unlock_bh(&ecm_front_end_ipv4_lock);
 }
 
 /*
@@ -4514,48 +4742,48 @@ static void ecm_front_end_ipv4_connection_non_ported_defunct_callback(void *arg)
 
 	DEBUG_CHECK_MAGIC(fecnpi, ECM_FRONT_END_IPV4_CONNECTION_NON_PORTED_INSTANCE_MAGIC, "%p: magic failed", fecnpi);
 
-	spin_lock_bh(&fecnpi->lock);
+	spin_lock_bh(&feci->lock);
 
 	/*
 	 * If connection has already become defunct, do nothing.
 	 */
-	if (fecnpi->is_defunct) {
-		spin_unlock_bh(&fecnpi->lock);
+	if (feci->is_defunct) {
+		spin_unlock_bh(&feci->lock);
 		return;
 	}
-	fecnpi->is_defunct = true;
+	feci->is_defunct = true;
 
 	/*
 	 * If the connection is already in one of the fail modes, do nothing, keep the current accel_mode.
 	 */
-	if (ECM_FRONT_END_ACCELERATION_FAILED(fecnpi->accel_mode)) {
-		spin_unlock_bh(&fecnpi->lock);
+	if (ECM_FRONT_END_ACCELERATION_FAILED(feci->accel_mode)) {
+		spin_unlock_bh(&feci->lock);
 		return;
 	}
 
 	/*
 	 * If the connection is decel then ensure it will not attempt accel while defunct.
 	 */
-	if (fecnpi->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_DECEL) {
-		fecnpi->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DEFUNCT;
-		spin_unlock_bh(&fecnpi->lock);
+	if (feci->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_DECEL) {
+		feci->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DEFUNCT;
+		spin_unlock_bh(&feci->lock);
 		return;
 	}
 
 	/*
 	 * If the connection is decel pending then decel operation is in progress anyway.
 	 */
-	if (fecnpi->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_DECEL_PENDING) {
-		spin_unlock_bh(&fecnpi->lock);
+	if (feci->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_DECEL_PENDING) {
+		spin_unlock_bh(&feci->lock);
 		return;
 	}
 
 	/*
-	 * If none of the cases mathes above, this means the connection is in one of the
+	 * If none of the cases matched above, this means the connection is in one of the
 	 * accel modes (accel or accel_pending) so we force a deceleration.
 	 * NOTE: If the mode is accel pending then the decel will be actioned when that is completed.
 	 */
-	spin_unlock_bh(&fecnpi->lock);
+	spin_unlock_bh(&feci->lock);
 	ecm_front_end_ipv4_connection_non_ported_front_end_decelerate(feci);
 }
 
@@ -4569,9 +4797,9 @@ static ecm_front_end_acceleration_mode_t ecm_front_end_ipv4_connection_non_porte
 	ecm_front_end_acceleration_mode_t state;
 
 	DEBUG_CHECK_MAGIC(fecnpi, ECM_FRONT_END_IPV4_CONNECTION_NON_PORTED_INSTANCE_MAGIC, "%p: magic failed", fecnpi);
-	spin_lock_bh(&fecnpi->lock);
-	state = fecnpi->accel_mode;
-	spin_unlock_bh(&fecnpi->lock);
+	spin_lock_bh(&feci->lock);
+	state = feci->accel_mode;
+	spin_unlock_bh(&feci->lock);
 	return state;
 }
 
@@ -4587,9 +4815,9 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_action_seen(struc
 
 	DEBUG_CHECK_MAGIC(fecnpi, ECM_FRONT_END_IPV4_CONNECTION_NON_PORTED_INSTANCE_MAGIC, "%p: magic failed", fecnpi);
 	DEBUG_INFO("%p: Action seen\n", fecnpi);
-	spin_lock_bh(&fecnpi->lock);
-	fecnpi->base.stats.no_action_seen = 0;
-	spin_unlock_bh(&fecnpi->lock);
+	spin_lock_bh(&feci->lock);
+	feci->stats.no_action_seen = 0;
+	spin_unlock_bh(&feci->lock);
 }
 
 /*
@@ -4607,7 +4835,7 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_accel_ceased(stru
 
 	DEBUG_INFO("%p: accel ceased\n", fecnpi);
 
-	spin_lock_bh(&fecnpi->lock);
+	spin_lock_bh(&feci->lock);
 
 	/*
 	 * If we are in accel-pending state then the NSS has issued a flush out-of-order
@@ -4615,38 +4843,38 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_accel_ceased(stru
 	 * To work around this we record a "flush has already happened" and will action it when we finally get that ACK/NACK.
 	 * GGG TODO This should eventually be removed when the NSS honours messaging sequence.
 	 */
-	if (fecnpi->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING) {
-		fecnpi->base.stats.flush_happened = true;
-		fecnpi->base.stats.flush_happened_total++;
-		spin_unlock_bh(&fecnpi->lock);
+	if (feci->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING) {
+		feci->stats.flush_happened = true;
+		feci->stats.flush_happened_total++;
+		spin_unlock_bh(&feci->lock);
 		return;
 	}
 
 	/*
 	 * If connection is no longer accelerated by the time we get here just ignore the command
 	 */
-	if (fecnpi->accel_mode != ECM_FRONT_END_ACCELERATION_MODE_ACCEL) {
-		spin_unlock_bh(&fecnpi->lock);
+	if (feci->accel_mode != ECM_FRONT_END_ACCELERATION_MODE_ACCEL) {
+		spin_unlock_bh(&feci->lock);
 		return;
 	}
 
 	/*
 	 * If the no_action_seen counter was not reset then acceleration ended without any offload action
 	 */
-	if (fecnpi->base.stats.no_action_seen) {
-		fecnpi->base.stats.no_action_seen_total++;
+	if (feci->stats.no_action_seen) {
+		feci->stats.no_action_seen_total++;
 	}
 
 	/*
 	 * If the no_action_seen indicates successive cessations of acceleration without any offload action occuring
 	 * then we fail out this connection
 	 */
-	if (fecnpi->base.stats.no_action_seen >= fecnpi->base.stats.no_action_seen_limit) {
-		fecnpi->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_NO_ACTION;
+	if (feci->stats.no_action_seen >= feci->stats.no_action_seen_limit) {
+		feci->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_NO_ACTION;
 	} else {
-		fecnpi->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_DECEL;
+		feci->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_DECEL;
 	}
-	spin_unlock_bh(&fecnpi->lock);
+	spin_unlock_bh(&feci->lock);
 
 	/*
 	 * Non-Ported acceleration ends
@@ -4668,11 +4896,11 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_ref(struct ecm_fr
 	struct ecm_front_end_ipv4_connection_non_ported_instance *fecnpi = (struct ecm_front_end_ipv4_connection_non_ported_instance *)feci;
 
 	DEBUG_CHECK_MAGIC(fecnpi, ECM_FRONT_END_IPV4_CONNECTION_NON_PORTED_INSTANCE_MAGIC, "%p: magic failed", fecnpi);
-	spin_lock_bh(&fecnpi->lock);
-	fecnpi->refs++;
-	DEBUG_TRACE("%p: fecnpi ref %d\n", fecnpi, fecnpi->refs);
-	DEBUG_ASSERT(fecnpi->refs > 0, "%p: ref wrap\n", fecnpi);
-	spin_unlock_bh(&fecnpi->lock);
+	spin_lock_bh(&feci->lock);
+	feci->refs++;
+	DEBUG_TRACE("%p: fecnpi ref %d\n", fecnpi, feci->refs);
+	DEBUG_ASSERT(feci->refs > 0, "%p: ref wrap\n", fecnpi);
+	spin_unlock_bh(&feci->lock);
 }
 
 /*
@@ -4685,17 +4913,17 @@ static int ecm_front_end_ipv4_connection_non_ported_front_end_deref(struct ecm_f
 
 	DEBUG_CHECK_MAGIC(fecnpi, ECM_FRONT_END_IPV4_CONNECTION_NON_PORTED_INSTANCE_MAGIC, "%p: magic failed", fecnpi);
 
-	spin_lock_bh(&fecnpi->lock);
-	fecnpi->refs--;
-	DEBUG_ASSERT(fecnpi->refs >= 0, "%p: ref wrap\n", fecnpi);
+	spin_lock_bh(&feci->lock);
+	feci->refs--;
+	DEBUG_ASSERT(feci->refs >= 0, "%p: ref wrap\n", fecnpi);
 
-	if (fecnpi->refs > 0) {
-		int refs = fecnpi->refs;
-		spin_unlock_bh(&fecnpi->lock);
+	if (feci->refs > 0) {
+		int refs = feci->refs;
+		spin_unlock_bh(&feci->lock);
 		DEBUG_TRACE("%p: fecnpi deref %d\n", fecnpi, refs);
 		return refs;
 	}
-	spin_unlock_bh(&fecnpi->lock);
+	spin_unlock_bh(&feci->lock);
 
 	/*
 	 * We can now destroy the instance
@@ -4704,9 +4932,6 @@ static int ecm_front_end_ipv4_connection_non_ported_front_end_deref(struct ecm_f
 	DEBUG_CLEAR_MAGIC(fecnpi);
 	kfree(fecnpi);
 
-	/*
-	 * Thread may be able to exit on object destruction
-	 */
 	return 0;
 }
 
@@ -4723,11 +4948,11 @@ static int ecm_front_end_ipv4_connection_non_ported_front_end_xml_state_get(stru
 
 	DEBUG_CHECK_MAGIC(fecnpi, ECM_FRONT_END_IPV4_CONNECTION_NON_PORTED_INSTANCE_MAGIC, "%p: magic failed", fecnpi);
 
-	spin_lock_bh(&fecnpi->lock);
-	can_accel = fecnpi->can_accel;
-	accel_mode = fecnpi->accel_mode;
+	spin_lock_bh(&feci->lock);
+	can_accel = feci->can_accel;
+	accel_mode = feci->accel_mode;
 	memcpy(&stats, &feci->stats, sizeof(struct ecm_front_end_connection_mode_stats));
-	spin_unlock_bh(&fecnpi->lock);
+	spin_unlock_bh(&feci->lock);
 
 	return snprintf(buf, buf_sz, "<front_end_non_ported can_accel=\"%d\" accel_mode=\"%d\" decelerate_pending=\"%d\" flush_happened_total=\"%d\" no_action_seen_total=\"%d\" no_action_seen=\"%d\" no_action_seen_limit=\"%d\""
 				" driver_fail_total=\"%d\" driver_fail=\"%d\" driver_fail_limit=\"%d\" nss_nack_total=\"%d\" nss_nack=\"%d\" nss_nack_limit=\"%d\"/>\n",
@@ -4757,6 +4982,7 @@ static struct ecm_front_end_ipv4_connection_non_ported_instance *ecm_front_end_i
 								bool can_accel)
 {
 	struct ecm_front_end_ipv4_connection_non_ported_instance *fecnpi;
+	struct ecm_front_end_connection_instance *feci;
 
 	fecnpi = (struct ecm_front_end_ipv4_connection_non_ported_instance *)kzalloc(sizeof(struct ecm_front_end_ipv4_connection_non_ported_instance), GFP_ATOMIC | __GFP_NOWARN);
 	if (!fecnpi) {
@@ -4767,33 +4993,34 @@ static struct ecm_front_end_ipv4_connection_non_ported_instance *ecm_front_end_i
 	/*
 	 * Refs is 1 for the creator of the connection
 	 */
-	fecnpi->refs = 1;
+	feci = (struct ecm_front_end_connection_instance *)fecnpi;
+	feci->refs = 1;
 	DEBUG_SET_MAGIC(fecnpi, ECM_FRONT_END_IPV4_CONNECTION_NON_PORTED_INSTANCE_MAGIC);
-	spin_lock_init(&fecnpi->lock);
+	spin_lock_init(&feci->lock);
 
-	fecnpi->can_accel = can_accel;
-	fecnpi->accel_mode = (can_accel)? ECM_FRONT_END_ACCELERATION_MODE_DECEL : ECM_FRONT_END_ACCELERATION_MODE_FAIL_DENIED;
+	feci->can_accel = can_accel;
+	feci->accel_mode = (can_accel)? ECM_FRONT_END_ACCELERATION_MODE_DECEL : ECM_FRONT_END_ACCELERATION_MODE_FAIL_DENIED;
 	spin_lock_bh(&ecm_front_end_ipv4_lock);
-	fecnpi->base.stats.no_action_seen_limit = ecm_front_end_ipv4_no_action_limit_default;
-	fecnpi->base.stats.driver_fail_limit = ecm_front_end_ipv4_driver_fail_limit_default;
-	fecnpi->base.stats.nss_nack_limit = ecm_front_end_ipv4_nack_limit_default;
+	feci->stats.no_action_seen_limit = ecm_front_end_ipv4_no_action_limit_default;
+	feci->stats.driver_fail_limit = ecm_front_end_ipv4_driver_fail_limit_default;
+	feci->stats.nss_nack_limit = ecm_front_end_ipv4_nack_limit_default;
 	spin_unlock_bh(&ecm_front_end_ipv4_lock);
 
 	/*
 	 * Copy reference to connection - no need to ref ci as ci maintains a ref to this instance instead (this instance persists for as long as ci does)
 	 */
-	fecnpi->ci = ci;
+	feci->ci = ci;
 
 	/*
 	 * Populate the methods and callbacks
 	 */
-	fecnpi->base.ref = ecm_front_end_ipv4_connection_non_ported_front_end_ref;
-	fecnpi->base.deref = ecm_front_end_ipv4_connection_non_ported_front_end_deref;
-	fecnpi->base.decelerate = ecm_front_end_ipv4_connection_non_ported_front_end_decelerate;
-	fecnpi->base.accel_state_get = ecm_front_end_ipv4_connection_non_ported_front_end_accel_state_get;
-	fecnpi->base.action_seen = ecm_front_end_ipv4_connection_non_ported_front_end_action_seen;
-	fecnpi->base.accel_ceased = ecm_front_end_ipv4_connection_non_ported_front_end_accel_ceased;
-	fecnpi->base.xml_state_get = ecm_front_end_ipv4_connection_non_ported_front_end_xml_state_get;
+	feci->ref = ecm_front_end_ipv4_connection_non_ported_front_end_ref;
+	feci->deref = ecm_front_end_ipv4_connection_non_ported_front_end_deref;
+	feci->decelerate = ecm_front_end_ipv4_connection_non_ported_front_end_decelerate;
+	feci->accel_state_get = ecm_front_end_ipv4_connection_non_ported_front_end_accel_state_get;
+	feci->action_seen = ecm_front_end_ipv4_connection_non_ported_front_end_action_seen;
+	feci->accel_ceased = ecm_front_end_ipv4_connection_non_ported_front_end_accel_ceased;
+	feci->xml_state_get = ecm_front_end_ipv4_connection_non_ported_front_end_xml_state_get;
 
 	return fecnpi;
 }
@@ -8218,6 +8445,48 @@ static ssize_t ecm_front_end_ipv4_get_accelerated_count(struct device *dev,
 }
 
 /*
+ * ecm_front_end_ipv4_get_pending_accel_count()
+ */
+static ssize_t ecm_front_end_ipv4_get_pending_accel_count(struct device *dev,
+				  struct device_attribute *attr,
+				  char *buf)
+{
+	ssize_t count;
+	int num;
+
+	/*
+	 * Operate under our locks
+	 */
+	spin_lock_bh(&ecm_front_end_ipv4_lock);
+	num = ecm_front_end_ipv4_pending_accel_count;
+	spin_unlock_bh(&ecm_front_end_ipv4_lock);
+
+	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", num);
+	return count;
+}
+
+/*
+ * ecm_front_end_ipv4_get_pending_decel_count()
+ */
+static ssize_t ecm_front_end_ipv4_get_pending_decel_count(struct device *dev,
+				  struct device_attribute *attr,
+				  char *buf)
+{
+	ssize_t count;
+	int num;
+
+	/*
+	 * Operate under our locks
+	 */
+	spin_lock_bh(&ecm_front_end_ipv4_lock);
+	num = ecm_front_end_ipv4_pending_decel_count;
+	spin_unlock_bh(&ecm_front_end_ipv4_lock);
+
+	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", num);
+	return count;
+}
+
+/*
  * ecm_front_end_ipv4_get_no_action_limit_default()
  */
 static ssize_t ecm_front_end_ipv4_get_no_action_limit_default(struct device *dev,
@@ -8365,6 +8634,133 @@ static ssize_t ecm_front_end_ipv4_set_nack_limit_default(struct device *dev,
 }
 
 /*
+ * ecm_front_end_ipv4_get_accel_limit_mode()
+ */
+static ssize_t ecm_front_end_ipv4_get_accel_limit_mode(struct device *dev,
+				  struct device_attribute *attr,
+				  char *buf)
+{
+	ssize_t count;
+	int num;
+
+	/*
+	 * Operate under our locks
+	 */
+	spin_lock_bh(&ecm_front_end_ipv4_lock);
+	num = ecm_front_end_ipv4_accel_limit_mode;
+	spin_unlock_bh(&ecm_front_end_ipv4_lock);
+
+	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", num);
+	return count;
+}
+
+
+/*
+ * ecm_front_end_ipv4_set_accel_limit_mode()
+ */
+static ssize_t ecm_front_end_ipv4_set_accel_limit_mode(struct device *dev,
+				  struct device_attribute *attr,
+				  const char *buf, size_t count)
+{
+	char num_buf[12];
+	int bits;
+
+	/*
+	 * Get the number from buf into a properly z-termed number buffer
+	 */
+	if (count > 11) {
+		return 0;
+	}
+	memcpy(num_buf, buf, count);
+	num_buf[count] = '\0';
+	sscanf(num_buf, "%d", &bits);
+	DEBUG_TRACE("ecm_front_end_ipv4_accel_limit_mode = %x\n", bits);
+
+	/*
+	 * Check that only valid bits are set.
+	 * It's fine for no bits to be set as that suggests no modes are wanted.
+	 */
+	if (bits && (bits ^ (ECM_FRONT_END_ACCEL_LIMIT_MODE_FIXED | ECM_FRONT_END_ACCEL_LIMIT_MODE_UNLIMITED))) {
+		DEBUG_WARN("ecm_front_end_ipv4_accel_limit_mode = %x bad\n", bits);
+		return 0;
+	}
+
+	spin_lock_bh(&ecm_front_end_ipv4_lock);
+	ecm_front_end_ipv4_accel_limit_mode = bits;
+	spin_unlock_bh(&ecm_front_end_ipv4_lock);
+
+	return count;
+}
+
+/*
+ * ecm_front_end_ipv4_get_accel_average_millis()
+ */
+static ssize_t ecm_front_end_ipv4_get_accel_average_millis(struct device *dev,
+				  struct device_attribute *attr,
+				  char *buf)
+{
+	ssize_t count;
+	unsigned long set;
+	unsigned long samples;
+	unsigned long avg;
+
+	/*
+	 * Operate under our locks.
+	 * Compute the average of the samples taken and seed the next set of samples with the result of this one.
+	 */
+	spin_lock_bh(&ecm_front_end_ipv4_lock);
+	samples = ecm_front_end_ipv4_accel_cmd_time_avg_samples;
+	set = ecm_front_end_ipv4_accel_cmd_time_avg_set;
+	ecm_front_end_ipv4_accel_cmd_time_avg_samples /= ecm_front_end_ipv4_accel_cmd_time_avg_set;
+	ecm_front_end_ipv4_accel_cmd_time_avg_set = 1;
+	avg = ecm_front_end_ipv4_accel_cmd_time_avg_samples;
+	spin_unlock_bh(&ecm_front_end_ipv4_lock);
+
+	/*
+	 * Convert average jiffies to milliseconds
+	 */
+	avg *= 1000;
+	avg /= HZ;
+
+	count = snprintf(buf, (ssize_t)PAGE_SIZE, "avg=%lu\tsamples=%lu\tset_size=%lu\n", avg, samples, set);
+	return count;
+}
+
+/*
+ * ecm_front_end_ipv4_get_decel_average_millis()
+ */
+static ssize_t ecm_front_end_ipv4_get_decel_average_millis(struct device *dev,
+				  struct device_attribute *attr,
+				  char *buf)
+{
+	ssize_t count;
+	unsigned long set;
+	unsigned long samples;
+	unsigned long avg;
+
+	/*
+	 * Operate under our locks.
+	 * Compute the average of the samples taken and seed the next set of samples with the result of this one.
+	 */
+	spin_lock_bh(&ecm_front_end_ipv4_lock);
+	samples = ecm_front_end_ipv4_decel_cmd_time_avg_samples;
+	set = ecm_front_end_ipv4_decel_cmd_time_avg_set;
+	ecm_front_end_ipv4_decel_cmd_time_avg_samples /= ecm_front_end_ipv4_decel_cmd_time_avg_set;
+	ecm_front_end_ipv4_decel_cmd_time_avg_set = 1;
+	avg = ecm_front_end_ipv4_decel_cmd_time_avg_samples;
+	spin_unlock_bh(&ecm_front_end_ipv4_lock);
+
+	/*
+	 * Convert average jiffies to milliseconds
+	 */
+	avg *= 1000;
+	avg /= HZ;
+
+	count = snprintf(buf, (ssize_t)PAGE_SIZE, "avg=%lu\tsamples=%lu\tset_size=%lu\n", avg, samples, set);
+	return count;
+}
+
+/*
  * System device attributes
  */
 static DEVICE_ATTR(stop, 0644, ecm_front_end_ipv4_get_stop, ecm_front_end_ipv4_set_stop);
@@ -8375,6 +8771,11 @@ static DEVICE_ATTR(udp_accelerated_count, 0444, ecm_front_end_ipv4_get_udp_accel
 static DEVICE_ATTR(tcp_accelerated_count, 0444, ecm_front_end_ipv4_get_tcp_accelerated_count, NULL);
 static DEVICE_ATTR(non_ported_accelerated_count, 0444, ecm_front_end_ipv4_get_non_ported_accelerated_count, NULL);
 static DEVICE_ATTR(accelerated_count, 0444, ecm_front_end_ipv4_get_accelerated_count, NULL);
+static DEVICE_ATTR(pending_accel_count, 0444, ecm_front_end_ipv4_get_pending_accel_count, NULL);
+static DEVICE_ATTR(pending_decel_count, 0444, ecm_front_end_ipv4_get_pending_decel_count, NULL);
+static DEVICE_ATTR(accel_limit_mode, 0644, ecm_front_end_ipv4_get_accel_limit_mode, ecm_front_end_ipv4_set_accel_limit_mode);
+static DEVICE_ATTR(accel_cmd_avg_millis, 0444, ecm_front_end_ipv4_get_accel_average_millis, NULL);
+static DEVICE_ATTR(decel_cmd_avg_millis, 0444, ecm_front_end_ipv4_get_decel_average_millis, NULL);
 
 /*
  * System device attribute array.
@@ -8387,7 +8788,12 @@ static struct device_attribute *ecm_front_end_ipv4_attrs[] = {
 	&dev_attr_udp_accelerated_count,
 	&dev_attr_tcp_accelerated_count,
 	&dev_attr_non_ported_accelerated_count,
-	&dev_attr_accelerated_count
+	&dev_attr_accelerated_count,
+	&dev_attr_pending_accel_count,
+	&dev_attr_pending_decel_count,
+	&dev_attr_accel_limit_mode,
+	&dev_attr_accel_cmd_avg_millis,
+	&dev_attr_decel_cmd_avg_millis
 };
 
 /*
