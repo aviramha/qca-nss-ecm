@@ -215,11 +215,13 @@ struct ecm_db_interface_info_ethernet {			/* type == ECM_DB_IFACE_TYPE_ETHERNET 
 	uint8_t address[ETH_ALEN];			/* MAC Address of this Interface */
 };
 
+#ifdef ECM_INTERFACE_VLAN_ENABLE
 struct ecm_db_interface_info_vlan {			/* type == ECM_DB_IFACE_TYPE_VLAN */
 	uint8_t address[ETH_ALEN];			/* MAC Address of this Interface */
 	uint16_t vlan_tpid;				/* VLAN tag protocol id */
 	uint16_t vlan_tag;				/* VLAN tag of this interface */
 };
+#endif
 
 struct ecm_db_interface_info_lag {			/* type == ECM_DB_IFACE_TYPE_LAG */
 	uint8_t address[ETH_ALEN];			/* MAC Address of this Interface */
