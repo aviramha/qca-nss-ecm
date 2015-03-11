@@ -116,6 +116,12 @@ ECM_NON_PORTED_SUPPORT_ENABLE=y
 ecm-$(ECM_NON_PORTED_SUPPORT_ENABLE) += frontends/nss/ecm_nss_non_ported_ipv4.o
 ccflags-$(ECM_NON_PORTED_SUPPORT_ENABLE) += -DECM_NON_PORTED_SUPPORT_ENABLE
 
+# #############################################################################
+# Define ECM_STATE_OUTPUT_ENABLE=y to support XML state output
+# #############################################################################
+ECM_STATE_OUTPUT_ENABLE=y
+ecm-$(ECM_STATE_OUTPUT_ENABLE) += ecm_state.o
+ccflags-$(ECM_STATE_OUTPUT_ENABLE) += -DECM_STATE_OUTPUT_ENABLE
 
 # #############################################################################
 # Debug flags, set these to = 0 if you want to disable all debugging for that
@@ -137,6 +143,7 @@ ccflags-y += -DECM_TRACKER_UDP_DEBUG_LEVEL=1
 ccflags-y += -DECM_BOND_NOTIFIER_DEBUG_LEVEL=1
 ccflags-y += -DECM_INTERFACE_DEBUG_LEVEL=1
 ccflags-y += -DECM_NSS
+ccflags-y += -DECM_STATE_DEBUG_LEVEL=1
 
 ccflags-y += -I$(obj)/ -I$(obj)/frontends/include -I$(obj)/frontends/nss
 

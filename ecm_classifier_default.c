@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2014, The Linux Foundation.  All rights reserved.
+ * Copyright (c) 2014, 2015, The Linux Foundation.  All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -507,6 +507,7 @@ static struct ecm_tracker_instance *ecm_classifier_tracker_get_and_ref(struct ec
 	return ti;
 }
 
+#ifdef ECM_STATE_OUTPUT_ENABLE
 /*
  * ecm_classifier_default_xml_state_get()
  *	Return an XML state element
@@ -575,6 +576,7 @@ static int ecm_classifier_default_xml_state_get(struct ecm_classifier_instance *
 	total += count;
 	return total;
 }
+#endif
 
 /*
  * ecm_classifier_default_instance_alloc()
@@ -666,7 +668,9 @@ struct ecm_classifier_default_instance *ecm_classifier_default_instance_alloc(st
 	cdi->base.reclassify_allowed = ecm_classifier_default_reclassify_allowed;
 	cdi->base.reclassify = ecm_classifier_default_reclassify;
 	cdi->base.last_process_response_get = ecm_classifier_default_last_process_response_get;
+#ifdef ECM_STATE_OUTPUT_ENABLE
 	cdi->base.xml_state_get = ecm_classifier_default_xml_state_get;
+#endif
 	cdi->base.ref = ecm_classifier_default_ref;
 	cdi->base.deref = ecm_classifier_default_deref;
 

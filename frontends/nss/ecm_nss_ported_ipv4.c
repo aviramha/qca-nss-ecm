@@ -1533,6 +1533,7 @@ static int ecm_nss_ported_ipv4_connection_deref(struct ecm_front_end_connection_
 	return 0;
 }
 
+#ifdef ECM_STATE_OUTPUT_ENABLE
 /*
  * ecm_nss_ported_ipv4_connection_xml_state_get()
  *	Return an XML element containing the state of this ported front end instance
@@ -1568,6 +1569,7 @@ static int ecm_nss_ported_ipv4_connection_xml_state_get(struct ecm_front_end_con
 			stats.nss_nack,
 			stats.nss_nack_limit);
 }
+#endif
 
 /*
  * ecm_nss_ported_ipv4_connection_instance_alloc()
@@ -1619,7 +1621,9 @@ static struct ecm_nss_ported_ipv4_connection_instance *ecm_nss_ported_ipv4_conne
 	feci->accel_state_get = ecm_nss_ported_ipv4_connection_accel_state_get;
 	feci->action_seen = ecm_nss_ported_ipv4_connection_action_seen;
 	feci->accel_ceased = ecm_nss_ported_ipv4_connection_accel_ceased;
+#ifdef ECM_STATE_OUTPUT_ENABLE
 	feci->xml_state_get = ecm_nss_ported_ipv4_connection_xml_state_get;
+#endif
 
 	if (protocol == IPPROTO_TCP) {
 		npci->ported_accelerated_count_index = ECM_NSS_PORTED_IPV4_PROTO_TCP;

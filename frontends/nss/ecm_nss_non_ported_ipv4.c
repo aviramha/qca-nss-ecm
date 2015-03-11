@@ -1540,6 +1540,7 @@ static int ecm_nss_non_ported_ipv4_connection_deref(struct ecm_front_end_connect
 	return 0;
 }
 
+#ifdef ECM_STATE_OUTPUT_ENABLE
 /*
  * ecm_nss_non_ported_ipv4_connection_xml_state_get()
  *	Return an XML element containing the state of this Non ported front end instance
@@ -1575,6 +1576,7 @@ static int ecm_nss_non_ported_ipv4_connection_xml_state_get(struct ecm_front_end
 			stats.nss_nack,
 			stats.nss_nack_limit);
 }
+#endif
 
 /*
  * ecm_nss_non_ported_ipv4_connection_instance_alloc()
@@ -1625,7 +1627,9 @@ static struct ecm_nss_non_ported_ipv4_connection_instance *ecm_nss_non_ported_ip
 	feci->accel_state_get = ecm_nss_non_ported_ipv4_connection_accel_state_get;
 	feci->action_seen = ecm_nss_non_ported_ipv4_connection_action_seen;
 	feci->accel_ceased = ecm_nss_non_ported_ipv4_connection_accel_ceased;
+#ifdef ECM_STATE_OUTPUT_ENABLE
 	feci->xml_state_get = ecm_nss_non_ported_ipv4_connection_xml_state_get;
+#endif
 
 	return nnpci;
 }

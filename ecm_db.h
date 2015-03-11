@@ -174,6 +174,21 @@ int32_t ecm_db_connection_from_nat_interfaces_get_and_ref(struct ecm_db_connecti
 int32_t ecm_db_connection_to_nat_interfaces_get_and_ref(struct ecm_db_connection_instance *ci, struct ecm_db_iface_instance *interfaces[]);
 void ecm_db_connection_interfaces_deref(struct ecm_db_iface_instance *interfaces[], int32_t first);
 
+struct ecm_db_connection_instance *ecm_db_connections_get_and_ref_first(void);
+struct ecm_db_connection_instance *ecm_db_connection_get_and_ref_next(struct ecm_db_connection_instance *ci);
+
+struct ecm_db_mapping_instance *ecm_db_mappings_get_and_ref_first(void);
+struct ecm_db_mapping_instance *ecm_db_mapping_get_and_ref_next(struct ecm_db_mapping_instance *mi);
+
+struct ecm_db_host_instance *ecm_db_hosts_get_and_ref_first(void);
+struct ecm_db_host_instance *ecm_db_host_get_and_ref_next(struct ecm_db_host_instance *hi);
+
+struct ecm_db_node_instance *ecm_db_nodes_get_and_ref_first(void);
+struct ecm_db_node_instance *ecm_db_node_get_and_ref_next(struct ecm_db_node_instance *ni);
+
+struct ecm_db_iface_instance *ecm_db_interfaces_get_and_ref_first(void);
+struct ecm_db_iface_instance *ecm_db_interface_get_and_ref_next(struct ecm_db_iface_instance *ii);
+
 struct ecm_db_connection_instance *ecm_db_mapping_connections_from_get_and_ref_first(struct ecm_db_mapping_instance *mi);
 struct ecm_db_connection_instance *ecm_db_mapping_connections_to_get_and_ref_first(struct ecm_db_mapping_instance *mi);
 struct ecm_db_connection_instance *ecm_db_connection_mapping_from_get_and_ref_next(struct ecm_db_connection_instance *ci);
@@ -206,6 +221,10 @@ int ecm_db_connection_classifier_assignments_get_and_ref(struct ecm_db_connectio
 void ecm_db_connection_classifier_unassign(struct ecm_db_connection_instance *ci, struct ecm_classifier_instance *cci);
 void ecm_db_connection_assignments_release(int assignment_count, struct ecm_classifier_instance *assignments[]);
 struct ecm_classifier_instance *ecm_db_connection_assigned_classifier_find_and_ref(struct ecm_db_connection_instance *ci, ecm_classifier_type_t type);
+
+struct ecm_db_connection_instance *ecm_db_connection_by_classifier_type_assignment_get_and_ref_first(ecm_classifier_type_t ca_type);
+struct ecm_db_connection_instance *ecm_db_connection_by_classifier_type_assignment_get_and_ref_next(struct ecm_db_connection_instance *ci, ecm_classifier_type_t ca_type);
+void ecm_db_connection_by_classifier_type_assignment_deref(struct ecm_db_connection_instance *ci, ecm_classifier_type_t ca_type);
 
 struct ecm_db_listener_instance *ecm_db_listener_alloc(void);
 struct ecm_db_connection_instance *ecm_db_connection_alloc(void);
@@ -259,4 +278,31 @@ int ecm_db_host_deref(struct ecm_db_host_instance *hi);
 int ecm_db_mapping_deref(struct ecm_db_mapping_instance *mi);
 int ecm_db_iface_deref(struct ecm_db_iface_instance *ii);
 int ecm_db_node_deref(struct ecm_db_node_instance *ni);
+
+int ecm_db_connection_count_by_protocol_get(int protocol);
+
+#ifdef ECM_STATE_OUTPUT_ENABLE
+int ecm_db_connection_xml_state_get(struct ecm_db_connection_instance *ci, char *buf, int buf_sz);
+int ecm_db_mapping_xml_state_get(struct ecm_db_mapping_instance *mi, char *buf, int buf_sz);
+int ecm_db_host_xml_state_get(struct ecm_db_host_instance *hi, char *buf, int buf_sz);
+int ecm_db_node_xml_state_get(struct ecm_db_node_instance *ni, char *buf, int buf_sz);
+int ecm_db_iface_xml_state_get(struct ecm_db_iface_instance *ii, char *buf, int buf_sz);
+int ecm_db_connection_hash_table_lengths_get(int index);
+int ecm_db_connection_hash_index_get_next(int index);
+int ecm_db_connection_hash_index_get_first(void);
+int ecm_db_mapping_hash_table_lengths_get(int index);
+int ecm_db_mapping_hash_index_get_next(int index);
+int ecm_db_mapping_hash_index_get_first(void);
+int ecm_db_host_hash_table_lengths_get(int index);
+int ecm_db_host_hash_index_get_next(int index);
+int ecm_db_host_hash_index_get_first(void);
+int ecm_db_node_hash_table_lengths_get(int index);
+int ecm_db_node_hash_index_get_next(int index);
+int ecm_db_node_hash_index_get_first(void);
+int ecm_db_iface_hash_table_lengths_get(int index);
+int ecm_db_iface_hash_index_get_next(int index);
+int ecm_db_iface_hash_index_get_first(void);
+int ecm_db_protocol_get_next(int protocol);
+int ecm_db_protocol_get_first(void);
+#endif
 

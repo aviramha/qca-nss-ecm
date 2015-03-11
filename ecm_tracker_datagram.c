@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2014, The Linux Foundation.  All rights reserved.
+ * Copyright (c) 2014, 2015, The Linux Foundation.  All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -631,6 +631,7 @@ static void ecm_tracker_datagram_state_get_callback(struct ecm_tracker_instance 
 	*tg = ECM_DB_TIMER_GROUPS_CONNECTION_GENERIC_TIMEOUT;
 }
 
+#ifdef ECM_STATE_OUTPUT_ENABLE
 /*
  * ecm_tracker_datagram_xml_state_get_callback()
  *	Return an XML state element
@@ -674,6 +675,7 @@ static int ecm_tracker_datagram_xml_state_get_callback(struct ecm_tracker_instan
 			ecm_tracker_sender_state_to_string(sender_state[ECM_TRACKER_SENDER_TYPE_DEST]),
 			ecm_tracker_connection_state_to_string(connection_state));
 }
+#endif
 
 /*
  * ecm_tracker_datagram_init()
@@ -717,7 +719,9 @@ struct ecm_tracker_datagram_instance *ecm_tracker_datagram_alloc(void)
 	dtii->datagram_base.base.data_limit_set = ecm_tracker_datagram_data_limit_set_callback;
 	dtii->datagram_base.base.state_update = ecm_tracker_datagram_state_update_callback;
 	dtii->datagram_base.base.state_get = ecm_tracker_datagram_state_get_callback;
+#ifdef ECM_STATE_OUTPUT_ENABLE
 	dtii->datagram_base.base.xml_state_get = ecm_tracker_datagram_xml_state_get_callback;
+#endif
 
 	// GGG TODO IMPLEMENT METHODS SPECIFIC TO WORKING WITH datagram e.g. reading without worrying about the datagram header content
 

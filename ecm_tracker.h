@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2014, The Linux Foundation.  All rights reserved.
+ * Copyright (c) 2014, 2015, The Linux Foundation.  All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -171,11 +171,13 @@ typedef void (*ecm_tracker_state_update_method_t)(struct ecm_tracker_instance *t
 													/* Update state of the sender */
 typedef void (*ecm_tracker_state_get_method_t)(struct ecm_tracker_instance *ti, ecm_tracker_sender_state_t *src_state, ecm_tracker_sender_state_t *dest_state, ecm_tracker_connection_state_t *state, ecm_db_timer_group_t *tg);
 													/* State of the connection */
+#ifdef ECM_STATE_OUTPUT_ENABLE
 typedef int (*ecm_tracker_xml_state_get_callback_t)(struct ecm_tracker_instance *ti, char *buf, int buf_sz);
 											/* Get XML state output, buf has buf_sz bytes available.  Returns number of bytes written.
 											 * Function has failed if the return is (<= 0) || (return value == buf_sz).
 											 * The return code is compatible with snprintf().
 											 */
+#endif
 
 /*
  * struct ecm_tracker_instance
@@ -196,7 +198,9 @@ struct ecm_tracker_instance {
 	ecm_tracker_discard_all_method_t discard_all;
 	ecm_tracker_state_update_method_t state_update;
 	ecm_tracker_state_get_method_t state_get;
+#ifdef ECM_STATE_OUTPUT_ENABLE
 	ecm_tracker_xml_state_get_callback_t xml_state_get;		/* Return an XML element containing its state */
+#endif
 	ecm_tracker_ref_method_t ref;
 	ecm_tracker_deref_method_t deref;
 };

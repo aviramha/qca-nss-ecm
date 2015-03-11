@@ -67,11 +67,13 @@ typedef void (*ecm_front_end_connection_ref_method_t)(struct ecm_front_end_conne
 typedef int (*ecm_front_end_connection_deref_callback_t)(struct ecm_front_end_connection_instance *feci);
 typedef void (*ecm_front_end_connection_action_seen_method_t)(struct ecm_front_end_connection_instance *feci);
 typedef void (*ecm_front_end_connection_accel_ceased_method_t)(struct ecm_front_end_connection_instance *feci);
+#ifdef ECM_STATE_OUTPUT_ENABLE
 typedef int (*ecm_front_end_connection_xml_state_get_callback_t)(struct ecm_front_end_connection_instance *feci, char *buf, int buf_sz);
 											/* Get XML state output, buf has buf_sz bytes available.  Returns number of bytes written.
 											 * Function has failed if the return is (<= 0) || (return value == buf_sz).
 											 * The return code is compatible with snprintf().
 											 */
+#endif
 
 /*
  * Acceleration limiting modes.
@@ -111,7 +113,9 @@ struct ecm_front_end_connection_instance {
 	ecm_front_end_connection_accel_state_get_method_t accel_state_get;	/* Get the acceleration state */
 	ecm_front_end_connection_action_seen_method_t action_seen;		/* Acceleration action has occurred */
 	ecm_front_end_connection_accel_ceased_method_t accel_ceased;		/* Acceleration has stopped */
+#ifdef ECM_STATE_OUTPUT_ENABLE
 	ecm_front_end_connection_xml_state_get_callback_t xml_state_get;	/* Obtain XML formatted state for this object */
+#endif
 
 	/*
 	 * Accel/decel mode statistics.

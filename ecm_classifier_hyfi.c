@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2014, The Linux Foundation.  All rights reserved.
+ * Copyright (c) 2014, 2015, The Linux Foundation.  All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -512,6 +512,7 @@ static void ecm_classifier_hyfi_reclassify(struct ecm_classifier_instance *ci)
 	DEBUG_CHECK_MAGIC(chfi, ECM_CLASSIFIER_HYFI_INSTANCE_MAGIC, "%p: magic failed\n", chfi);
 }
 
+#ifdef ECM_STATE_OUTPUT_ENABLE
 /*
  * ecm_classifier_hyfi_xml_state_get()
  *	Return an XML state element
@@ -557,6 +558,7 @@ static int ecm_classifier_hyfi_xml_state_get(struct ecm_classifier_instance *ci,
 	total += count;
 	return total;
 }
+#endif
 
 /*
  * ecm_classifier_hyfi_instance_alloc()
@@ -586,7 +588,9 @@ struct ecm_classifier_hyfi_instance *ecm_classifier_hyfi_instance_alloc(struct e
 	chfi->base.last_process_response_get = ecm_classifier_hyfi_last_process_response_get;
 	chfi->base.reclassify_allowed = ecm_classifier_hyfi_reclassify_allowed;
 	chfi->base.reclassify = ecm_classifier_hyfi_reclassify;
+#ifdef ECM_STATE_OUTPUT_ENABLE
 	chfi->base.xml_state_get = ecm_classifier_hyfi_xml_state_get;
+#endif
 	chfi->base.ref = ecm_classifier_hyfi_ref;
 	chfi->base.deref = ecm_classifier_hyfi_deref;
 	chfi->ci_serial = ecm_db_connection_serial_get(ci);

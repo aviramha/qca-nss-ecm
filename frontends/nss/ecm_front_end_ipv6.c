@@ -2574,6 +2574,7 @@ static int ecm_front_end_ipv6_connection_tcp_front_end_deref(struct ecm_front_en
 	return 0;
 }
 
+#ifdef ECM_STATE_OUTPUT_ENABLE
 /*
  * ecm_front_end_ipv6_connection_tcp_front_end_xml_state_get()
  *	Return an XML element containing the state of this TCP front end instance
@@ -2611,6 +2612,7 @@ static int ecm_front_end_ipv6_connection_tcp_front_end_xml_state_get(struct ecm_
 			stats.nss_nack,
 			stats.nss_nack_limit);
 }
+#endif
 
 /*
  * ecm_front_end_ipv6_connection_tcp_instance_alloc()
@@ -2661,7 +2663,9 @@ static struct ecm_front_end_ipv6_connection_tcp_instance *ecm_front_end_ipv6_con
 	feci->accel_state_get = ecm_front_end_ipv6_connection_tcp_front_end_accel_state_get;
 	feci->action_seen = ecm_front_end_ipv6_connection_tcp_front_end_action_seen;
 	feci->accel_ceased = ecm_front_end_ipv6_connection_tcp_front_end_accel_ceased;
+#ifdef ECM_STATE_OUTPUT_ENABLE
 	feci->xml_state_get = ecm_front_end_ipv6_connection_tcp_front_end_xml_state_get;
+#endif
 
 	return fecti;
 }
@@ -3963,6 +3967,7 @@ static int ecm_front_end_ipv6_connection_udp_front_end_deref(struct ecm_front_en
 	return 0;
 }
 
+#ifdef ECM_STATE_OUTPUT_ENABLE
 /*
  * ecm_front_end_ipv6_connection_udp_front_end_xml_state_get()
  *	Return an XML element containing the state of this UDP front end instance
@@ -4000,6 +4005,7 @@ static int ecm_front_end_ipv6_connection_udp_front_end_xml_state_get(struct ecm_
 			stats.nss_nack,
 			stats.nss_nack_limit);
 }
+#endif
 
 /*
  * ecm_front_end_ipv6_connection_udp_instance_alloc()
@@ -4050,8 +4056,9 @@ static struct ecm_front_end_ipv6_connection_udp_instance *ecm_front_end_ipv6_con
 	feci->accel_state_get = ecm_front_end_ipv6_connection_udp_front_end_accel_state_get;
 	feci->action_seen = ecm_front_end_ipv6_connection_udp_front_end_action_seen;
 	feci->accel_ceased = ecm_front_end_ipv6_connection_udp_front_end_accel_ceased;
+#ifdef ECM_STATE_OUTPUT_ENABLE
 	feci->xml_state_get = ecm_front_end_ipv6_connection_udp_front_end_xml_state_get;
-
+#endif
 	return fecui;
 }
 
@@ -5377,6 +5384,7 @@ static int ecm_front_end_ipv6_connection_non_ported_front_end_deref(struct ecm_f
 	return 0;
 }
 
+#ifdef ECM_STATE_OUTPUT_ENABLE
 /*
  * ecm_front_end_ipv6_connection_non_ported_front_end_xml_state_get()
  *	Return an XML element containing the state of this Non ported front end instance
@@ -5415,6 +5423,7 @@ static int ecm_front_end_ipv6_connection_non_ported_front_end_xml_state_get(stru
 			stats.nss_nack_limit);
 
 }
+#endif
 
 /*
  * ecm_front_end_ipv6_connection_non_ported_instance_alloc()
@@ -5465,7 +5474,9 @@ static struct ecm_front_end_ipv6_connection_non_ported_instance *ecm_front_end_i
 	feci->accel_state_get = ecm_front_end_ipv6_connection_non_ported_front_end_accel_state_get;
 	feci->action_seen = ecm_front_end_ipv6_connection_non_ported_front_end_action_seen;
 	feci->accel_ceased = ecm_front_end_ipv6_connection_non_ported_front_end_accel_ceased;
+#ifdef ECM_STATE_OUTPUT_ENABLE
 	feci->xml_state_get = ecm_front_end_ipv6_connection_non_ported_front_end_xml_state_get;
+#endif
 
 	return fecnpi;
 }

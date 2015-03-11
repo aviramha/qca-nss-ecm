@@ -531,6 +531,7 @@ static void ecm_classifier_dscp_reclassify(struct ecm_classifier_instance *ci)
 	spin_unlock_bh(&ecm_classifier_dscp_lock);
 }
 
+#ifdef ECM_STATE_OUTPUT_ENABLE
 /*
  * ecm_classifier_dscp_xml_state_get()
  *	Return an XML state element
@@ -576,6 +577,7 @@ static int ecm_classifier_dscp_xml_state_get(struct ecm_classifier_instance *ci,
 	total += count;
 	return total;
 }
+#endif
 
 /*
  * ecm_classifier_dscp_instance_alloc()
@@ -605,7 +607,9 @@ struct ecm_classifier_dscp_instance *ecm_classifier_dscp_instance_alloc(struct e
 	cdscpi->base.last_process_response_get = ecm_classifier_dscp_last_process_response_get;
 	cdscpi->base.reclassify_allowed = ecm_classifier_dscp_reclassify_allowed;
 	cdscpi->base.reclassify = ecm_classifier_dscp_reclassify;
+#ifdef ECM_STATE_OUTPUT_ENABLE
 	cdscpi->base.xml_state_get = ecm_classifier_dscp_xml_state_get;
+#endif
 	cdscpi->base.ref = ecm_classifier_dscp_ref;
 	cdscpi->base.deref = ecm_classifier_dscp_deref;
 	cdscpi->ci_serial = ecm_db_connection_serial_get(ci);

@@ -122,11 +122,13 @@ typedef void (*ecm_classifier_reclassify_callback_t)(struct ecm_classifier_insta
 											/* Reclassify */
 typedef void (*ecm_classifier_last_process_response_get_callback_t)(struct ecm_classifier_instance *ci, struct ecm_classifier_process_response *process_response);
 											/* Get last process response */
+#ifdef ECM_STATE_OUTPUT_ENABLE
 typedef int (*ecm_classifier_xml_state_get_callback_t)(struct ecm_classifier_instance *ci, char *buf, int buf_sz);
 											/* Get XML state output, buf has buf_sz bytes available.  Returns number of bytes written.
 											 * Function has failed if the return is (<= 0) || (return value == buf_sz).
 											 * The return code is compatible with snprintf().
 											 */
+#endif
 
 /*
  * Base class for all types of classifiers
@@ -149,12 +151,15 @@ struct ecm_classifier_instance {
 							/* Reclassify */
 	ecm_classifier_last_process_response_get_callback_t last_process_response_get;
 							/* Return last process response */
+#ifdef ECM_STATE_OUTPUT_ENABLE
 	ecm_classifier_xml_state_get_callback_t xml_state_get;
 							/* Return an XML element containing its state */
+#endif
 	ecm_classifier_ref_method_t ref;
 	ecm_classifier_deref_callback_t deref;
 };
 
+#ifdef ECM_STATE_OUTPUT_ENABLE
 /*
  * ecm_classifier_process_response_xml_state_get()
  *	Output an XML block for the process response
@@ -225,5 +230,7 @@ static inline int ecm_classifier_process_response_xml_state_get(char *buf, int b
 			accel_mode_str,
 			dscp_str);
 }
+#endif
+
 
 
