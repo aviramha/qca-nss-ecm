@@ -522,6 +522,13 @@ static void ecm_classifier_dscp_reclassify(struct ecm_classifier_instance *ci)
 	struct ecm_classifier_dscp_instance *cdscpi;
 	cdscpi = (struct ecm_classifier_dscp_instance *)ci;
 	DEBUG_CHECK_MAGIC(cdscpi, ECM_CLASSIFIER_DSCP_INSTANCE_MAGIC, "%p: magic failed\n", cdscpi);
+
+	/*
+	 * Revert back to MAYBE relevant - we will evaluate when we get the next process() call.
+	 */
+	spin_lock_bh(&ecm_classifier_dscp_lock);
+	cdscpi->process_response.relevance = ECM_CLASSIFIER_RELEVANCE_MAYBE;
+	spin_unlock_bh(&ecm_classifier_dscp_lock);
 }
 
 /*
