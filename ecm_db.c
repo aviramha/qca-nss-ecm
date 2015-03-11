@@ -193,6 +193,7 @@ struct ecm_db_iface_instance {
 	char name[IFNAMSIZ];				/* Name of interface */
 	int32_t mtu;					/* Interface MTU */
 
+#ifdef ECM_DB_ADVANCED_STATS_ENABLE
 	uint64_t from_data_total;			/* Total of data sent by this Interface */
 	uint64_t to_data_total;				/* Total of data sent to this Interface */
 	uint64_t from_packet_total;			/* Total of packets sent by this Interface */
@@ -201,6 +202,7 @@ struct ecm_db_iface_instance {
 	uint64_t to_data_total_dropped;
 	uint64_t from_packet_total_dropped;
 	uint64_t to_packet_total_dropped;
+#endif
 
 	/*
 	 * For convenience interfaces keep lists of connections that have been established
@@ -291,6 +293,7 @@ struct ecm_db_node_instance {
 
 	uint32_t time_added;				/* RO: DB time stamp when the node was added into the database */
 
+#ifdef ECM_DB_ADVANCED_STATS_ENABLE
 	uint64_t from_data_total;			/* Total of data sent by this node */
 	uint64_t to_data_total;				/* Total of data sent to this node */
 	uint64_t from_packet_total;			/* Total of packets sent by this node */
@@ -299,6 +302,7 @@ struct ecm_db_node_instance {
 	uint64_t to_data_total_dropped;
 	uint64_t from_packet_total_dropped;
 	uint64_t to_packet_total_dropped;
+#endif
 
 	struct ecm_db_iface_instance *iface;		/* The interface to which this node relates */
 	struct ecm_db_node_instance *node_next;		/* The next node within the same iface nodes list */
@@ -333,6 +337,7 @@ struct ecm_db_host_instance {
 	int mapping_count;				/* Number of mappings in the mapping list */
 	uint32_t time_added;				/* RO: DB time stamp when the host was added into the database */
 
+#ifdef ECM_DB_ADVANCED_STATS_ENABLE
 	uint64_t from_data_total;			/* Total of data sent by this host */
 	uint64_t to_data_total;				/* Total of data sent to this host */
 	uint64_t from_packet_total;			/* Total of packets sent by this host */
@@ -341,6 +346,7 @@ struct ecm_db_host_instance {
 	uint64_t to_data_total_dropped;
 	uint64_t from_packet_total_dropped;
 	uint64_t to_packet_total_dropped;
+#endif
 
 	ecm_db_host_final_callback_t final;		/* Callback to owner when object is destroyed */
 	void *arg;					/* Argument returned to owner in callbacks */
@@ -399,6 +405,7 @@ struct ecm_db_mapping_instance {
 	int nat_from;
 	int nat_to;
 
+#ifdef ECM_DB_ADVANCED_STATS_ENABLE
 	/*
 	 * Data totals
 	 */
@@ -410,6 +417,7 @@ struct ecm_db_mapping_instance {
 	uint64_t to_data_total_dropped;
 	uint64_t from_packet_total_dropped;
 	uint64_t to_packet_total_dropped;
+#endif
 
 	ecm_db_mapping_final_callback_t final;				/* Callback to owner when object is destroyed */
 	void *arg;							/* Argument returned to owner in callbacks */
@@ -896,10 +904,11 @@ void ecm_db_connection_data_totals_update(struct ecm_db_connection_instance *ci,
 		 * Update totals sent by the FROM side of connection
 		 */
 		ci->from_data_total += size;
+		ci->from_packet_total += packets;
+#ifdef ECM_DB_ADVANCED_STATS_ENABLE
 		ci->mapping_from->from_data_total += size;
 		ci->mapping_from->host->from_data_total += size;
 		ci->from_node->from_data_total += size;
-		ci->from_packet_total += packets;
 		ci->mapping_from->from_packet_total += packets;
 		ci->mapping_from->host->from_packet_total += packets;
 		ci->from_node->from_packet_total += packets;
@@ -925,6 +934,7 @@ void ecm_db_connection_data_totals_update(struct ecm_db_connection_instance *ci,
 		 */
 		ci->to_node->iface->from_data_total += size;
 		ci->to_node->iface->from_packet_total += packets;
+#endif
 		spin_unlock_bh(&ecm_db_lock);
 		return;
 	}
@@ -933,10 +943,11 @@ void ecm_db_connection_data_totals_update(struct ecm_db_connection_instance *ci,
 	 * Update totals sent by the TO side of this connection
 	 */
 	ci->to_data_total += size;
+	ci->to_packet_total += packets;
+#ifdef ECM_DB_ADVANCED_STATS_ENABLE
 	ci->mapping_to->from_data_total += size;
 	ci->mapping_to->host->from_data_total += size;
 	ci->to_node->from_data_total += size;
-	ci->to_packet_total += packets;
 	ci->mapping_to->from_packet_total += packets;
 	ci->mapping_to->host->from_packet_total += packets;
 	ci->to_node->from_packet_total += packets;
@@ -962,6 +973,7 @@ void ecm_db_connection_data_totals_update(struct ecm_db_connection_instance *ci,
 	 */
 	ci->from_node->iface->from_data_total += size;
 	ci->from_node->iface->from_packet_total += packets;
+#endif
 	spin_unlock_bh(&ecm_db_lock);
 }
 EXPORT_SYMBOL(ecm_db_connection_data_totals_update);
@@ -980,10 +992,11 @@ void ecm_db_connection_data_totals_update_dropped(struct ecm_db_connection_insta
 		 */
 		spin_lock_bh(&ecm_db_lock);
 		ci->from_data_total_dropped += size;
+		ci->from_packet_total_dropped += packets;
+#ifdef ECM_DB_ADVANCED_STATS_ENABLE
 		ci->mapping_from->from_data_total_dropped += size;
 		ci->mapping_from->host->from_data_total_dropped += size;
 		ci->from_node->from_data_total_dropped += size;
-		ci->from_packet_total_dropped += packets;
 		ci->mapping_from->from_packet_total_dropped += packets;
 		ci->mapping_from->host->from_packet_total_dropped += packets;
 		ci->from_node->from_packet_total_dropped += packets;
@@ -993,6 +1006,7 @@ void ecm_db_connection_data_totals_update_dropped(struct ecm_db_connection_insta
 		 */
 		ci->from_node->iface->to_data_total_dropped += size;
 		ci->from_node->iface->to_packet_total_dropped += packets;
+#endif
 		spin_unlock_bh(&ecm_db_lock);
 		return;
 	}
@@ -1002,10 +1016,11 @@ void ecm_db_connection_data_totals_update_dropped(struct ecm_db_connection_insta
 	 */
 	spin_lock_bh(&ecm_db_lock);
 	ci->to_data_total_dropped += size;
+	ci->to_packet_total_dropped += packets;
+#ifdef ECM_DB_ADVANCED_STATS_ENABLE
 	ci->mapping_to->from_data_total_dropped += size;
 	ci->mapping_to->host->from_data_total_dropped += size;
 	ci->to_node->from_data_total_dropped += size;
-	ci->to_packet_total_dropped += packets;
 	ci->mapping_to->from_packet_total_dropped += packets;
 	ci->mapping_to->host->from_packet_total_dropped += packets;
 	ci->to_node->from_packet_total_dropped += packets;
@@ -1015,6 +1030,7 @@ void ecm_db_connection_data_totals_update_dropped(struct ecm_db_connection_insta
 	 */
 	ci->to_node->iface->to_data_total_dropped += size;
 	ci->to_node->iface->to_packet_total_dropped += packets;
+#endif
 	spin_unlock_bh(&ecm_db_lock);
 }
 EXPORT_SYMBOL(ecm_db_connection_data_totals_update_dropped);
@@ -1059,6 +1075,7 @@ void ecm_db_connection_data_stats_get(struct ecm_db_connection_instance *ci, uin
 }
 EXPORT_SYMBOL(ecm_db_connection_data_stats_get);
 
+#ifdef ECM_DB_ADVANCED_STATS_ENABLE
 /*
  * ecm_db_mapping_data_stats_get()
  *	Return data stats for the instance
@@ -1097,7 +1114,9 @@ void ecm_db_mapping_data_stats_get(struct ecm_db_mapping_instance *mi, uint64_t 
 	spin_unlock_bh(&ecm_db_lock);
 }
 EXPORT_SYMBOL(ecm_db_mapping_data_stats_get);
+#endif
 
+#ifdef ECM_DB_ADVANCED_STATS_ENABLE
 /*
  * ecm_db_host_data_stats_get()
  *	Return data stats for the instance
@@ -1136,7 +1155,9 @@ void ecm_db_host_data_stats_get(struct ecm_db_host_instance *hi, uint64_t *from_
 	spin_unlock_bh(&ecm_db_lock);
 }
 EXPORT_SYMBOL(ecm_db_host_data_stats_get);
+#endif
 
+#ifdef ECM_DB_ADVANCED_STATS_ENABLE
 /*
  * ecm_db_node_data_stats_get()
  *	Return data stats for the instance
@@ -1175,7 +1196,9 @@ void ecm_db_node_data_stats_get(struct ecm_db_node_instance *ni, uint64_t *from_
 	spin_unlock_bh(&ecm_db_lock);
 }
 EXPORT_SYMBOL(ecm_db_node_data_stats_get);
+#endif
 
+#ifdef ECM_DB_ADVANCED_STATS_ENABLE
 /*
  * ecm_db_iface_data_stats_get()
  *	Return data stats for the instance
@@ -1214,6 +1237,7 @@ void ecm_db_iface_data_stats_get(struct ecm_db_iface_instance *ii, uint64_t *fro
 	spin_unlock_bh(&ecm_db_lock);
 }
 EXPORT_SYMBOL(ecm_db_iface_data_stats_get);
+#endif
 
 /*
  * ecm_db_connection_serial_get()
@@ -6491,6 +6515,12 @@ static int ecm_db_iface_xml_state_get_open(struct ecm_db_iface_instance *ii, cha
 	int count;
 	int node_count;
 	uint32_t time_added;
+	int32_t interface_identifier;
+	int32_t nss_interface_identifier;
+	char name[IFNAMSIZ];
+	int32_t mtu;
+	ecm_db_iface_type_t type;
+#ifdef ECM_DB_ADVANCED_STATS_ENABLE
 	uint64_t from_data_total;
 	uint64_t to_data_total;
 	uint64_t from_packet_total;
@@ -6499,11 +6529,7 @@ static int ecm_db_iface_xml_state_get_open(struct ecm_db_iface_instance *ii, cha
 	uint64_t to_data_total_dropped;
 	uint64_t from_packet_total_dropped;
 	uint64_t to_packet_total_dropped;
-	int32_t interface_identifier;
-	int32_t nss_interface_identifier;
-	char name[IFNAMSIZ];
-	int32_t mtu;
-	ecm_db_iface_type_t type;
+#endif
 
 	DEBUG_CHECK_MAGIC(ii, ECM_DB_IFACE_INSTANCE_MAGIC, "%p: magic failed\n", ii);
 	DEBUG_TRACE("%p: Open iface msg\n", ii);
@@ -6515,10 +6541,6 @@ static int ecm_db_iface_xml_state_get_open(struct ecm_db_iface_instance *ii, cha
 	 */
 	node_count = ecm_db_iface_node_count_get(ii);
 	time_added = ii->time_added;
-	ecm_db_iface_data_stats_get(ii, &from_data_total, &to_data_total,
-			&from_packet_total, &to_packet_total,
-			&from_data_total_dropped, &to_data_total_dropped,
-			&from_packet_total_dropped, &to_packet_total_dropped);
 	type = ii->type;
 	spin_lock_bh(&ecm_db_lock);
 	strcpy(name, ii->name);
@@ -6527,29 +6549,54 @@ static int ecm_db_iface_xml_state_get_open(struct ecm_db_iface_instance *ii, cha
 	nss_interface_identifier = ii->nss_interface_identifier;
 	spin_unlock_bh(&ecm_db_lock);
 
+#ifdef ECM_DB_ADVANCED_STATS_ENABLE
+	ecm_db_iface_data_stats_get(ii, &from_data_total, &to_data_total,
+			&from_packet_total, &to_packet_total,
+			&from_data_total_dropped, &to_data_total_dropped,
+			&from_packet_total_dropped, &to_packet_total_dropped);
+#endif
+
 	/*
 	 * Prep the message
 	 */
 	count = snprintf(buf, buf_sz,
-		"<iface type=\"%d\" name=\"%s\" nodes=\"%d\" time_added=\"%u\""
-		" mtu=\"%d\" interface_identifier=\"%d\" nss_interface_identifier=\"%d\""
-		" from_data_total=\"%llu\" to_data_total=\"%llu\" from_packet_total=\"%llu\" to_packet_total=\"%llu\""
-		" from_data_total_dropped=\"%llu\" to_data_total_dropped=\"%llu\" from_packet_total_dropped=\"%llu\" to_packet_total_dropped=\"%llu\">\n",
-		type,
-		name,
-		node_count,
-		time_added,
-		mtu,
-		interface_identifier,
-		nss_interface_identifier,
-		from_data_total,
-		to_data_total,
-		from_packet_total,
-		to_packet_total,
-		from_data_total_dropped,
-		to_data_total_dropped,
-		from_packet_total_dropped,
-		to_packet_total_dropped);
+		"<iface"
+		" type=\"%d\""
+		" name=\"%s\""
+		" nodes=\"%d\""
+		" time_added=\"%u\""
+		" mtu=\"%d\""
+		" interface_identifier=\"%d\""
+		" nss_interface_identifier=\"%d\""
+#ifdef ECM_DB_ADVANCED_STATS_ENABLE
+		" from_data_total=\"%llu\""
+		" to_data_total=\"%llu\""
+		" from_packet_total=\"%llu\""
+		" to_packet_total=\"%llu\""
+		" from_data_total_dropped=\"%llu\""
+		" to_data_total_dropped=\"%llu\""
+		" from_packet_total_dropped=\"%llu\""
+		" to_packet_total_dropped=\"%llu\""
+#endif
+		">\n"
+		, type
+		, name
+		, node_count
+		, time_added
+		, mtu
+		, interface_identifier
+		, nss_interface_identifier
+#ifdef ECM_DB_ADVANCED_STATS_ENABLE
+		, from_data_total
+		, to_data_total
+		, from_packet_total
+		, to_packet_total
+		, from_data_total_dropped
+		, to_data_total_dropped
+		, from_packet_total_dropped
+		, to_packet_total_dropped
+#endif
+		);
 
 	if ((count <= 0) || (count >= buf_sz)) {
 		return -1;
@@ -7365,6 +7412,8 @@ int ecm_db_mapping_xml_state_get(struct ecm_db_mapping_instance *mi, char *buf, 
 	int nat_from;
 	int nat_to;
 	uint32_t time_added;
+	struct ecm_db_host_instance *hi;
+#ifdef ECM_DB_ADVANCED_STATS_ENABLE
 	uint64_t from_data_total;
 	uint64_t to_data_total;
 	uint64_t from_packet_total;
@@ -7373,7 +7422,7 @@ int ecm_db_mapping_xml_state_get(struct ecm_db_mapping_instance *mi, char *buf, 
 	uint64_t to_data_total_dropped;
 	uint64_t from_packet_total_dropped;
 	uint64_t to_packet_total_dropped;
-	struct ecm_db_host_instance *hi;
+#endif
 
 	DEBUG_TRACE("Prep mapping msg for %p\n", mi);
 
@@ -7385,45 +7434,72 @@ int ecm_db_mapping_xml_state_get(struct ecm_db_mapping_instance *mi, char *buf, 
 			&tcp_nat_from, &tcp_nat_to, &udp_nat_from, &udp_nat_to, &nat_from, &nat_to);
 	port = mi->port;
 	time_added = mi->time_added;
+	hi = mi->host;
+	ecm_ip_addr_to_string(address, hi->address);
+
+#ifdef ECM_DB_ADVANCED_STATS_ENABLE
 	ecm_db_mapping_data_stats_get(mi, &from_data_total, &to_data_total,
 			&from_packet_total, &to_packet_total,
 			&from_data_total_dropped, &to_data_total_dropped,
 			&from_packet_total_dropped, &to_packet_total_dropped);
-	hi = mi->host;
-	ecm_ip_addr_to_string(address, hi->address);
+#endif
 
 	/*
 	 * Prep the message
 	 */
 	return snprintf(buf, buf_sz,
-			"<mapping address=\"%s\" port=\"%d\" from=\"%d\" to=\"%d\" tcp_from=\"%d\" tcp_to=\"%d\" udp_from=\"%d\" udp_to=\"%d\""
-			" nat_from=\"%d\" nat_to=\"%d\" tcp_nat_from=\"%d\" tcp_nat_to=\"%d\" udp_nat_from=\"%d\" udp_nat_to=\"%d\""
-			" from_data_total=\"%llu\" to_data_total=\"%llu\" from_packet_total=\"%llu\" to_packet_total=\"%llu\""
-			" from_data_total_dropped=\"%llu\" to_data_total_dropped=\"%llu\" from_packet_total_dropped=\"%llu\" to_packet_total_dropped=\"%llu\""
-			" time_added=\"%u\"/>\n",
-			address,
-			port,
-			from,
-			to,
-			tcp_from,
-			tcp_to,
-			udp_from,
-			udp_to,
-			nat_from,
-			nat_to,
-			tcp_nat_from,
-			tcp_nat_to,
-			udp_nat_from,
-			udp_nat_to,
-			from_data_total,
-			to_data_total,
-			from_packet_total,
-			to_packet_total,
-			from_data_total_dropped,
-			to_data_total_dropped,
-			from_packet_total_dropped,
-			to_packet_total_dropped,
-			time_added);
+			"<mapping"
+			" address=\"%s\""
+			" port=\"%d\""
+			" from=\"%d\""
+			" to=\"%d\""
+			" tcp_from=\"%d\""
+			" tcp_to=\"%d\""
+			" udp_from=\"%d\""
+			" udp_to=\"%d\""
+			" nat_from=\"%d\""
+			" nat_to=\"%d\""
+			" tcp_nat_from=\"%d\""
+			" tcp_nat_to=\"%d\""
+			" udp_nat_from=\"%d\""
+			" udp_nat_to=\"%d\""
+#ifdef ECM_DB_ADVANCED_STATS_ENABLE
+			" from_data_total=\"%llu\""
+			" to_data_total=\"%llu\""
+			" from_packet_total=\"%llu\""
+			" to_packet_total=\"%llu\""
+			" from_data_total_dropped=\"%llu\""
+			" to_data_total_dropped=\"%llu\""
+			" from_packet_total_dropped=\"%llu\""
+			" to_packet_total_dropped=\"%llu\""
+#endif
+			" time_added=\"%u\""
+			"/>\n"
+			, address
+			, port
+			, from
+			, to
+			, tcp_from
+			, tcp_to
+			, udp_from
+			, udp_to
+			, nat_from
+			, nat_to
+			, tcp_nat_from
+			, tcp_nat_to
+			, udp_nat_from
+			, udp_nat_to
+#ifdef ECM_DB_ADVANCED_STATS_ENABLE
+			, from_data_total
+			, to_data_total
+			, from_packet_total
+			, to_packet_total
+			, from_data_total_dropped
+			, to_data_total_dropped
+			, from_packet_total_dropped
+			, to_packet_total_dropped
+#endif
+			, time_added);
 
 }
 EXPORT_SYMBOL(ecm_db_mapping_xml_state_get);
@@ -7437,6 +7513,8 @@ int ecm_db_host_xml_state_get(struct ecm_db_host_instance *hi, char *buf, int bu
 	char address[50];
 	int mapping_count;
 	uint32_t time_added;
+	bool on_link;
+#ifdef ECM_DB_ADVANCED_STATS_ENABLE
 	uint64_t from_data_total;
 	uint64_t to_data_total;
 	uint64_t from_packet_total;
@@ -7445,7 +7523,7 @@ int ecm_db_host_xml_state_get(struct ecm_db_host_instance *hi, char *buf, int bu
 	uint64_t to_data_total_dropped;
 	uint64_t from_packet_total_dropped;
 	uint64_t to_packet_total_dropped;
-	bool on_link;
+#endif
 
 	DEBUG_TRACE("Prep host msg for %p\n", hi);
 
@@ -7456,31 +7534,50 @@ int ecm_db_host_xml_state_get(struct ecm_db_host_instance *hi, char *buf, int bu
 	mapping_count = ecm_db_host_mapping_count_get(hi);
 	ecm_ip_addr_to_string(address, hi->address);
 	time_added = hi->time_added;
+	on_link = hi->on_link;
+
+#ifdef ECM_DB_ADVANCED_STATS_ENABLE
 	ecm_db_host_data_stats_get(hi, &from_data_total, &to_data_total,
 			&from_packet_total, &to_packet_total,
 			&from_data_total_dropped, &to_data_total_dropped,
 			&from_packet_total_dropped, &to_packet_total_dropped);
-	on_link = hi->on_link;
+#endif
 
 	/*
 	 * Prep the message
 	 */
 	return snprintf(buf, buf_sz,
-		"<host address=\"%s\" mappings=\"%d\" time_added=\"%u\" on_link=\"%d\""
-		" from_data_total=\"%llu\" to_data_total=\"%llu\" from_packet_total=\"%llu\" to_packet_total=\"%llu\""
-		" from_data_total_dropped=\"%llu\" to_data_total_dropped=\"%llu\" from_packet_total_dropped=\"%llu\" to_packet_total_dropped=\"%llu\"/>\n",
-		address,
-		mapping_count,
-		time_added,
-		on_link,
-		from_data_total,
-		to_data_total,
-		from_packet_total,
-		to_packet_total,
-		from_data_total_dropped,
-		to_data_total_dropped,
-		from_packet_total_dropped,
-		to_packet_total_dropped);
+		"<host"
+		" address=\"%s\""
+		" mappings=\"%d\""
+		" time_added=\"%u\""
+		" on_link=\"%d\""
+#ifdef ECM_DB_ADVANCED_STATS_ENABLE
+		" from_data_total=\"%llu\""
+		" to_data_total=\"%llu\""
+		" from_packet_total=\"%llu\""
+		" to_packet_total=\"%llu\""
+		" from_data_total_dropped=\"%llu\""
+		" to_data_total_dropped=\"%llu\""
+		" from_packet_total_dropped=\"%llu\""
+		" to_packet_total_dropped=\"%llu\""
+#endif
+		"/>\n"
+		, address
+		, mapping_count
+		, time_added
+		, on_link
+#ifdef ECM_DB_ADVANCED_STATS_ENABLE
+		, from_data_total
+		, to_data_total
+		, from_packet_total
+		, to_packet_total
+		, from_data_total_dropped
+		, to_data_total_dropped
+		, from_packet_total_dropped
+		, to_packet_total_dropped
+#endif
+		);
 }
 EXPORT_SYMBOL(ecm_db_host_xml_state_get);
 
@@ -7496,6 +7593,7 @@ int ecm_db_node_xml_state_get(struct ecm_db_node_instance *ni, char *buf, int bu
 	int from_nat_connections_count;
 	int to_nat_connections_count;
 	uint32_t time_added;
+#ifdef ECM_DB_ADVANCED_STATS_ENABLE
 	uint64_t from_data_total;
 	uint64_t to_data_total;
 	uint64_t from_packet_total;
@@ -7504,6 +7602,7 @@ int ecm_db_node_xml_state_get(struct ecm_db_node_instance *ni, char *buf, int bu
 	uint64_t to_data_total_dropped;
 	uint64_t from_packet_total_dropped;
 	uint64_t to_packet_total_dropped;
+#endif
 
 	DEBUG_TRACE("Prep node msg for %p\n", ni);
 
@@ -7520,33 +7619,55 @@ int ecm_db_node_xml_state_get(struct ecm_db_node_instance *ni, char *buf, int bu
 	to_nat_connections_count = ni->to_nat_connections_count;
 	spin_unlock_bh(&ecm_db_lock);
 	time_added = ni->time_added;
+	sprintf(address, "%pM", ni->address);
+
+#ifdef ECM_DB_ADVANCED_STATS_ENABLE
 	ecm_db_node_data_stats_get(ni, &from_data_total, &to_data_total,
 			&from_packet_total, &to_packet_total,
 			&from_data_total_dropped, &to_data_total_dropped,
 			&from_packet_total_dropped, &to_packet_total_dropped);
-	sprintf(address, "%pM", ni->address);
+
+#endif
 
 	/*
 	 * Prep the message
 	 */
 	return snprintf(buf, buf_sz,
-		"<node address=\"%s\" from_connections_count=\"%d\" to_connections_count=\"%d\" from_nat_connections_count=\"%d\" to_nat_connections_count=\"%d\" time_added=\"%u\""
-		" from_data_total=\"%llu\" to_data_total=\"%llu\" from_packet_total=\"%llu\" to_packet_total=\"%llu\""
-		" from_data_total_dropped=\"%llu\" to_data_total_dropped=\"%llu\" from_packet_total_dropped=\"%llu\" to_packet_total_dropped=\"%llu\" />\n",
-		address,
-		from_connections_count,
-		to_connections_count,
-		from_nat_connections_count,
-		to_nat_connections_count,
-		time_added,
-		from_data_total,
-		to_data_total,
-		from_packet_total,
-		to_packet_total,
-		from_data_total_dropped,
-		to_data_total_dropped,
-		from_packet_total_dropped,
-		to_packet_total_dropped);
+		"<node"
+		" address=\"%s\""
+		" from_connections_count=\"%d\""
+		" to_connections_count=\"%d\""
+		" from_nat_connections_count=\"%d\""
+		" to_nat_connections_count=\"%d\""
+		" time_added=\"%u\""
+#ifdef ECM_DB_ADVANCED_STATS_ENABLE
+		" from_data_total=\"%llu\""
+		" to_data_total=\"%llu\""
+		" from_packet_total=\"%llu\""
+		" to_packet_total=\"%llu\""
+		" from_data_total_dropped=\"%llu\""
+		" to_data_total_dropped=\"%llu\""
+		" from_packet_total_dropped=\"%llu\""
+		" to_packet_total_dropped=\"%llu\""
+#endif
+		"/>\n"
+		, address
+		, from_connections_count
+		, to_connections_count
+		, from_nat_connections_count
+		, to_nat_connections_count
+		, time_added
+#ifdef ECM_DB_ADVANCED_STATS_ENABLE
+		, from_data_total
+		, to_data_total
+		, from_packet_total
+		, to_packet_total
+		, from_data_total_dropped
+		, to_data_total_dropped
+		, from_packet_total_dropped
+		, to_packet_total_dropped
+#endif
+		);
 }
 EXPORT_SYMBOL(ecm_db_node_xml_state_get);
 
