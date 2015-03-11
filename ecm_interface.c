@@ -1025,8 +1025,8 @@ static struct ecm_db_iface_instance *ecm_interface_ipsec_tunnel_interface_establ
 	return nii;
 }
 
-#ifdef CONFIG_IPV6_SIT_6RD
 #ifdef ECM_INTERFACE_SIT_ENABLE
+#ifdef CONFIG_IPV6_SIT_6RD
 /*
  * ecm_interface_sit_interface_establish()
  *	Returns a reference to a iface of the SIT type, possibly creating one if necessary.
@@ -1156,7 +1156,9 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct net_device 
 		struct ecm_db_interface_info_unknown unknown;		/* type == ECM_DB_IFACE_TYPE_UNKNOWN */
 		struct ecm_db_interface_info_loopback loopback;		/* type == ECM_DB_IFACE_TYPE_LOOPBACK */
 		struct ecm_db_interface_info_ipsec_tunnel ipsec_tunnel;	/* type == ECM_DB_IFACE_TYPE_IPSEC_TUNNEL */
+#ifdef ECM_INTERFACE_SIT_ENABLE
 		struct ecm_db_interface_info_sit sit;			/* type == ECM_DB_IFACE_TYPE_SIT */
+#endif
 		struct ecm_db_interface_info_tunipip6 tunipip6;		/* type == ECM_DB_IFACE_TYPE_TUNIPIP6 */
 	} type_info;
 
@@ -1296,8 +1298,8 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct net_device 
 		return ii;
 	}
 
-#ifdef CONFIG_IPV6_SIT_6RD
 #ifdef ECM_INTERFACE_SIT_ENABLE
+#ifdef CONFIG_IPV6_SIT_6RD
 	/*
 	 * SIT (6-in-4)?
 	 */

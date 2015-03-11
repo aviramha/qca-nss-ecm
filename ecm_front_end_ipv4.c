@@ -3519,8 +3519,8 @@ static struct ecm_front_end_ipv4_connection_udp_instance *ecm_front_end_ipv4_con
 	return fecui;
 }
 
-#ifdef CONFIG_IPV6_SIT_6RD
 #ifdef ECM_INTERFACE_SIT_ENABLE
+#ifdef CONFIG_IPV6_SIT_6RD
 /*
  * ecm_front_end_ipv4_sit_set_peer()
  *	It will set the tunnel's peer when the tunnel is a remote any tunnel.
@@ -7228,8 +7228,8 @@ static unsigned int ecm_front_end_ipv4_non_ported_process(struct net_device *out
 	skb->priority = prevalent_pr.flow_qos_tag;
 	DEBUG_TRACE("%p: skb priority: %u\n", ci, skb->priority);
 
-#ifdef CONFIG_IPV6_SIT_6RD
 #ifdef ECM_INTERFACE_SIT_ENABLE
+#ifdef CONFIG_IPV6_SIT_6RD
 	/*
 	 * SIT tunnel acceleration needs create a rule to the nss firmware if the
 	 *	tunnel's dest ip address is empty,it will get dest ip and the embedded ipv6's dest ip
