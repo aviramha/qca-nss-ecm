@@ -223,9 +223,11 @@ struct ecm_db_interface_info_vlan {			/* type == ECM_DB_IFACE_TYPE_VLAN */
 };
 #endif
 
+#ifdef ECM_INTERFACE_BOND_ENABLE
 struct ecm_db_interface_info_lag {			/* type == ECM_DB_IFACE_TYPE_LAG */
 	uint8_t address[ETH_ALEN];			/* MAC Address of this Interface */
 };
+#endif
 
 struct ecm_db_interface_info_bridge {			/* type == ECM_DB_IFACE_TYPE_BRIDGE */
 	uint8_t address[ETH_ALEN];			/* MAC Address of this Interface */

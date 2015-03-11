@@ -225,7 +225,9 @@ struct ecm_db_iface_instance {
 #ifdef ECM_INTERFACE_VLAN_ENABLE
 		struct ecm_db_interface_info_vlan vlan;			/* type == ECM_DB_IFACE_TYPE_VLAN */
 #endif
+#ifdef ECM_INTERFACE_BOND_ENABLE
 		struct ecm_db_interface_info_lag lag;			/* type == ECM_DB_IFACE_TYPE_LAG */
+#endif
 		struct ecm_db_interface_info_bridge bridge;		/* type == ECM_DB_IFACE_TYPE_BRIDGE */
 #ifdef ECM_INTERFACE_PPP_ENABLE
 		struct ecm_db_interface_info_pppoe pppoe;		/* type == ECM_DB_IFACE_TYPE_PPPOE */
@@ -3669,6 +3671,7 @@ struct ecm_db_iface_instance *ecm_db_iface_find_and_ref_bridge(uint8_t *address)
 }
 EXPORT_SYMBOL(ecm_db_iface_find_and_ref_bridge);
 
+#ifdef ECM_INTERFACE_BOND_ENABLE
 /*
  * ecm_db_iface_find_and_ref_lag()
  *	Lookup and return a iface reference if any
@@ -3706,6 +3709,7 @@ struct ecm_db_iface_instance *ecm_db_iface_find_and_ref_lag(uint8_t *address)
 	return NULL;
 }
 EXPORT_SYMBOL(ecm_db_iface_find_and_ref_lag);
+#endif
 
 #ifdef ECM_INTERFACE_PPP_ENABLE
 /*
@@ -6741,6 +6745,7 @@ void ecm_db_iface_add_ethernet(struct ecm_db_iface_instance *ii, uint8_t *addres
 }
 EXPORT_SYMBOL(ecm_db_iface_add_ethernet);
 
+#ifdef ECM_INTERFACE_BOND_ENABLE
 /*
  * ecm_db_iface_lag_xml_state_get()
  * 	Return interface type specific state
@@ -6881,6 +6886,7 @@ void ecm_db_iface_add_lag(struct ecm_db_iface_instance *ii, uint8_t *address, ch
 	}
 }
 EXPORT_SYMBOL(ecm_db_iface_add_lag);
+#endif
 
 /*
  * ecm_db_iface_bridge_xml_state_get()

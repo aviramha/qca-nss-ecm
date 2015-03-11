@@ -20,6 +20,7 @@
 #define ecm_front_end_is_bridge_port(dev) (dev && (dev->priv_flags & IFF_BRIDGE_PORT))
 #define ecm_front_end_is_bridge_device(dev) (dev->priv_flags & IFF_EBRIDGE)
 
+#ifdef ECM_INTERFACE_BOND_ENABLE
 /*
  * LAN Aggregation device macros
  */
@@ -27,6 +28,7 @@
 							 && (dev->priv_flags & IFF_BONDING))
 #define ecm_front_end_is_lag_slave(dev)	((dev->flags & IFF_SLAVE)	\
 							 && (dev->priv_flags & IFF_BONDING))
+#endif
 
 /*
  * enum ecm_front_end_acceleration_modes
