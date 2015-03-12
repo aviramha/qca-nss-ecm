@@ -973,6 +973,7 @@ static struct ecm_db_iface_instance *ecm_interface_loopback_interface_establish(
 	return nii;
 }
 
+#ifdef ECM_INTERFACE_IPSEC_ENABLE
 /*
  * ecm_interface_ipsec_tunnel_interface_establish()
  *	Returns a reference to a iface of the IPSEC_TUNNEL type, possibly creating one if necessary.
@@ -1024,6 +1025,7 @@ static struct ecm_db_iface_instance *ecm_interface_ipsec_tunnel_interface_establ
 	DEBUG_TRACE("%p: ipsec_tunnel iface established\n", nii);
 	return nii;
 }
+#endif
 
 #ifdef ECM_INTERFACE_SIT_ENABLE
 #ifdef CONFIG_IPV6_SIT_6RD
@@ -1157,7 +1159,9 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct net_device 
 #endif
 		struct ecm_db_interface_info_unknown unknown;		/* type == ECM_DB_IFACE_TYPE_UNKNOWN */
 		struct ecm_db_interface_info_loopback loopback;		/* type == ECM_DB_IFACE_TYPE_LOOPBACK */
+#ifdef ECM_INTERFACE_IPSEC_ENABLE
 		struct ecm_db_interface_info_ipsec_tunnel ipsec_tunnel;	/* type == ECM_DB_IFACE_TYPE_IPSEC_TUNNEL */
+#endif
 #ifdef ECM_INTERFACE_SIT_ENABLE
 		struct ecm_db_interface_info_sit sit;			/* type == ECM_DB_IFACE_TYPE_SIT */
 #endif
@@ -1285,6 +1289,7 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct net_device 
 		return ii;
 	}
 
+#ifdef ECM_INTERFACE_IPSEC_ENABLE
 	/*
 	 * IPSEC?
 	 */
@@ -1301,6 +1306,7 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct net_device 
 		ii = ecm_interface_ipsec_tunnel_interface_establish(&type_info.ipsec_tunnel, dev_name, dev_interface_num, nss_interface_num, dev_mtu);
 		return ii;
 	}
+#endif
 
 #ifdef ECM_INTERFACE_SIT_ENABLE
 #ifdef CONFIG_IPV6_SIT_6RD

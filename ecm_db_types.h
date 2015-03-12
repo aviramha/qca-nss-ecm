@@ -248,10 +248,12 @@ struct ecm_db_interface_info_loopback {			/* type == ECM_DB_IFACE_TYPE_LOOPBACK 
 	uint32_t os_specific_ident;			/* Operating system specific identifier (known only by front end) */
 };
 
+#ifdef ECM_INTERFACE_IPSEC_ENABLE
 struct ecm_db_interface_info_ipsec_tunnel {		/* type == ECM_DB_IFACE_TYPE_IPSEC_TUNNEL */
 	uint32_t os_specific_ident;			/* Operating system specific identifier (known only by front end) */
 	// GGG TODO Flesh this out with tunnel endpoint addressing detal
 };
+#endif
 
 #ifdef ECM_INTERFACE_SIT_ENABLE
 struct ecm_db_interface_info_sit {			/* type == ECM_DB_IFACE_TYPE_SIT */
