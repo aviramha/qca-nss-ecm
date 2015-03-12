@@ -759,6 +759,21 @@ static char *ecm_db_interface_type_names[ECM_DB_IFACE_TYPE_COUNT] = {
 };
 
 /*
+ * ecm_db_connection_count_get()
+ *	Return the connection count
+ */
+int ecm_db_connection_count_get(void)
+{
+	int count;
+
+	spin_lock_bh(&ecm_db_lock);
+	count = ecm_db_connection_count;
+	spin_unlock_bh(&ecm_db_lock);
+	return count;
+}
+EXPORT_SYMBOL(ecm_db_connection_count_get);
+
+/*
  * ecm_db_interface_type_to_string()
  *	Return a string buffer containing the type name of the interface
  */

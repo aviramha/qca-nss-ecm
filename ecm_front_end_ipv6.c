@@ -5806,19 +5806,6 @@ static unsigned int ecm_front_end_ipv6_tcp_process(struct net_device *out_dev,
 				ECM_IP_ADDR_TO_OCTAL(ip_src_addr), src_port, ECM_IP_ADDR_TO_OCTAL(ip_dest_addr), dest_port);
 
 		/*
-		 * Do not add a connection in terminating state
-		 */
-		if (ct) {
-			spin_lock_bh(&ct->lock);
-			if (ct->proto.tcp.state >= TCP_CONNTRACK_FIN_WAIT && ct->proto.tcp.state <= TCP_CONNTRACK_CLOSE) {
-				spin_unlock_bh(&ct->lock);
-				DEBUG_TRACE("%p: Connection in termination state %#X\n", ct, ct->proto.tcp.state);
-				return NF_ACCEPT;
-			}
-			spin_unlock_bh(&ct->lock);
-		}
-
-		/*
 		 * Before we attempt to create the connection are we being terminated?
 		 */
 		spin_lock_bh(&ecm_front_end_ipv6_lock);
@@ -5832,6 +5819,40 @@ static unsigned int ecm_front_end_ipv6_tcp_process(struct net_device *out_dev,
 			return NF_ACCEPT;
 		}
 		spin_unlock_bh(&ecm_front_end_ipv6_lock);
+
+		/*
+		 * Does this connection have a conntrack entry?
+		 */
+		if (ct) {
+			unsigned int conn_count;
+
+			/*
+			 * If we have exceeded the connection limit (according to conntrack) then abort
+			 * NOTE: Conntrack, when at its limit, will destroy a connection to make way for a new.
+			 * Conntrack won't exceed its limit but ECM can due to it needing to hold connections while
+			 * acceleration commands are in-flight.
+			 * This means that ECM can 'fall behind' somewhat with the connection state wrt conntrack connection state.
+			 * This is not seen as an issue since conntrack will have issued us with a destroy event for the flushed connection(s)
+			 * and we will eventually catch up.
+			 * Since ECM is capable of handling connections mid-flow ECM will pick up where it can.
+			 */
+			conn_count = (unsigned int)ecm_db_connection_count_get();
+			if (conn_count >= nf_conntrack_max) {
+				DEBUG_WARN("ECM Connection count limit reached: db: %u, ct: %u\n", conn_count, nf_conntrack_max);
+				return NF_ACCEPT;
+			}
+
+			/*
+			 * No point in establishing a connection for one that is closing
+			 */
+			spin_lock_bh(&ct->lock);
+			if (ct->proto.tcp.state >= TCP_CONNTRACK_FIN_WAIT && ct->proto.tcp.state <= TCP_CONNTRACK_CLOSE) {
+				spin_unlock_bh(&ct->lock);
+				DEBUG_TRACE("%p: Connection in termination state %#X\n", ct, ct->proto.tcp.state);
+				return NF_ACCEPT;
+			}
+			spin_unlock_bh(&ct->lock);
+		}
 
 		/*
 		 * Now allocate the new connection
@@ -6336,6 +6357,29 @@ static unsigned int ecm_front_end_ipv6_udp_process(struct net_device *out_dev,
 		spin_unlock_bh(&ecm_front_end_ipv6_lock);
 
 		/*
+		 * Does this connection have a conntrack entry?
+		 */
+		if (ct) {
+			unsigned int conn_count;
+
+			/*
+			 * If we have exceeded the connection limit (according to conntrack) then abort
+			 * NOTE: Conntrack, when at its limit, will destroy a connection to make way for a new.
+			 * Conntrack won't exceed its limit but ECM can due to it needing to hold connections while
+			 * acceleration commands are in-flight.
+			 * This means that ECM can 'fall behind' somewhat with the connection state wrt conntrack connection state.
+			 * This is not seen as an issue since conntrack will have issued us with a destroy event for the flushed connection(s)
+			 * and we will eventually catch up.
+			 * Since ECM is capable of handling connections mid-flow ECM will pick up where it can.
+			 */
+			conn_count = (unsigned int)ecm_db_connection_count_get();
+			if (conn_count >= nf_conntrack_max) {
+				DEBUG_WARN("ECM Connection count limit reached: db: %u, ct: %u\n", conn_count, nf_conntrack_max);
+				return NF_ACCEPT;
+			}
+		}
+
+		/*
 		 * Now allocate the new connection
 		 */
 		nci = ecm_db_connection_alloc();
@@ -6792,6 +6836,29 @@ static unsigned int ecm_front_end_ipv6_non_ported_process(struct net_device *out
 			return NF_ACCEPT;
 		}
 		spin_unlock_bh(&ecm_front_end_ipv6_lock);
+
+		/*
+		 * Does this connection have a conntrack entry?
+		 */
+		if (ct) {
+			unsigned int conn_count;
+
+			/*
+			 * If we have exceeded the connection limit (according to conntrack) then abort
+			 * NOTE: Conntrack, when at its limit, will destroy a connection to make way for a new.
+			 * Conntrack won't exceed its limit but ECM can due to it needing to hold connections while
+			 * acceleration commands are in-flight.
+			 * This means that ECM can 'fall behind' somewhat with the connection state wrt conntrack connection state.
+			 * This is not seen as an issue since conntrack will have issued us with a destroy event for the flushed connection(s)
+			 * and we will eventually catch up.
+			 * Since ECM is capable of handling connections mid-flow ECM will pick up where it can.
+			 */
+			conn_count = (unsigned int)ecm_db_connection_count_get();
+			if (conn_count >= nf_conntrack_max) {
+				DEBUG_WARN("ECM Connection count limit reached: db: %u, ct: %u\n", conn_count, nf_conntrack_max);
+				return NF_ACCEPT;
+			}
+		}
 
 		/*
 		 * Now allocate the new connection
