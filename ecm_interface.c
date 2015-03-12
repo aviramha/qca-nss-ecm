@@ -44,7 +44,7 @@
 
 
 #include <linux/inetdevice.h>
-#if (LINUX_VERSION_CODE <= KERNEL_VERSION(3,6,0))
+#if defined(ECM_INTERFACE_TUNIPIP6_ENABLE) || defined(ECM_INTERFACE_SIT_ENABLE)
 #include <net/ipip.h>
 #endif
 #include <net/ip6_tunnel.h>
@@ -1079,6 +1079,7 @@ static struct ecm_db_iface_instance *ecm_interface_sit_interface_establish(struc
 #endif
 #endif
 
+#ifdef ECM_INTERFACE_TUNIPIP6_ENABLE
 /*
  * ecm_interface_tunipip6_interface_establish()
  *	Returns a reference to a iface of the TUNIPIP6 type, possibly creating one if necessary.
@@ -1128,6 +1129,7 @@ static struct ecm_db_iface_instance *ecm_interface_tunipip6_interface_establish(
 	DEBUG_TRACE("%p: tunipip6 iface established\n", nii);
 	return nii;
 }
+#endif
 
 /*
  * ecm_interface_establish_and_ref()
@@ -1159,7 +1161,9 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct net_device 
 #ifdef ECM_INTERFACE_SIT_ENABLE
 		struct ecm_db_interface_info_sit sit;			/* type == ECM_DB_IFACE_TYPE_SIT */
 #endif
+#ifdef ECM_INTERFACE_TUNIPIP6_ENABLE
 		struct ecm_db_interface_info_tunipip6 tunipip6;		/* type == ECM_DB_IFACE_TYPE_TUNIPIP6 */
+#endif
 	} type_info;
 
 #ifdef ECM_INTERFACE_PPP_ENABLE
@@ -1336,6 +1340,7 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct net_device 
 #endif
 #endif
 
+#ifdef ECM_INTERFACE_TUNIPIP6_ENABLE
 	/*
 	 * IPIP6 Tunnel?
 	 */
@@ -1360,7 +1365,7 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct net_device 
 		ii = ecm_interface_tunipip6_interface_establish(&type_info.tunipip6, dev_name, dev_interface_num, nss_interface_num, dev_mtu);
 		return ii;
 	}
-
+#endif
 	/*
 	 * If this is NOT PPP then it is unknown to the ecm
 	 */

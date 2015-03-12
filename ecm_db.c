@@ -238,7 +238,9 @@ struct ecm_db_iface_instance {
 #ifdef ECM_INTERFACE_SIT_ENABLE
 		struct ecm_db_interface_info_sit sit;			/* type == ECM_DB_IFACE_TYPE_SIT (6-in-4) */
 #endif
+#ifdef ECM_INTERFACE_TUNIPIP6_ENABLE
 		struct ecm_db_interface_info_tunipip6 tunipip6;		/* type == ECM_DB_IFACE_TYPE_TUNIPIP6 (IPIP v6 Tunnel i.e. TUNNEL6) */
+#endif
 	} type_info;
 
 	ecm_db_iface_xml_state_get_method_t xml_state_get;		/* Type specific state method to return XML state for it */
@@ -3377,6 +3379,7 @@ static inline ecm_db_iface_hash_t ecm_db_iface_generate_hash_index_sit(ip_addr_t
 }
 #endif
 
+#ifdef ECM_INTERFACE_TUNIPIP6_ENABLE
 /*
  * ecm_db_iface_generate_hash_index_tunipip6()
  * 	Calculate the hash index.
@@ -3390,6 +3393,7 @@ static inline ecm_db_iface_hash_t ecm_db_iface_generate_hash_index_tunipip6(ip_a
 	hash_val = (temp >> 24) ^ (temp >> 16) ^ (temp >> 8) ^ temp;
 	return (ecm_db_iface_hash_t)(hash_val & (ECM_DB_IFACE_HASH_SLOTS - 1));
 }
+#endif
 
 /*
  * ecm_db_iface_generate_hash_index_ethernet()
@@ -3930,6 +3934,7 @@ struct ecm_db_iface_instance *ecm_db_iface_find_and_ref_sit(ip_addr_t saddr, ip_
 EXPORT_SYMBOL(ecm_db_iface_find_and_ref_sit);
 #endif
 
+#ifdef ECM_INTERFACE_TUNIPIP6_ENABLE
 /*
  * ecm_db_iface_find_and_ref_tunipip6()
  *	Lookup and return a iface reference if any
@@ -3970,6 +3975,7 @@ struct ecm_db_iface_instance *ecm_db_iface_find_and_ref_tunipip6(ip_addr_t saddr
 	return NULL;
 }
 EXPORT_SYMBOL(ecm_db_iface_find_and_ref_tunipip6);
+#endif
 
 /*
  * ecm_db_mapping_find_and_ref()
@@ -7763,6 +7769,7 @@ void ecm_db_iface_add_sit(struct ecm_db_iface_instance *ii, struct ecm_db_interf
 EXPORT_SYMBOL(ecm_db_iface_add_sit);
 #endif
 
+#ifdef ECM_INTERFACE_TUNIPIP6_ENABLE
 /*
  * ecm_db_iface_add_tunipip6()
  *	Add a iface instance into the database
@@ -7855,6 +7862,7 @@ void ecm_db_iface_add_tunipip6(struct ecm_db_iface_instance *ii, struct ecm_db_i
 	}
 }
 EXPORT_SYMBOL(ecm_db_iface_add_tunipip6);
+#endif
 
 /*
  * ecm_db_iface_add_ipsec_tunnel()
