@@ -94,7 +94,7 @@
 #include "ecm_db.h"
 #include "ecm_interface.h"
 
-#ifdef ECM_FRONT_END_IPV6_ENABLE
+#ifdef ECM_IPV6_ENABLE
 /*
  * TODO: Remove once the Linux image and headers get propogated.
  */
@@ -162,7 +162,7 @@ static struct net_device *ecm_interface_dev_find_by_local_addr_ipv4(ip_addr_t ad
 	return dev;
 }
 
-#ifdef ECM_FRONT_END_IPV6_ENABLE
+#ifdef ECM_IPV6_ENABLE
 /*
  * ecm_interface_dev_find_by_local_addr_ipv6()
  *	Return a hold to the device for the given local IP address.  Returns NULL on failure.
@@ -195,7 +195,7 @@ struct net_device *ecm_interface_dev_find_by_local_addr(ip_addr_t addr)
 		return ecm_interface_dev_find_by_local_addr_ipv4(addr);
 	}
 
-#ifdef ECM_FRONT_END_IPV6_ENABLE
+#ifdef ECM_IPV6_ENABLE
 	return ecm_interface_dev_find_by_local_addr_ipv6(addr);
 #else
 	return NULL;
@@ -251,7 +251,7 @@ struct net_device *ecm_interface_dev_find_by_addr(ip_addr_t addr, bool *from_loc
 }
 EXPORT_SYMBOL(ecm_interface_dev_find_by_addr);
 
-#ifdef ECM_FRONT_END_IPV6_ENABLE
+#ifdef ECM_IPV6_ENABLE
 /*
  * ecm_interface_mac_addr_get_ipv6()
  *	Return mac for an IPv6 address
@@ -477,7 +477,7 @@ bool ecm_interface_mac_addr_get(ip_addr_t addr, uint8_t *mac_addr, bool *on_link
 		return ecm_interface_mac_addr_get_ipv4(addr, mac_addr, on_link, gw_addr);
 	}
 
-#ifdef ECM_FRONT_END_IPV6_ENABLE
+#ifdef ECM_IPV6_ENABLE
 	return ecm_interface_mac_addr_get_ipv6(addr, mac_addr, on_link, gw_addr);
 #else
 	return false;
@@ -509,7 +509,7 @@ static bool ecm_interface_find_route_by_addr_ipv4(ip_addr_t addr, struct ecm_int
 	return true;
 }
 
-#ifdef ECM_FRONT_END_IPV6_ENABLE
+#ifdef ECM_IPV6_ENABLE
 /*
  * ecm_interface_addr_find_route_by_addr_ipv6()
  *	Return the route for the given IP address.  Returns NULL on failure.
@@ -555,7 +555,7 @@ bool ecm_interface_find_route_by_addr(ip_addr_t addr, struct ecm_interface_route
 		return ecm_interface_find_route_by_addr_ipv4(addr, ecm_rt);
 	}
 
-#ifdef ECM_FRONT_END_IPV6_ENABLE
+#ifdef ECM_IPV6_ENABLE
 	return ecm_interface_find_route_by_addr_ipv6(addr, ecm_rt);
 #else
 	return false;
@@ -1082,6 +1082,7 @@ static struct ecm_db_iface_instance *ecm_interface_sit_interface_establish(struc
 #endif
 
 #ifdef ECM_INTERFACE_TUNIPIP6_ENABLE
+#ifdef ECM_IPV6_ENABLE
 /*
  * ecm_interface_tunipip6_interface_establish()
  *	Returns a reference to a iface of the TUNIPIP6 type, possibly creating one if necessary.
@@ -1132,6 +1133,7 @@ static struct ecm_db_iface_instance *ecm_interface_tunipip6_interface_establish(
 	return nii;
 }
 #endif
+#endif
 
 /*
  * ecm_interface_establish_and_ref()
@@ -1166,7 +1168,9 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct net_device 
 		struct ecm_db_interface_info_sit sit;			/* type == ECM_DB_IFACE_TYPE_SIT */
 #endif
 #ifdef ECM_INTERFACE_TUNIPIP6_ENABLE
+#ifdef ECM_IPV6_ENABLE
 		struct ecm_db_interface_info_tunipip6 tunipip6;		/* type == ECM_DB_IFACE_TYPE_TUNIPIP6 */
+#endif
 #endif
 	} type_info;
 
@@ -1347,6 +1351,7 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct net_device 
 #endif
 
 #ifdef ECM_INTERFACE_TUNIPIP6_ENABLE
+#ifdef ECM_IPV6_ENABLE
 	/*
 	 * IPIP6 Tunnel?
 	 */
@@ -1372,6 +1377,8 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct net_device 
 		return ii;
 	}
 #endif
+#endif
+
 	/*
 	 * If this is NOT PPP then it is unknown to the ecm
 	 */
@@ -1805,6 +1812,7 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfac
 					DEBUG_TRACE("Net device: %p is BRIDGE, next_dev: %p (%s)\n", dest_dev, next_dev, next_dev->name);
 					break;
 				}
+
 #ifdef ECM_INTERFACE_BOND_ENABLE
 				/*
 				 * LAG?

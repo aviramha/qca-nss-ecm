@@ -208,7 +208,7 @@ ecm_classifier_nl_send_genl_msg(enum ECM_CL_NL_GENL_CMD cmd,
 /*
  * Helper function to convert connection IP info into a genl_attr_tuple
  */
-static int
+static void
 ecm_cl_nl_genl_attr_tuple_encode(struct ecm_cl_nl_genl_attr_tuple *tuple,
 				 int proto,
 				 ip_addr_t src_ip,
@@ -224,13 +224,13 @@ ecm_cl_nl_genl_attr_tuple_encode(struct ecm_cl_nl_genl_attr_tuple *tuple,
 		tuple->af = AF_INET;
 		ECM_IP_ADDR_TO_NIN4_ADDR(tuple->src_ip.in.s_addr, src_ip);
 		ECM_IP_ADDR_TO_NIN4_ADDR(tuple->dst_ip.in.s_addr, dst_ip);
-	} else {
-		tuple->af = AF_INET6;
-		ECM_IP_ADDR_TO_NIN6_ADDR(tuple->src_ip.in6, src_ip);
-		ECM_IP_ADDR_TO_NIN6_ADDR(tuple->dst_ip.in6, dst_ip);
+		return;
 	}
-
-	return 0;
+#ifdef ECM_IPV6_ENABLE
+	tuple->af = AF_INET6;
+	ECM_IP_ADDR_TO_NIN6_ADDR(tuple->src_ip.in6, src_ip);
+	ECM_IP_ADDR_TO_NIN6_ADDR(tuple->dst_ip.in6, dst_ip);
+#endif
 }
 
 /*
@@ -250,14 +250,16 @@ ecm_cl_nl_genl_attr_tuple_decode(struct ecm_cl_nl_genl_attr_tuple *tuple,
 	if (AF_INET == tuple->af) {
 		ECM_NIN4_ADDR_TO_IP_ADDR(src_ip, tuple->src_ip.in.s_addr);
 		ECM_NIN4_ADDR_TO_IP_ADDR(dst_ip, tuple->dst_ip.in.s_addr);
-	} else if (AF_INET6 == tuple->af) {
+		return 0;
+	}
+#ifdef ECM_IPV6_ENABLE
+	if (AF_INET6 == tuple->af) {
 		ECM_NIN6_ADDR_TO_IP_ADDR(src_ip, tuple->src_ip.in6);
 		ECM_NIN6_ADDR_TO_IP_ADDR(dst_ip, tuple->dst_ip.in6);
-	} else {
-		return -EAFNOSUPPORT;
+		return 0;
 	}
-
-	return 0;
+#endif
+	return -EAFNOSUPPORT;
 }
 
 static void
@@ -301,16 +303,12 @@ ecm_classifier_nl_genl_msg_ACCEL_OK(struct ecm_classifier_nl_instance *cnli)
 
 	ecm_db_connection_deref(ci);
 
-	ret = ecm_cl_nl_genl_attr_tuple_encode(&tuple,
+	ecm_cl_nl_genl_attr_tuple_encode(&tuple,
 					       proto,
 					       src_ip,
 					       src_port,
 					       dst_ip,
 					       dst_port);
-	if (ret != 0) {
-		DEBUG_WARN("failed to encode genl_attr_tuple: %d\n", ret);
-		return;
-	}
 
 	ret = ecm_classifier_nl_send_genl_msg(ECM_CL_NL_GENL_CMD_ACCEL_OK,
 					      &tuple);
@@ -335,23 +333,18 @@ ecm_classifier_nl_genl_msg_ACCEL_OK(struct ecm_classifier_nl_instance *cnli)
 static void ecm_classifier_nl_genl_msg_closed(struct ecm_classifier_nl_instance *cnli,
 					int proto, ip_addr_t src_ip, ip_addr_t dst_ip, int src_port, int dst_port)
 {
-	int ret;
 	struct ecm_cl_nl_genl_attr_tuple tuple;
 
 	spin_lock_bh(&ecm_classifier_nl_lock);
 	cnli->flags |= ECM_CLASSIFIER_NL_F_CLOSED;
 	spin_unlock_bh(&ecm_classifier_nl_lock);
 
-	ret = ecm_cl_nl_genl_attr_tuple_encode(&tuple,
+	ecm_cl_nl_genl_attr_tuple_encode(&tuple,
 					       proto,
 					       src_ip,
 					       src_port,
 					       dst_ip,
 					       dst_port);
-	if (ret != 0) {
-		DEBUG_WARN("failed to encode genl_attr_tuple: %d\n", ret);
-		return;
-	}
 
 	ecm_classifier_nl_send_genl_msg(ECM_CL_NL_GENL_CMD_CONNECTION_CLOSED, &tuple);
 }
@@ -917,13 +910,19 @@ ecm_classifier_nl_ct_get_and_ref(struct ecm_db_connection_instance *ci)
 		tuple.src.l3num = AF_INET;
 		ECM_IP_ADDR_TO_NIN4_ADDR(tuple.src.u3.ip, src_ip);
 		ECM_IP_ADDR_TO_NIN4_ADDR(tuple.dst.u3.ip, dst_ip);
-	} else {
-		DEBUG_ASSERT(!ECM_IP_ADDR_IS_V4(dst_ip),
-			     "src IP was V6 but dst IP was not");
-		tuple.src.l3num = AF_INET6;
-		ECM_IP_ADDR_TO_NIN6_ADDR(tuple.src.u3.in6, src_ip);
-		ECM_IP_ADDR_TO_NIN6_ADDR(tuple.dst.u3.in6, dst_ip);
+		goto ip_check_done;
 	}
+#ifdef ECM_IPV6_ENABLE
+	DEBUG_ASSERT(!ECM_IP_ADDR_IS_V4(dst_ip),
+			     "src IP was V6 but dst IP was not");
+	tuple.src.l3num = AF_INET6;
+	ECM_IP_ADDR_TO_NIN6_ADDR(tuple.src.u3.in6, src_ip);
+	ECM_IP_ADDR_TO_NIN6_ADDR(tuple.dst.u3.in6, dst_ip);
+#else
+	return NULL;
+#endif
+
+ip_check_done:
 	tuple.dst.protonum = proto;
 	tuple.src.u.all = htons(src_port);
 	tuple.dst.u.all = htons(dst_port);

@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2014, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2015, The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -82,7 +82,8 @@
 #include "ecm_db.h"
 #include "ecm_classifier_default.h"
 #include "ecm_nss_ipv4.h"
-#ifdef ECM_FRONT_END_IPV6_ENABLE
+#include "ecm_front_end_ipv4.h"
+#ifdef ECM_IPV6_ENABLE
 #include "ecm_front_end_ipv6.h"
 #endif
 
@@ -146,10 +147,9 @@ static int ecm_conntrack_event(unsigned int events, struct nf_ct_event *item)
 	 */
 	if (nf_ct_l3num(ct) == AF_INET) {
 		return ecm_nss_ipv4_conntrack_event(events, ct);
-#ifndef ECM_FRONT_END_IPV6_ENABLE
 	}
-#else
-	} else if (nf_ct_l3num(ct) == AF_INET6) {
+#ifdef ECM_IPV6_ENABLE
+	if (nf_ct_l3num(ct) == AF_INET6) {
 		return ecm_front_end_ipv6_conntrack_event(events, ct);
 	}
 #endif

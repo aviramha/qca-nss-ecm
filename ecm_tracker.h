@@ -89,17 +89,19 @@ ecm_tracker_connection_state_to_string(enum ecm_tracker_connection_states);
  * These constants are used to index into the ecm_tracker_ip_header.headers[]
  */
 enum ecm_tracker_ip_protocol_types {
-	ECM_TRACKER_IP_PROTOCOL_TYPE_IPV6_HBH,
+	ECM_TRACKER_IP_PROTOCOL_TYPE_UNKNOWN,		/* A protocol that is unrecognised */
 	ECM_TRACKER_IP_PROTOCOL_TYPE_ICMP,
 	ECM_TRACKER_IP_PROTOCOL_TYPE_UDP,
 	ECM_TRACKER_IP_PROTOCOL_TYPE_TCP,
 	ECM_TRACKER_IP_PROTOCOL_TYPE_GRE,
+#ifdef ECM_IPV6_ENABLE
 	ECM_TRACKER_IP_PROTOCOL_TYPE_IPV6_ROUTING,
 	ECM_TRACKER_IP_PROTOCOL_TYPE_IPV6_FRAGMENT,
 	ECM_TRACKER_IP_PROTOCOL_TYPE_AH,
 	ECM_TRACKER_IP_PROTOCOL_TYPE_IPV6_ICMP,
 	ECM_TRACKER_IP_PROTOCOL_TYPE_IPV6_DO,
-	ECM_TRACKER_IP_PROTOCOL_TYPE_UNKNOWN,		/* A protocol that is unrecognised */
+	ECM_TRACKER_IP_PROTOCOL_TYPE_IPV6_HBH,		/* IPv6 hop-by-hop header */
+#endif
 	ECM_TRACKER_IP_PROTOCOL_TYPE_COUNT		/* Must be last, do not use */
 };
 typedef enum ecm_tracker_ip_protocol_types ecm_tracker_ip_protocol_type_t;
@@ -123,13 +125,15 @@ struct ecm_tracker_ip_protocol_header {
  */
 struct ecm_tracker_ip_header {
 	/*
-	 * h is a union of v4 and v6 headers.
+	 * h is a union of IP version headers.
 	 * This only works as far as the version field goes, but that's enough to know what we are dealing with.
 	 * These are also used as buffers where skn_header_pointer() needs them to perform a skb_copy_bits() operation.
 	 */
 	union {
 		struct iphdr v4_hdr;
+#ifdef ECM_IPV6_ENABLE
 		struct ipv6hdr v6_hdr;
+#endif
 	} h;
 
 	struct sk_buff *skb;		/* COPY of POINTER to the skb this header relates to.  This ecm_ip_header is ONLY VALID for as long as the skb it relates to remains UNTOUCHED */

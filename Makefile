@@ -79,11 +79,11 @@ ECM_INTERFACE_IPSEC_ENABLE=y
 ccflags-$(ECM_INTERFACE_IPSEC_ENABLE) += -DECM_INTERFACE_IPSEC_ENABLE
 
 # #############################################################################
-# Define ECM_FRONT_END_IPV6_ENABLE=y in order to enable IPv6 front end.
+# Define ECM_IPV6_ENABLE=y in order to enable IPv6 support in the ECM.
 # #############################################################################
-ECM_FRONT_END_IPV6_ENABLE=y
-ecm-$(ECM_FRONT_END_IPV6_ENABLE) += frontends/nss/ecm_front_end_ipv6.o
-ccflags-$(ECM_FRONT_END_IPV6_ENABLE) += -DECM_FRONT_END_IPV6_ENABLE
+ECM_IPV6_ENABLE=y
+ecm-$(ECM_IPV6_ENABLE) += frontends/nss/ecm_front_end_ipv6.o
+ccflags-$(ECM_IPV6_ENABLE) += -DECM_IPV6_ENABLE
 
 # #############################################################################
 # Define ECM_CLASSIFIER_NL_ENABLE=y in order to enable NL classifier.
