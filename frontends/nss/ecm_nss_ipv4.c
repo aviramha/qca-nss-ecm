@@ -90,19 +90,18 @@
 #include "ecm_classifier_dscp.h"
 #endif
 #include "ecm_interface.h"
-#include "ecm_front_end_ipv4_nss.h"
-#include "ecm_front_end_ipv4_nss_tcp.h"
-#include "ecm_front_end_ipv4_nss_udp.h"
-#include "ecm_front_end_ipv4_nss_non_ported.h"
+#include "ecm_nss_ipv4.h"
+#include "ecm_nss_ported_ipv4.h"
+#ifdef ECM_NON_PORTED_SUPPORT_ENABLE
+#include "ecm_nss_non_ported_ipv4.h"
+#endif
 
-
-
-int ecm_front_end_ipv4_no_action_limit_default = 250;		/* Default no-action limit. */
-int ecm_front_end_ipv4_driver_fail_limit_default = 250;		/* Default driver fail limit. */
-int ecm_front_end_ipv4_nack_limit_default = 250;			/* Default nack limit. */
-int ecm_front_end_ipv4_accelerated_count = 0;			/* Total offloads */
-int ecm_front_end_ipv4_pending_accel_count = 0;			/* Total pending offloads issued to the NSS / awaiting completion */
-int ecm_front_end_ipv4_pending_decel_count = 0;			/* Total pending deceleration requests issued to the NSS / awaiting completion */
+int ecm_nss_ipv4_no_action_limit_default = 250;		/* Default no-action limit. */
+int ecm_nss_ipv4_driver_fail_limit_default = 250;		/* Default driver fail limit. */
+int ecm_nss_ipv4_nack_limit_default = 250;			/* Default nack limit. */
+int ecm_nss_ipv4_accelerated_count = 0;			/* Total offloads */
+int ecm_nss_ipv4_pending_accel_count = 0;			/* Total pending offloads issued to the NSS / awaiting completion */
+int ecm_nss_ipv4_pending_decel_count = 0;			/* Total pending deceleration requests issued to the NSS / awaiting completion */
 
 /*
  * Limiting the acceleration of connections.
@@ -113,55 +112,48 @@ int ecm_front_end_ipv4_pending_decel_count = 0;			/* Total pending deceleration 
  * In this scenario the acceleration engine will begin removal of existing rules to make way for new ones.
  * When the accel_limit_mode is set to FIXED ECM will not permit more rules to be issued than the engine will allow.
  */
-uint32_t ecm_front_end_ipv4_accel_limit_mode = ECM_FRONT_END_ACCEL_LIMIT_MODE_UNLIMITED;
+uint32_t ecm_nss_ipv4_accel_limit_mode = ECM_FRONT_END_ACCEL_LIMIT_MODE_UNLIMITED;
 
 /*
  * Locking of the classifier - concurrency control for file global parameters.
  * NOTE: It is safe to take this lock WHILE HOLDING a feci->lock.  The reverse is NOT SAFE.
  */
-spinlock_t ecm_front_end_ipv4_lock;			/* Protect against SMP access between netfilter, events and private threaded function. */
+spinlock_t ecm_nss_ipv4_lock;			/* Protect against SMP access between netfilter, events and private threaded function. */
 
 /*
  * Management thread control
  */
-bool ecm_front_end_ipv4_terminate_pending = false;		/* True when the user has signalled we should quit */
+bool ecm_nss_ipv4_terminate_pending = false;		/* True when the user has signalled we should quit */
 
 /*
  * NSS driver linkage
  */
-struct nss_ctx_instance *ecm_front_end_ipv4_nss_ipv4_mgr = NULL;
+struct nss_ctx_instance *ecm_nss_ipv4_nss_ipv4_mgr = NULL;
 
-
-
-
-
-
-
-
-static unsigned long ecm_front_end_ipv4_accel_cmd_time_avg_samples = 0;	/* Sum of time taken for the set of accel command samples, used to compute average time for an accel command to complete */
-static unsigned long ecm_front_end_ipv4_accel_cmd_time_avg_set = 1;	/* How many samples in the set */
-static unsigned long ecm_front_end_ipv4_decel_cmd_time_avg_samples = 0;	/* Sum of time taken for the set of accel command samples, used to compute average time for an accel command to complete */
-static unsigned long ecm_front_end_ipv4_decel_cmd_time_avg_set = 1;	/* How many samples in the set */
+static unsigned long ecm_nss_ipv4_accel_cmd_time_avg_samples = 0;	/* Sum of time taken for the set of accel command samples, used to compute average time for an accel command to complete */
+static unsigned long ecm_nss_ipv4_accel_cmd_time_avg_set = 1;	/* How many samples in the set */
+static unsigned long ecm_nss_ipv4_decel_cmd_time_avg_samples = 0;	/* Sum of time taken for the set of accel command samples, used to compute average time for an accel command to complete */
+static unsigned long ecm_nss_ipv4_decel_cmd_time_avg_set = 1;	/* How many samples in the set */
 
 /*
  * System device linkage
  */
-static struct device ecm_front_end_ipv4_dev;		/* System device linkage */
+static struct device ecm_nss_ipv4_dev;		/* System device linkage */
 
 /*
  * General operational control
  */
-static int ecm_front_end_ipv4_stopped = 0;			/* When non-zero further traffic will not be processed */
+static int ecm_nss_ipv4_stopped = 0;			/* When non-zero further traffic will not be processed */
 
 /*
- * ecm_front_end_ipv4_node_establish_and_ref()
+ * ecm_nss_ipv4_node_establish_and_ref()
  *	Returns a reference to a node, possibly creating one if necessary.
  *
  * The given_node_addr will be used if provided.
  *
  * Returns NULL on failure.
  */
-struct ecm_db_node_instance *ecm_front_end_ipv4_node_establish_and_ref(struct net_device *dev, ip_addr_t addr,
+struct ecm_db_node_instance *ecm_nss_ipv4_node_establish_and_ref(struct net_device *dev, ip_addr_t addr,
 							struct ecm_db_iface_instance *interface_list[], int32_t interface_list_first,
 							uint8_t *given_node_addr)
 {
@@ -321,17 +313,17 @@ struct ecm_db_node_instance *ecm_front_end_ipv4_node_establish_and_ref(struct ne
 	/*
 	 * Add node into the database, atomically to avoid races creating the same thing
 	 */
-	spin_lock_bh(&ecm_front_end_ipv4_lock);
+	spin_lock_bh(&ecm_nss_ipv4_lock);
 	ni = ecm_db_node_find_and_ref(node_addr);
 	if (ni) {
-		spin_unlock_bh(&ecm_front_end_ipv4_lock);
+		spin_unlock_bh(&ecm_nss_ipv4_lock);
 		ecm_db_node_deref(nni);
 		ecm_db_iface_deref(ii);
 		return ni;
 	}
 
 	ecm_db_node_add(nni, ii, node_addr, NULL, nni);
-	spin_unlock_bh(&ecm_front_end_ipv4_lock);
+	spin_unlock_bh(&ecm_nss_ipv4_lock);
 
 	/*
 	 * Don't need iface instance now
@@ -343,12 +335,12 @@ struct ecm_db_node_instance *ecm_front_end_ipv4_node_establish_and_ref(struct ne
 }
 
 /*
- * ecm_front_end_ipv4_host_establish_and_ref()
+ * ecm_nss_ipv4_host_establish_and_ref()
  *	Returns a reference to a host, possibly creating one if necessary.
  *
  * Returns NULL on failure.
  */
-struct ecm_db_host_instance *ecm_front_end_ipv4_host_establish_and_ref(ip_addr_t addr)
+struct ecm_db_host_instance *ecm_nss_ipv4_host_establish_and_ref(ip_addr_t addr)
 {
 	struct ecm_db_host_instance *hi;
 	struct ecm_db_host_instance *nhi;
@@ -376,29 +368,29 @@ struct ecm_db_host_instance *ecm_front_end_ipv4_host_establish_and_ref(ip_addr_t
 	/*
 	 * Add host into the database, atomically to avoid races creating the same thing
 	 */
-	spin_lock_bh(&ecm_front_end_ipv4_lock);
+	spin_lock_bh(&ecm_nss_ipv4_lock);
 	hi = ecm_db_host_find_and_ref(addr);
 	if (hi) {
-		spin_unlock_bh(&ecm_front_end_ipv4_lock);
+		spin_unlock_bh(&ecm_nss_ipv4_lock);
 		ecm_db_host_deref(nhi);
 		return hi;
 	}
 
 	ecm_db_host_add(nhi, addr, true, NULL, nhi);
 
-	spin_unlock_bh(&ecm_front_end_ipv4_lock);
+	spin_unlock_bh(&ecm_nss_ipv4_lock);
 
 	DEBUG_TRACE("%p: host established\n", nhi);
 	return nhi;
 }
 
 /*
- * ecm_front_end_ipv4_mapping_establish_and_ref()
+ * ecm_nss_ipv4_mapping_establish_and_ref()
  *	Returns a reference to a mapping, possibly creating one if necessary.
  *
  * Returns NULL on failure.
  */
-struct ecm_db_mapping_instance *ecm_front_end_ipv4_mapping_establish_and_ref(ip_addr_t addr, int port)
+struct ecm_db_mapping_instance *ecm_nss_ipv4_mapping_establish_and_ref(ip_addr_t addr, int port)
 {
 	struct ecm_db_mapping_instance *mi;
 	struct ecm_db_mapping_instance *nmi;
@@ -418,7 +410,7 @@ struct ecm_db_mapping_instance *ecm_front_end_ipv4_mapping_establish_and_ref(ip_
 	/*
 	 * No mapping - establish host existence
 	 */
-	hi = ecm_front_end_ipv4_host_establish_and_ref(addr);
+	hi = ecm_nss_ipv4_host_establish_and_ref(addr);
 	if (!hi) {
 		DEBUG_WARN("Failed to establish host\n");
 		return NULL;
@@ -437,10 +429,10 @@ struct ecm_db_mapping_instance *ecm_front_end_ipv4_mapping_establish_and_ref(ip_
 	/*
 	 * Add mapping into the database, atomically to avoid races creating the same thing
 	 */
-	spin_lock_bh(&ecm_front_end_ipv4_lock);
+	spin_lock_bh(&ecm_nss_ipv4_lock);
 	mi = ecm_db_mapping_find_and_ref(addr, port);
 	if (mi) {
-		spin_unlock_bh(&ecm_front_end_ipv4_lock);
+		spin_unlock_bh(&ecm_nss_ipv4_lock);
 		ecm_db_mapping_deref(nmi);
 		ecm_db_host_deref(hi);
 		return mi;
@@ -448,7 +440,7 @@ struct ecm_db_mapping_instance *ecm_front_end_ipv4_mapping_establish_and_ref(ip_
 
 	ecm_db_mapping_add(nmi, hi, port, NULL, nmi);
 
-	spin_unlock_bh(&ecm_front_end_ipv4_lock);
+	spin_unlock_bh(&ecm_nss_ipv4_lock);
 
 	/*
 	 * Don't need the host instance now - the mapping maintains a reference to it now.
@@ -463,10 +455,10 @@ struct ecm_db_mapping_instance *ecm_front_end_ipv4_mapping_establish_and_ref(ip_
 }
 
 /*
- * ecm_front_end_ipv4_accel_done_time_update()
+ * ecm_nss_ipv4_accel_done_time_update()
  *	Record how long the command took to complete, updating average samples
  */
-void ecm_front_end_ipv4_accel_done_time_update(struct ecm_front_end_connection_instance *feci)
+void ecm_nss_ipv4_accel_done_time_update(struct ecm_front_end_connection_instance *feci)
 {
 	unsigned long delta;
 
@@ -478,17 +470,17 @@ void ecm_front_end_ipv4_accel_done_time_update(struct ecm_front_end_connection_i
 	delta = feci->stats.cmd_time_completed - feci->stats.cmd_time_begun;
 	spin_unlock_bh(&feci->lock);
 
-	spin_lock_bh(&ecm_front_end_ipv4_lock);
-	ecm_front_end_ipv4_accel_cmd_time_avg_samples += delta;
-	ecm_front_end_ipv4_accel_cmd_time_avg_set++;
-	spin_unlock_bh(&ecm_front_end_ipv4_lock);
+	spin_lock_bh(&ecm_nss_ipv4_lock);
+	ecm_nss_ipv4_accel_cmd_time_avg_samples += delta;
+	ecm_nss_ipv4_accel_cmd_time_avg_set++;
+	spin_unlock_bh(&ecm_nss_ipv4_lock);
 }
 
 /*
- * ecm_front_end_ipv4_deccel_done_time_update()
+ * ecm_nss_ipv4_deccel_done_time_update()
  *	Record how long the command took to complete, updating average samples
  */
-void ecm_front_end_ipv4_decel_done_time_update(struct ecm_front_end_connection_instance *feci)
+void ecm_nss_ipv4_decel_done_time_update(struct ecm_front_end_connection_instance *feci)
 {
 	unsigned long delta;
 
@@ -500,17 +492,17 @@ void ecm_front_end_ipv4_decel_done_time_update(struct ecm_front_end_connection_i
 	delta = feci->stats.cmd_time_completed - feci->stats.cmd_time_begun;
 	spin_unlock_bh(&feci->lock);
 
-	spin_lock_bh(&ecm_front_end_ipv4_lock);
-	ecm_front_end_ipv4_decel_cmd_time_avg_samples += delta;
-	ecm_front_end_ipv4_decel_cmd_time_avg_set++;
-	spin_unlock_bh(&ecm_front_end_ipv4_lock);
+	spin_lock_bh(&ecm_nss_ipv4_lock);
+	ecm_nss_ipv4_decel_cmd_time_avg_samples += delta;
+	ecm_nss_ipv4_decel_cmd_time_avg_set++;
+	spin_unlock_bh(&ecm_nss_ipv4_lock);
 }
 
 /*
- * ecm_front_end_ipv4_assign_classifier()
+ * ecm_nss_ipv4_assign_classifier()
  *	Instantiate and assign classifier of type upon the connection, also returning it if it could be allocated.
  */
-struct ecm_classifier_instance *ecm_front_end_ipv4_assign_classifier(struct ecm_db_connection_instance *ci, ecm_classifier_type_t type)
+struct ecm_classifier_instance *ecm_nss_ipv4_assign_classifier(struct ecm_db_connection_instance *ci, ecm_classifier_type_t type)
 {
 	DEBUG_TRACE("%p: Assign classifier of type: %d\n", ci, type);
 	DEBUG_ASSERT(type != ECM_CLASSIFIER_TYPE_DEFAULT, "Must never need to instantiate default type in this way");
@@ -563,14 +555,14 @@ struct ecm_classifier_instance *ecm_front_end_ipv4_assign_classifier(struct ecm_
 }
 
 /*
- * ecm_front_end_ipv4_reclassify()
+ * ecm_nss_ipv4_reclassify()
  *	Signal reclassify upon the assigned classifiers.
  *
  * Classifiers that unassigned themselves we TRY to re-instantiate them.
  * Returns false if the function is not able to instantiate all missing classifiers.
  * This function does not release and references to classifiers in the assignments[].
  */
-bool ecm_front_end_ipv4_reclassify(struct ecm_db_connection_instance *ci, int assignment_count, struct ecm_classifier_instance *assignments[])
+bool ecm_nss_ipv4_reclassify(struct ecm_db_connection_instance *ci, int assignment_count, struct ecm_classifier_instance *assignments[])
 {
 	ecm_classifier_type_t classifier_type;
 	int i;
@@ -604,7 +596,7 @@ bool ecm_front_end_ipv4_reclassify(struct ecm_db_connection_instance *ci, int as
 			DEBUG_TRACE("%p: Instantiate missing type: %d\n", ci, classifier_type);
 			DEBUG_ASSERT(classifier_type < ECM_CLASSIFIER_TYPES, "Algorithm bad");
 
-			naci = ecm_front_end_ipv4_assign_classifier(ci, classifier_type);
+			naci = ecm_nss_ipv4_assign_classifier(ci, classifier_type);
 			if (!naci) {
 				full_reclassification = false;
 			} else {
@@ -622,7 +614,7 @@ bool ecm_front_end_ipv4_reclassify(struct ecm_db_connection_instance *ci, int as
 		struct ecm_classifier_instance *naci;
 		DEBUG_TRACE("%p: Instantiate missing type: %d\n", ci, classifier_type);
 
-		naci = ecm_front_end_ipv4_assign_classifier(ci, classifier_type);
+		naci = ecm_nss_ipv4_assign_classifier(ci, classifier_type);
 		if (!naci) {
 			full_reclassification = false;
 		} else {
@@ -635,14 +627,14 @@ bool ecm_front_end_ipv4_reclassify(struct ecm_db_connection_instance *ci, int as
 }
 
 /*
- * ecm_front_end_ipv4_connection_regenerate()
+ * ecm_nss_ipv4_connection_regenerate()
  *	Re-generate a connection.
  *
  * Re-generating a connection involves re-evaluating the interface lists in case interface heirarchies have changed.
  * It also involves the possible triggering of classifier re-evaluation but only if all currently assigned
  * classifiers permit this operation.
  */
-bool ecm_front_end_ipv4_connection_regenerate(struct ecm_db_connection_instance *ci, ecm_tracker_sender_type_t sender,
+bool ecm_nss_ipv4_connection_regenerate(struct ecm_db_connection_instance *ci, ecm_tracker_sender_type_t sender,
 							struct net_device *out_dev, struct net_device *out_dev_nat,
 							struct net_device *in_dev, struct net_device *in_dev_nat)
 {
@@ -788,7 +780,7 @@ bool ecm_front_end_ipv4_connection_regenerate(struct ecm_db_connection_instance 
 	 * Reclassify
 	 */
 	DEBUG_INFO("%p: reclassify\n", ci);
-	if (!ecm_front_end_ipv4_reclassify(ci, assignment_count, assignments)) {
+	if (!ecm_nss_ipv4_reclassify(ci, assignment_count, assignments)) {
 		/*
 		 * We could not set up the classifiers to reclassify, it is safer to fail out and try again next time
 		 */
@@ -810,10 +802,10 @@ ecm_ipv4_retry_regen:
 }
 
 /*
- * ecm_front_end_ipv4_ip_process()
+ * ecm_nss_ipv4_ip_process()
  *	Process IP datagram skb
  */
-static unsigned int ecm_front_end_ipv4_ip_process(struct net_device *out_dev, struct net_device *in_dev,
+static unsigned int ecm_nss_ipv4_ip_process(struct net_device *out_dev, struct net_device *in_dev,
 							uint8_t *src_node_addr, uint8_t *dest_node_addr,
 							bool can_accel, bool is_routed, struct sk_buff *skb)
 {
@@ -1190,18 +1182,8 @@ static unsigned int ecm_front_end_ipv4_ip_process(struct net_device *out_dev, st
 	 * Process IP specific protocol
 	 * TCP and UDP are the most likliest protocols.
 	 */
-	if (likely(orig_tuple.dst.protonum == IPPROTO_TCP)) {
-		return ecm_front_end_ipv4_tcp_process(out_dev, out_dev_nat,
-				in_dev, in_dev_nat,
-				src_node_addr, src_node_addr_nat,
-				dest_node_addr, dest_node_addr_nat,
-				can_accel, is_routed, skb,
-				&ip_hdr,
-				ct, sender, ecm_dir,
-				&orig_tuple, &reply_tuple,
-				ip_src_addr, ip_dest_addr, ip_src_addr_nat, ip_dest_addr_nat);
-	} else if (likely(orig_tuple.dst.protonum == IPPROTO_UDP)) {
-		return ecm_front_end_ipv4_udp_process(out_dev, out_dev_nat,
+	if (likely(orig_tuple.dst.protonum == IPPROTO_TCP) || likely(orig_tuple.dst.protonum == IPPROTO_UDP)) {
+		return ecm_nss_ported_ipv4_process(out_dev, out_dev_nat,
 				in_dev, in_dev_nat,
 				src_node_addr, src_node_addr_nat,
 				dest_node_addr, dest_node_addr_nat,
@@ -1211,7 +1193,8 @@ static unsigned int ecm_front_end_ipv4_ip_process(struct net_device *out_dev, st
 				&orig_tuple, &reply_tuple,
 				ip_src_addr, ip_dest_addr, ip_src_addr_nat, ip_dest_addr_nat);
 	}
-	return ecm_front_end_ipv4_non_ported_process(out_dev, out_dev_nat,
+#ifdef ECM_NON_PORTED_SUPPORT_ENABLE
+	return ecm_nss_non_ported_ipv4_process(out_dev, out_dev_nat,
 				in_dev, in_dev_nat,
 				src_node_addr, src_node_addr_nat,
 				dest_node_addr, dest_node_addr_nat,
@@ -1220,20 +1203,23 @@ static unsigned int ecm_front_end_ipv4_ip_process(struct net_device *out_dev, st
 				ct, sender, ecm_dir,
 				&orig_tuple, &reply_tuple,
 				ip_src_addr, ip_dest_addr, ip_src_addr_nat, ip_dest_addr_nat);
+#else
+	return NF_ACCEPT;
+#endif
 }
 
 /*
- * ecm_front_end_ipv4_post_routing_hook()
+ * ecm_nss_ipv4_post_routing_hook()
  *	Called for IP packets that are going out to interfaces after IP routing stage.
  */
 #if (LINUX_VERSION_CODE <= KERNEL_VERSION(3,6,0))
-static unsigned int ecm_front_end_ipv4_post_routing_hook(unsigned int hooknum,
+static unsigned int ecm_nss_ipv4_post_routing_hook(unsigned int hooknum,
 				struct sk_buff *skb,
 				const struct net_device *in_unused,
 				const struct net_device *out,
 				int (*okfn)(struct sk_buff *))
 #else
-static unsigned int ecm_front_end_ipv4_post_routing_hook(const struct nf_hook_ops *ops,
+static unsigned int ecm_nss_ipv4_post_routing_hook(const struct nf_hook_ops *ops,
 				struct sk_buff *skb,
 				const struct net_device *in_unused,
 				const struct net_device *out,
@@ -1249,13 +1235,13 @@ static unsigned int ecm_front_end_ipv4_post_routing_hook(const struct nf_hook_op
 	/*
 	 * If operations have stopped then do not process packets
 	 */
-	spin_lock_bh(&ecm_front_end_ipv4_lock);
-	if (unlikely(ecm_front_end_ipv4_stopped)) {
-		spin_unlock_bh(&ecm_front_end_ipv4_lock);
+	spin_lock_bh(&ecm_nss_ipv4_lock);
+	if (unlikely(ecm_nss_ipv4_stopped)) {
+		spin_unlock_bh(&ecm_nss_ipv4_lock);
 		DEBUG_TRACE("Front end stopped\n");
 		return NF_ACCEPT;
 	}
-	spin_unlock_bh(&ecm_front_end_ipv4_lock);
+	spin_unlock_bh(&ecm_nss_ipv4_lock);
 
 	/*
 	 * Don't process broadcast or multicast
@@ -1291,27 +1277,27 @@ static unsigned int ecm_front_end_ipv4_post_routing_hook(const struct nf_hook_op
 	}
 
 	DEBUG_TRACE("Post routing process skb %p, out: %p (%s), in: %p (%s)\n", skb, out, out->name, in, in->name);
-	result = ecm_front_end_ipv4_ip_process((struct net_device *)out, in, NULL, NULL,
+	result = ecm_nss_ipv4_ip_process((struct net_device *)out, in, NULL, NULL,
 							can_accel, true, skb);
 	dev_put(in);
 	return result;
 }
 
 /*
- * ecm_front_end_ipv4_bridge_post_routing_hook()
+ * ecm_nss_ipv4_bridge_post_routing_hook()
  *	Called for packets that are going out to one of the bridge physical interfaces.
  *
  * These may have come from another bridged interface or from a non-bridged interface.
  * Conntrack information may be available or not if this skb is bridged.
  */
 #if (LINUX_VERSION_CODE <= KERNEL_VERSION(3,6,0))
-static unsigned int ecm_front_end_ipv4_bridge_post_routing_hook(unsigned int hooknum,
+static unsigned int ecm_nss_ipv4_bridge_post_routing_hook(unsigned int hooknum,
 					struct sk_buff *skb,
 					const struct net_device *in_unused,
 					const struct net_device *out,
 					int (*okfn)(struct sk_buff *))
 #else
-static unsigned int ecm_front_end_ipv4_bridge_post_routing_hook(const struct nf_hook_ops *ops,
+static unsigned int ecm_nss_ipv4_bridge_post_routing_hook(const struct nf_hook_ops *ops,
 					struct sk_buff *skb,
 					const struct net_device *in_unused,
 					const struct net_device *out,
@@ -1330,13 +1316,13 @@ static unsigned int ecm_front_end_ipv4_bridge_post_routing_hook(const struct nf_
 	/*
 	 * If operations have stopped then do not process packets
 	 */
-	spin_lock_bh(&ecm_front_end_ipv4_lock);
-	if (unlikely(ecm_front_end_ipv4_stopped)) {
-		spin_unlock_bh(&ecm_front_end_ipv4_lock);
+	spin_lock_bh(&ecm_nss_ipv4_lock);
+	if (unlikely(ecm_nss_ipv4_stopped)) {
+		spin_unlock_bh(&ecm_nss_ipv4_lock);
 		DEBUG_TRACE("Front end stopped\n");
 		return NF_ACCEPT;
 	}
-	spin_unlock_bh(&ecm_front_end_ipv4_lock);
+	spin_unlock_bh(&ecm_nss_ipv4_lock);
 
 	/*
 	 * Don't process broadcast or multicast
@@ -1430,7 +1416,7 @@ static unsigned int ecm_front_end_ipv4_bridge_post_routing_hook(const struct nf_
 
 	DEBUG_TRACE("Bridge process skb: %p, bridge: %p (%s), In: %p (%s), Out: %p (%s)\n",
 			skb, bridge, bridge->name, in, in->name, out, out->name);
-	result = ecm_front_end_ipv4_ip_process((struct net_device *)out, in,
+	result = ecm_nss_ipv4_ip_process((struct net_device *)out, in,
 				skb_eth_hdr->h_source, skb_eth_hdr->h_dest, can_accel, false, skb);
 	dev_put(in);
 	dev_put(bridge);
@@ -1438,12 +1424,12 @@ static unsigned int ecm_front_end_ipv4_bridge_post_routing_hook(const struct nf_
 }
 
 /*
- * ecm_front_end_ipv4_neigh_get()
+ * ecm_nss_ipv4_neigh_get()
  * 	Returns neighbour reference for a given IP address which must be released when you are done with it.
  *
  * Returns NULL on fail.
  */
-static struct neighbour *ecm_front_end_ipv4_neigh_get(ip_addr_t addr)
+static struct neighbour *ecm_nss_ipv4_neigh_get(ip_addr_t addr)
 {
 	struct neighbour *neigh;
 	struct rtable *rt;
@@ -1462,10 +1448,10 @@ static struct neighbour *ecm_front_end_ipv4_neigh_get(ip_addr_t addr)
 }
 
 /*
- * ecm_front_end_ipv4_net_dev_callback()
+ * ecm_nss_ipv4_net_dev_callback()
  *	Callback handler from the NSS.
  */
-static void ecm_front_end_ipv4_net_dev_callback(void *app_data, struct nss_ipv4_msg *nim)
+static void ecm_nss_ipv4_net_dev_callback(void *app_data, struct nss_ipv4_msg *nim)
 {
 	struct nss_ipv4_conn_sync *sync;
 	struct nf_conntrack_tuple_hash *h;
@@ -1592,7 +1578,7 @@ static void ecm_front_end_ipv4_net_dev_callback(void *app_data, struct nss_ipv4_
 		/*
 		 * Update the neighbour entry for source IP address
 		 */
-		neigh = ecm_front_end_ipv4_neigh_get(flow_ip);
+		neigh = ecm_nss_ipv4_neigh_get(flow_ip);
 		if (!neigh) {
 			DEBUG_WARN("Neighbour entry for %pI4h not found\n", &sync->flow_ip);
 		} else {
@@ -1605,7 +1591,7 @@ static void ecm_front_end_ipv4_net_dev_callback(void *app_data, struct nss_ipv4_
 		 * Update the neighbour entry for destination IP address
 		 */
 		ECM_HIN4_ADDR_TO_IP_ADDR(return_ip, sync->return_ip);
-		neigh = ecm_front_end_ipv4_neigh_get(return_ip);
+		neigh = ecm_nss_ipv4_neigh_get(return_ip);
 		if (!neigh) {
 			DEBUG_WARN("Neighbour entry for %pI4h not found\n", &sync->return_ip);
 		} else {
@@ -1730,15 +1716,15 @@ sync_conntrack:
 }
 
 /*
- * struct nf_hook_ops ecm_front_end_ipv4_netfilter_hooks[]
+ * struct nf_hook_ops ecm_nss_ipv4_netfilter_hooks[]
  *	Hooks into netfilter packet monitoring points.
  */
-static struct nf_hook_ops ecm_front_end_ipv4_netfilter_hooks[] __read_mostly = {
+static struct nf_hook_ops ecm_nss_ipv4_netfilter_hooks[] __read_mostly = {
 	/*
 	 * Post routing hook is used to monitor packets going to interfaces that are NOT bridged in some way, e.g. packets to the WAN.
 	 */
 	{
-		.hook           = ecm_front_end_ipv4_post_routing_hook,
+		.hook           = ecm_nss_ipv4_post_routing_hook,
 		.owner          = THIS_MODULE,
 		.pf             = PF_INET,
 		.hooknum        = NF_INET_POST_ROUTING,
@@ -1750,7 +1736,7 @@ static struct nf_hook_ops ecm_front_end_ipv4_netfilter_hooks[] __read_mostly = {
 	 * For example Wireles LAN (WLAN) and Wired LAN (LAN).
 	 */
 	{
-		.hook		= ecm_front_end_ipv4_bridge_post_routing_hook,
+		.hook		= ecm_nss_ipv4_bridge_post_routing_hook,
 		.owner		= THIS_MODULE,
 		.pf		= PF_BRIDGE,
 		.hooknum	= NF_BR_POST_ROUTING,
@@ -1759,10 +1745,10 @@ static struct nf_hook_ops ecm_front_end_ipv4_netfilter_hooks[] __read_mostly = {
 };
 
 /*
- * ecm_front_end_ipv4_connection_from_ct_get_and_ref()
+ * ecm_nss_ipv4_connection_from_ct_get_and_ref()
  *	Return, if any, a connection given a ct
  */
-static struct ecm_db_connection_instance *ecm_front_end_ipv4_connection_from_ct_get_and_ref(struct nf_conn *ct)
+static struct ecm_db_connection_instance *ecm_nss_ipv4_connection_from_ct_get_and_ref(struct nf_conn *ct)
 {
 	struct nf_conntrack_tuple orig_tuple;
 	struct nf_conntrack_tuple reply_tuple;
@@ -1812,17 +1798,17 @@ static struct ecm_db_connection_instance *ecm_front_end_ipv4_connection_from_ct_
 }
 
 /*
- * ecm_front_end_ipv4_conntrack_event_destroy()
+ * ecm_nss_ipv4_conntrack_event_destroy()
  *	Handles conntrack destroy events
  */
-static void ecm_front_end_ipv4_conntrack_event_destroy(struct nf_conn *ct)
+static void ecm_nss_ipv4_conntrack_event_destroy(struct nf_conn *ct)
 {
 	struct ecm_db_connection_instance *ci;
 	struct ecm_front_end_connection_instance *feci;
 
 	DEBUG_INFO("Destroy event for ct: %p\n", ct);
 
-	ci = ecm_front_end_ipv4_connection_from_ct_get_and_ref(ct);
+	ci = ecm_nss_ipv4_connection_from_ct_get_and_ref(ct);
 	if (!ci) {
 		DEBUG_TRACE("%p: not found\n", ct);
 		return;
@@ -1844,10 +1830,10 @@ static void ecm_front_end_ipv4_conntrack_event_destroy(struct nf_conn *ct)
 }
 
 /*
- * ecm_front_end_ipv4_conntrack_event_mark()
+ * ecm_nss_ipv4_conntrack_event_mark()
  *	Handles conntrack mark events
  */
-static void ecm_front_end_ipv4_conntrack_event_mark(struct nf_conn *ct)
+static void ecm_nss_ipv4_conntrack_event_mark(struct nf_conn *ct)
 {
 	struct ecm_db_connection_instance *ci;
 	struct ecm_classifier_instance *__attribute__((unused))cls;
@@ -1861,7 +1847,7 @@ static void ecm_front_end_ipv4_conntrack_event_mark(struct nf_conn *ct)
 		return;
 	}
 
-	ci = ecm_front_end_ipv4_connection_from_ct_get_and_ref(ct);
+	ci = ecm_nss_ipv4_connection_from_ct_get_and_ref(ct);
 	if (!ci) {
 		DEBUG_TRACE("%p: not found\n", ct);
 		return;
@@ -1886,21 +1872,21 @@ static void ecm_front_end_ipv4_conntrack_event_mark(struct nf_conn *ct)
 }
 
 /*
- * ecm_front_end_ipv4_conntrack_event()
+ * ecm_nss_ipv4_conntrack_event()
  *	Callback event invoked when conntrack connection state changes, currently we handle destroy events to quickly release state
  */
-int ecm_front_end_ipv4_conntrack_event(unsigned long events, struct nf_conn *ct)
+int ecm_nss_ipv4_conntrack_event(unsigned long events, struct nf_conn *ct)
 {
 	/*
 	 * If operations have stopped then do not process event
 	 */
-	spin_lock_bh(&ecm_front_end_ipv4_lock);
-	if (unlikely(ecm_front_end_ipv4_stopped)) {
+	spin_lock_bh(&ecm_nss_ipv4_lock);
+	if (unlikely(ecm_nss_ipv4_stopped)) {
 		DEBUG_WARN("Ignoring event - stopped\n");
-		spin_unlock_bh(&ecm_front_end_ipv4_lock);
+		spin_unlock_bh(&ecm_nss_ipv4_lock);
 		return NOTIFY_DONE;
 	}
-	spin_unlock_bh(&ecm_front_end_ipv4_lock);
+	spin_unlock_bh(&ecm_nss_ipv4_lock);
 
 	if (!ct) {
 		DEBUG_WARN("Error: no ct\n");
@@ -1912,7 +1898,7 @@ int ecm_front_end_ipv4_conntrack_event(unsigned long events, struct nf_conn *ct)
 	 */
 	if (events & (1 << IPCT_DESTROY)) {
 		DEBUG_TRACE("%p: Event is destroy\n", ct);
-		ecm_front_end_ipv4_conntrack_event_destroy(ct);
+		ecm_nss_ipv4_conntrack_event_destroy(ct);
 	}
 
 	/*
@@ -1920,17 +1906,17 @@ int ecm_front_end_ipv4_conntrack_event(unsigned long events, struct nf_conn *ct)
 	 */
 	if (events & (1 << IPCT_MARK)) {
 		DEBUG_TRACE("%p: Event is mark\n", ct);
-		ecm_front_end_ipv4_conntrack_event_mark(ct);
+		ecm_nss_ipv4_conntrack_event_mark(ct);
 	}
 
 	return NOTIFY_DONE;
 }
-EXPORT_SYMBOL(ecm_front_end_ipv4_conntrack_event);
+EXPORT_SYMBOL(ecm_nss_ipv4_conntrack_event);
 
 /*
- * ecm_front_end_ipv4_get_stop()
+ * ecm_nss_ipv4_get_stop()
  */
-static ssize_t ecm_front_end_ipv4_get_stop(struct device *dev,
+static ssize_t ecm_nss_ipv4_get_stop(struct device *dev,
 				  struct device_attribute *attr,
 				  char *buf)
 {
@@ -1940,30 +1926,30 @@ static ssize_t ecm_front_end_ipv4_get_stop(struct device *dev,
 	/*
 	 * Operate under our locks
 	 */
-	spin_lock_bh(&ecm_front_end_ipv4_lock);
-	num = ecm_front_end_ipv4_stopped;
-	spin_unlock_bh(&ecm_front_end_ipv4_lock);
+	spin_lock_bh(&ecm_nss_ipv4_lock);
+	num = ecm_nss_ipv4_stopped;
+	spin_unlock_bh(&ecm_nss_ipv4_lock);
 
 	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", num);
 	return count;
 }
 
-void ecm_front_end_ipv4_stop(int num)
+void ecm_nss_ipv4_stop(int num)
 {
 	/*
 	 * Operate under our locks and stop further processing of packets
 	 */
-	spin_lock_bh(&ecm_front_end_ipv4_lock);
-	ecm_front_end_ipv4_stopped = num;
-	spin_unlock_bh(&ecm_front_end_ipv4_lock);
+	spin_lock_bh(&ecm_nss_ipv4_lock);
+	ecm_nss_ipv4_stopped = num;
+	spin_unlock_bh(&ecm_nss_ipv4_lock);
 
 }
-EXPORT_SYMBOL(ecm_front_end_ipv4_stop);
+EXPORT_SYMBOL(ecm_nss_ipv4_stop);
 
 /*
- * ecm_front_end_ipv4_set_stop()
+ * ecm_nss_ipv4_set_stop()
  */
-static ssize_t ecm_front_end_ipv4_set_stop(struct device *dev,
+static ssize_t ecm_nss_ipv4_set_stop(struct device *dev,
 				  struct device_attribute *attr,
 				  const char *buf, size_t count)
 {
@@ -1979,17 +1965,17 @@ static ssize_t ecm_front_end_ipv4_set_stop(struct device *dev,
 	memcpy(num_buf, buf, count);
 	num_buf[count] = '\0';
 	sscanf(num_buf, "%d", &num);
-	DEBUG_TRACE("ecm_front_end_ipv4_stop = %d\n", num);
+	DEBUG_TRACE("ecm_nss_ipv4_stop = %d\n", num);
 
-	ecm_front_end_ipv4_stop(num);
+	ecm_nss_ipv4_stop(num);
 
 	return count;
 }
 
 /*
- * ecm_front_end_ipv4_get_accelerated_count()
+ * ecm_nss_ipv4_get_accelerated_count()
  */
-static ssize_t ecm_front_end_ipv4_get_accelerated_count(struct device *dev,
+static ssize_t ecm_nss_ipv4_get_accelerated_count(struct device *dev,
 				  struct device_attribute *attr,
 				  char *buf)
 {
@@ -1999,18 +1985,18 @@ static ssize_t ecm_front_end_ipv4_get_accelerated_count(struct device *dev,
 	/*
 	 * Operate under our locks
 	 */
-	spin_lock_bh(&ecm_front_end_ipv4_lock);
-	num = ecm_front_end_ipv4_accelerated_count;
-	spin_unlock_bh(&ecm_front_end_ipv4_lock);
+	spin_lock_bh(&ecm_nss_ipv4_lock);
+	num = ecm_nss_ipv4_accelerated_count;
+	spin_unlock_bh(&ecm_nss_ipv4_lock);
 
 	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", num);
 	return count;
 }
 
 /*
- * ecm_front_end_ipv4_get_pending_accel_count()
+ * ecm_nss_ipv4_get_pending_accel_count()
  */
-static ssize_t ecm_front_end_ipv4_get_pending_accel_count(struct device *dev,
+static ssize_t ecm_nss_ipv4_get_pending_accel_count(struct device *dev,
 				  struct device_attribute *attr,
 				  char *buf)
 {
@@ -2020,18 +2006,18 @@ static ssize_t ecm_front_end_ipv4_get_pending_accel_count(struct device *dev,
 	/*
 	 * Operate under our locks
 	 */
-	spin_lock_bh(&ecm_front_end_ipv4_lock);
-	num = ecm_front_end_ipv4_pending_accel_count;
-	spin_unlock_bh(&ecm_front_end_ipv4_lock);
+	spin_lock_bh(&ecm_nss_ipv4_lock);
+	num = ecm_nss_ipv4_pending_accel_count;
+	spin_unlock_bh(&ecm_nss_ipv4_lock);
 
 	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", num);
 	return count;
 }
 
 /*
- * ecm_front_end_ipv4_get_pending_decel_count()
+ * ecm_nss_ipv4_get_pending_decel_count()
  */
-static ssize_t ecm_front_end_ipv4_get_pending_decel_count(struct device *dev,
+static ssize_t ecm_nss_ipv4_get_pending_decel_count(struct device *dev,
 				  struct device_attribute *attr,
 				  char *buf)
 {
@@ -2041,18 +2027,18 @@ static ssize_t ecm_front_end_ipv4_get_pending_decel_count(struct device *dev,
 	/*
 	 * Operate under our locks
 	 */
-	spin_lock_bh(&ecm_front_end_ipv4_lock);
-	num = ecm_front_end_ipv4_pending_decel_count;
-	spin_unlock_bh(&ecm_front_end_ipv4_lock);
+	spin_lock_bh(&ecm_nss_ipv4_lock);
+	num = ecm_nss_ipv4_pending_decel_count;
+	spin_unlock_bh(&ecm_nss_ipv4_lock);
 
 	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", num);
 	return count;
 }
 
 /*
- * ecm_front_end_ipv4_get_no_action_limit_default()
+ * ecm_nss_ipv4_get_no_action_limit_default()
  */
-static ssize_t ecm_front_end_ipv4_get_no_action_limit_default(struct device *dev,
+static ssize_t ecm_nss_ipv4_get_no_action_limit_default(struct device *dev,
 				  struct device_attribute *attr,
 				  char *buf)
 {
@@ -2062,18 +2048,18 @@ static ssize_t ecm_front_end_ipv4_get_no_action_limit_default(struct device *dev
 	/*
 	 * Operate under our locks
 	 */
-	spin_lock_bh(&ecm_front_end_ipv4_lock);
-	num = ecm_front_end_ipv4_no_action_limit_default;
-	spin_unlock_bh(&ecm_front_end_ipv4_lock);
+	spin_lock_bh(&ecm_nss_ipv4_lock);
+	num = ecm_nss_ipv4_no_action_limit_default;
+	spin_unlock_bh(&ecm_nss_ipv4_lock);
 
 	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", num);
 	return count;
 }
 
 /*
- * ecm_front_end_ipv4_set_no_action_limit_default()
+ * ecm_nss_ipv4_set_no_action_limit_default()
  */
-static ssize_t ecm_front_end_ipv4_set_no_action_limit_default(struct device *dev,
+static ssize_t ecm_nss_ipv4_set_no_action_limit_default(struct device *dev,
 				  struct device_attribute *attr,
 				  const char *buf, size_t count)
 {
@@ -2089,19 +2075,19 @@ static ssize_t ecm_front_end_ipv4_set_no_action_limit_default(struct device *dev
 	memcpy(num_buf, buf, count);
 	num_buf[count] = '\0';
 	sscanf(num_buf, "%d", &num);
-	DEBUG_TRACE("ecm_front_end_ipv4_no_action_limit_default = %d\n", num);
+	DEBUG_TRACE("ecm_nss_ipv4_no_action_limit_default = %d\n", num);
 
-	spin_lock_bh(&ecm_front_end_ipv4_lock);
-	ecm_front_end_ipv4_no_action_limit_default = num;
-	spin_unlock_bh(&ecm_front_end_ipv4_lock);
+	spin_lock_bh(&ecm_nss_ipv4_lock);
+	ecm_nss_ipv4_no_action_limit_default = num;
+	spin_unlock_bh(&ecm_nss_ipv4_lock);
 
 	return count;
 }
 
 /*
- * ecm_front_end_ipv4_get_driver_fail_limit_default()
+ * ecm_nss_ipv4_get_driver_fail_limit_default()
  */
-static ssize_t ecm_front_end_ipv4_get_driver_fail_limit_default(struct device *dev,
+static ssize_t ecm_nss_ipv4_get_driver_fail_limit_default(struct device *dev,
 				  struct device_attribute *attr,
 				  char *buf)
 {
@@ -2111,18 +2097,18 @@ static ssize_t ecm_front_end_ipv4_get_driver_fail_limit_default(struct device *d
 	/*
 	 * Operate under our locks
 	 */
-	spin_lock_bh(&ecm_front_end_ipv4_lock);
-	num = ecm_front_end_ipv4_driver_fail_limit_default;
-	spin_unlock_bh(&ecm_front_end_ipv4_lock);
+	spin_lock_bh(&ecm_nss_ipv4_lock);
+	num = ecm_nss_ipv4_driver_fail_limit_default;
+	spin_unlock_bh(&ecm_nss_ipv4_lock);
 
 	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", num);
 	return count;
 }
 
 /*
- * ecm_front_end_ipv4_set_driver_fail_limit_default()
+ * ecm_nss_ipv4_set_driver_fail_limit_default()
  */
-static ssize_t ecm_front_end_ipv4_set_driver_fail_limit_default(struct device *dev,
+static ssize_t ecm_nss_ipv4_set_driver_fail_limit_default(struct device *dev,
 				  struct device_attribute *attr,
 				  const char *buf, size_t count)
 {
@@ -2138,19 +2124,19 @@ static ssize_t ecm_front_end_ipv4_set_driver_fail_limit_default(struct device *d
 	memcpy(num_buf, buf, count);
 	num_buf[count] = '\0';
 	sscanf(num_buf, "%d", &num);
-	DEBUG_TRACE("ecm_front_end_ipv4_driver_fail_limit_default = %d\n", num);
+	DEBUG_TRACE("ecm_nss_ipv4_driver_fail_limit_default = %d\n", num);
 
-	spin_lock_bh(&ecm_front_end_ipv4_lock);
-	ecm_front_end_ipv4_driver_fail_limit_default = num;
-	spin_unlock_bh(&ecm_front_end_ipv4_lock);
+	spin_lock_bh(&ecm_nss_ipv4_lock);
+	ecm_nss_ipv4_driver_fail_limit_default = num;
+	spin_unlock_bh(&ecm_nss_ipv4_lock);
 
 	return count;
 }
 
 /*
- * ecm_front_end_ipv4_get_nack_limit_default()
+ * ecm_nss_ipv4_get_nack_limit_default()
  */
-static ssize_t ecm_front_end_ipv4_get_nack_limit_default(struct device *dev,
+static ssize_t ecm_nss_ipv4_get_nack_limit_default(struct device *dev,
 				  struct device_attribute *attr,
 				  char *buf)
 {
@@ -2160,18 +2146,18 @@ static ssize_t ecm_front_end_ipv4_get_nack_limit_default(struct device *dev,
 	/*
 	 * Operate under our locks
 	 */
-	spin_lock_bh(&ecm_front_end_ipv4_lock);
-	num = ecm_front_end_ipv4_nack_limit_default;
-	spin_unlock_bh(&ecm_front_end_ipv4_lock);
+	spin_lock_bh(&ecm_nss_ipv4_lock);
+	num = ecm_nss_ipv4_nack_limit_default;
+	spin_unlock_bh(&ecm_nss_ipv4_lock);
 
 	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", num);
 	return count;
 }
 
 /*
- * ecm_front_end_ipv4_set_nack_limit_default()
+ * ecm_nss_ipv4_set_nack_limit_default()
  */
-static ssize_t ecm_front_end_ipv4_set_nack_limit_default(struct device *dev,
+static ssize_t ecm_nss_ipv4_set_nack_limit_default(struct device *dev,
 				  struct device_attribute *attr,
 				  const char *buf, size_t count)
 {
@@ -2187,19 +2173,19 @@ static ssize_t ecm_front_end_ipv4_set_nack_limit_default(struct device *dev,
 	memcpy(num_buf, buf, count);
 	num_buf[count] = '\0';
 	sscanf(num_buf, "%d", &num);
-	DEBUG_TRACE("ecm_front_end_ipv4_nack_limit_default = %d\n", num);
+	DEBUG_TRACE("ecm_nss_ipv4_nack_limit_default = %d\n", num);
 
-	spin_lock_bh(&ecm_front_end_ipv4_lock);
-	ecm_front_end_ipv4_nack_limit_default = num;
-	spin_unlock_bh(&ecm_front_end_ipv4_lock);
+	spin_lock_bh(&ecm_nss_ipv4_lock);
+	ecm_nss_ipv4_nack_limit_default = num;
+	spin_unlock_bh(&ecm_nss_ipv4_lock);
 
 	return count;
 }
 
 /*
- * ecm_front_end_ipv4_get_accel_limit_mode()
+ * ecm_nss_ipv4_get_accel_limit_mode()
  */
-static ssize_t ecm_front_end_ipv4_get_accel_limit_mode(struct device *dev,
+static ssize_t ecm_nss_ipv4_get_accel_limit_mode(struct device *dev,
 				  struct device_attribute *attr,
 				  char *buf)
 {
@@ -2209,9 +2195,9 @@ static ssize_t ecm_front_end_ipv4_get_accel_limit_mode(struct device *dev,
 	/*
 	 * Operate under our locks
 	 */
-	spin_lock_bh(&ecm_front_end_ipv4_lock);
-	num = ecm_front_end_ipv4_accel_limit_mode;
-	spin_unlock_bh(&ecm_front_end_ipv4_lock);
+	spin_lock_bh(&ecm_nss_ipv4_lock);
+	num = ecm_nss_ipv4_accel_limit_mode;
+	spin_unlock_bh(&ecm_nss_ipv4_lock);
 
 	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", num);
 	return count;
@@ -2219,9 +2205,9 @@ static ssize_t ecm_front_end_ipv4_get_accel_limit_mode(struct device *dev,
 
 
 /*
- * ecm_front_end_ipv4_set_accel_limit_mode()
+ * ecm_nss_ipv4_set_accel_limit_mode()
  */
-static ssize_t ecm_front_end_ipv4_set_accel_limit_mode(struct device *dev,
+static ssize_t ecm_nss_ipv4_set_accel_limit_mode(struct device *dev,
 				  struct device_attribute *attr,
 				  const char *buf, size_t count)
 {
@@ -2237,28 +2223,28 @@ static ssize_t ecm_front_end_ipv4_set_accel_limit_mode(struct device *dev,
 	memcpy(num_buf, buf, count);
 	num_buf[count] = '\0';
 	sscanf(num_buf, "%d", &bits);
-	DEBUG_TRACE("ecm_front_end_ipv4_accel_limit_mode = %x\n", bits);
+	DEBUG_TRACE("ecm_nss_ipv4_accel_limit_mode = %x\n", bits);
 
 	/*
 	 * Check that only valid bits are set.
 	 * It's fine for no bits to be set as that suggests no modes are wanted.
 	 */
 	if (bits && (bits ^ (ECM_FRONT_END_ACCEL_LIMIT_MODE_FIXED | ECM_FRONT_END_ACCEL_LIMIT_MODE_UNLIMITED))) {
-		DEBUG_WARN("ecm_front_end_ipv4_accel_limit_mode = %x bad\n", bits);
+		DEBUG_WARN("ecm_nss_ipv4_accel_limit_mode = %x bad\n", bits);
 		return 0;
 	}
 
-	spin_lock_bh(&ecm_front_end_ipv4_lock);
-	ecm_front_end_ipv4_accel_limit_mode = bits;
-	spin_unlock_bh(&ecm_front_end_ipv4_lock);
+	spin_lock_bh(&ecm_nss_ipv4_lock);
+	ecm_nss_ipv4_accel_limit_mode = bits;
+	spin_unlock_bh(&ecm_nss_ipv4_lock);
 
 	return count;
 }
 
 /*
- * ecm_front_end_ipv4_get_accel_average_millis()
+ * ecm_nss_ipv4_get_accel_average_millis()
  */
-static ssize_t ecm_front_end_ipv4_get_accel_average_millis(struct device *dev,
+static ssize_t ecm_nss_ipv4_get_accel_average_millis(struct device *dev,
 				  struct device_attribute *attr,
 				  char *buf)
 {
@@ -2271,13 +2257,13 @@ static ssize_t ecm_front_end_ipv4_get_accel_average_millis(struct device *dev,
 	 * Operate under our locks.
 	 * Compute the average of the samples taken and seed the next set of samples with the result of this one.
 	 */
-	spin_lock_bh(&ecm_front_end_ipv4_lock);
-	samples = ecm_front_end_ipv4_accel_cmd_time_avg_samples;
-	set = ecm_front_end_ipv4_accel_cmd_time_avg_set;
-	ecm_front_end_ipv4_accel_cmd_time_avg_samples /= ecm_front_end_ipv4_accel_cmd_time_avg_set;
-	ecm_front_end_ipv4_accel_cmd_time_avg_set = 1;
-	avg = ecm_front_end_ipv4_accel_cmd_time_avg_samples;
-	spin_unlock_bh(&ecm_front_end_ipv4_lock);
+	spin_lock_bh(&ecm_nss_ipv4_lock);
+	samples = ecm_nss_ipv4_accel_cmd_time_avg_samples;
+	set = ecm_nss_ipv4_accel_cmd_time_avg_set;
+	ecm_nss_ipv4_accel_cmd_time_avg_samples /= ecm_nss_ipv4_accel_cmd_time_avg_set;
+	ecm_nss_ipv4_accel_cmd_time_avg_set = 1;
+	avg = ecm_nss_ipv4_accel_cmd_time_avg_samples;
+	spin_unlock_bh(&ecm_nss_ipv4_lock);
 
 	/*
 	 * Convert average jiffies to milliseconds
@@ -2290,9 +2276,9 @@ static ssize_t ecm_front_end_ipv4_get_accel_average_millis(struct device *dev,
 }
 
 /*
- * ecm_front_end_ipv4_get_decel_average_millis()
+ * ecm_nss_ipv4_get_decel_average_millis()
  */
-static ssize_t ecm_front_end_ipv4_get_decel_average_millis(struct device *dev,
+static ssize_t ecm_nss_ipv4_get_decel_average_millis(struct device *dev,
 				  struct device_attribute *attr,
 				  char *buf)
 {
@@ -2305,13 +2291,13 @@ static ssize_t ecm_front_end_ipv4_get_decel_average_millis(struct device *dev,
 	 * Operate under our locks.
 	 * Compute the average of the samples taken and seed the next set of samples with the result of this one.
 	 */
-	spin_lock_bh(&ecm_front_end_ipv4_lock);
-	samples = ecm_front_end_ipv4_decel_cmd_time_avg_samples;
-	set = ecm_front_end_ipv4_decel_cmd_time_avg_set;
-	ecm_front_end_ipv4_decel_cmd_time_avg_samples /= ecm_front_end_ipv4_decel_cmd_time_avg_set;
-	ecm_front_end_ipv4_decel_cmd_time_avg_set = 1;
-	avg = ecm_front_end_ipv4_decel_cmd_time_avg_samples;
-	spin_unlock_bh(&ecm_front_end_ipv4_lock);
+	spin_lock_bh(&ecm_nss_ipv4_lock);
+	samples = ecm_nss_ipv4_decel_cmd_time_avg_samples;
+	set = ecm_nss_ipv4_decel_cmd_time_avg_set;
+	ecm_nss_ipv4_decel_cmd_time_avg_samples /= ecm_nss_ipv4_decel_cmd_time_avg_set;
+	ecm_nss_ipv4_decel_cmd_time_avg_set = 1;
+	avg = ecm_nss_ipv4_decel_cmd_time_avg_samples;
+	spin_unlock_bh(&ecm_nss_ipv4_lock);
 
 	/*
 	 * Convert average jiffies to milliseconds
@@ -2326,31 +2312,35 @@ static ssize_t ecm_front_end_ipv4_get_decel_average_millis(struct device *dev,
 /*
  * System device attributes
  */
-static DEVICE_ATTR(stop, 0644, ecm_front_end_ipv4_get_stop, ecm_front_end_ipv4_set_stop);
-static DEVICE_ATTR(no_action_limit_default, 0644, ecm_front_end_ipv4_get_no_action_limit_default, ecm_front_end_ipv4_set_no_action_limit_default);
-static DEVICE_ATTR(driver_fail_limit_default, 0644, ecm_front_end_ipv4_get_driver_fail_limit_default, ecm_front_end_ipv4_set_driver_fail_limit_default);
-static DEVICE_ATTR(nack_limit_default, 0644, ecm_front_end_ipv4_get_nack_limit_default, ecm_front_end_ipv4_set_nack_limit_default);
-static DEVICE_ATTR(udp_accelerated_count, 0444, ecm_front_end_ipv4_get_udp_accelerated_count, NULL);
-static DEVICE_ATTR(tcp_accelerated_count, 0444, ecm_front_end_ipv4_get_tcp_accelerated_count, NULL);
-static DEVICE_ATTR(non_ported_accelerated_count, 0444, ecm_front_end_ipv4_get_non_ported_accelerated_count, NULL);
-static DEVICE_ATTR(accelerated_count, 0444, ecm_front_end_ipv4_get_accelerated_count, NULL);
-static DEVICE_ATTR(pending_accel_count, 0444, ecm_front_end_ipv4_get_pending_accel_count, NULL);
-static DEVICE_ATTR(pending_decel_count, 0444, ecm_front_end_ipv4_get_pending_decel_count, NULL);
-static DEVICE_ATTR(accel_limit_mode, 0644, ecm_front_end_ipv4_get_accel_limit_mode, ecm_front_end_ipv4_set_accel_limit_mode);
-static DEVICE_ATTR(accel_cmd_avg_millis, 0444, ecm_front_end_ipv4_get_accel_average_millis, NULL);
-static DEVICE_ATTR(decel_cmd_avg_millis, 0444, ecm_front_end_ipv4_get_decel_average_millis, NULL);
+static DEVICE_ATTR(stop, 0644, ecm_nss_ipv4_get_stop, ecm_nss_ipv4_set_stop);
+static DEVICE_ATTR(no_action_limit_default, 0644, ecm_nss_ipv4_get_no_action_limit_default, ecm_nss_ipv4_set_no_action_limit_default);
+static DEVICE_ATTR(driver_fail_limit_default, 0644, ecm_nss_ipv4_get_driver_fail_limit_default, ecm_nss_ipv4_set_driver_fail_limit_default);
+static DEVICE_ATTR(nack_limit_default, 0644, ecm_nss_ipv4_get_nack_limit_default, ecm_nss_ipv4_set_nack_limit_default);
+static DEVICE_ATTR(udp_accelerated_count, 0444, ecm_nss_ported_ipv4_get_udp_accelerated_count, NULL);
+static DEVICE_ATTR(tcp_accelerated_count, 0444, ecm_nss_ported_ipv4_get_tcp_accelerated_count, NULL);
+#ifdef ECM_NON_PORTED_SUPPORT_ENABLE
+static DEVICE_ATTR(non_ported_accelerated_count, 0444, ecm_nss_non_ported_ipv4_get_accelerated_count, NULL);
+#endif
+static DEVICE_ATTR(accelerated_count, 0444, ecm_nss_ipv4_get_accelerated_count, NULL);
+static DEVICE_ATTR(pending_accel_count, 0444, ecm_nss_ipv4_get_pending_accel_count, NULL);
+static DEVICE_ATTR(pending_decel_count, 0444, ecm_nss_ipv4_get_pending_decel_count, NULL);
+static DEVICE_ATTR(accel_limit_mode, 0644, ecm_nss_ipv4_get_accel_limit_mode, ecm_nss_ipv4_set_accel_limit_mode);
+static DEVICE_ATTR(accel_cmd_avg_millis, 0444, ecm_nss_ipv4_get_accel_average_millis, NULL);
+static DEVICE_ATTR(decel_cmd_avg_millis, 0444, ecm_nss_ipv4_get_decel_average_millis, NULL);
 
 /*
  * System device attribute array.
  */
-static struct device_attribute *ecm_front_end_ipv4_attrs[] = {
+static struct device_attribute *ecm_nss_ipv4_attrs[] = {
 	&dev_attr_stop,
 	&dev_attr_no_action_limit_default,
 	&dev_attr_driver_fail_limit_default,
 	&dev_attr_nack_limit_default,
 	&dev_attr_udp_accelerated_count,
 	&dev_attr_tcp_accelerated_count,
+#ifdef ECM_NON_PORTED_SUPPORT_ENABLE
 	&dev_attr_non_ported_accelerated_count,
+#endif
 	&dev_attr_accelerated_count,
 	&dev_attr_pending_accel_count,
 	&dev_attr_pending_decel_count,
@@ -2361,40 +2351,40 @@ static struct device_attribute *ecm_front_end_ipv4_attrs[] = {
 
 /*
  * Sub System node of the front end
- * Sysdevice control points can be found at /sys/devices/system/ecm_front_end_ipv4/ecm_front_end_ipv4X/
+ * Sysdevice control points can be found at /sys/devices/system/ecm_nss_ipv4/ecm_nss_ipv4X/
  */
-static struct bus_type ecm_front_end_ipv4_subsys = {
-	.name = "ecm_front_end_ipv4",
-	.dev_name = "ecm_front_end_ipv4",
+static struct bus_type ecm_nss_ipv4_subsys = {
+	.name = "ecm_nss_ipv4",
+	.dev_name = "ecm_nss_ipv4",
 };
 
 /*
- * ecm_front_end_ipv4_dev_release()
+ * ecm_nss_ipv4_dev_release()
  *	This is a dummy release function for device.
  */
-static void ecm_front_end_ipv4_dev_release(struct device *dev)
+static void ecm_nss_ipv4_dev_release(struct device *dev)
 {
 
 }
 
 /*
- * ecm_front_end_ipv4_init()
+ * ecm_nss_ipv4_init()
  */
-int ecm_front_end_ipv4_init(void)
+int ecm_nss_ipv4_init(void)
 {
 	int result;
 	int i;
-	DEBUG_INFO("ECM Front end IPv4 init\n");
+	DEBUG_INFO("ECM NSS IPv4 init\n");
 
 	/*
 	 * Initialise our global lock
 	 */
-	spin_lock_init(&ecm_front_end_ipv4_lock);
+	spin_lock_init(&ecm_nss_ipv4_lock);
 
 	/*
 	 * Register the Sub system
 	 */
-	result = subsys_system_register(&ecm_front_end_ipv4_subsys, NULL);
+	result = subsys_system_register(&ecm_nss_ipv4_subsys, NULL);
 	if (result) {
 		DEBUG_ERROR("Failed to register sub system %d\n", result);
 		return result;
@@ -2403,11 +2393,11 @@ int ecm_front_end_ipv4_init(void)
 	/*
 	 * Register System device control
 	 */
-	memset(&ecm_front_end_ipv4_dev, 0, sizeof(ecm_front_end_ipv4_dev));
-	ecm_front_end_ipv4_dev.id = 0;
-	ecm_front_end_ipv4_dev.bus = &ecm_front_end_ipv4_subsys;
-	ecm_front_end_ipv4_dev.release = ecm_front_end_ipv4_dev_release;
-	result = device_register(&ecm_front_end_ipv4_dev);
+	memset(&ecm_nss_ipv4_dev, 0, sizeof(ecm_nss_ipv4_dev));
+	ecm_nss_ipv4_dev.id = 0;
+	ecm_nss_ipv4_dev.bus = &ecm_nss_ipv4_subsys;
+	ecm_nss_ipv4_dev.release = ecm_nss_ipv4_dev_release;
+	result = device_register(&ecm_nss_ipv4_dev);
 	if (result) {
 		DEBUG_ERROR("Failed to register System device %d\n", result);
 		goto task_cleanup_1;
@@ -2416,8 +2406,8 @@ int ecm_front_end_ipv4_init(void)
 	/*
 	 * Create files, one for each parameter supported by this module
 	 */
-	for (i = 0; i < ARRAY_SIZE(ecm_front_end_ipv4_attrs); i++) {
-		result = device_create_file(&ecm_front_end_ipv4_dev, ecm_front_end_ipv4_attrs[i]);
+	for (i = 0; i < ARRAY_SIZE(ecm_nss_ipv4_attrs); i++) {
+		result = device_create_file(&ecm_nss_ipv4_dev, ecm_nss_ipv4_attrs[i]);
 		if (result) {
 			DEBUG_ERROR("Failed to register stop file %d\n", result);
 			goto task_cleanup_2;
@@ -2427,7 +2417,7 @@ int ecm_front_end_ipv4_init(void)
 	/*
 	 * Register netfilter hooks
 	 */
-	result = nf_register_hooks(ecm_front_end_ipv4_netfilter_hooks, ARRAY_SIZE(ecm_front_end_ipv4_netfilter_hooks));
+	result = nf_register_hooks(ecm_nss_ipv4_netfilter_hooks, ARRAY_SIZE(ecm_nss_ipv4_netfilter_hooks));
 	if (result < 0) {
 		DEBUG_ERROR("Can't register netfilter hooks.\n");
 		goto task_cleanup_2;
@@ -2436,49 +2426,49 @@ int ecm_front_end_ipv4_init(void)
 	/*
 	 * Register this module with the Linux NSS Network driver
 	 */
-	ecm_front_end_ipv4_nss_ipv4_mgr = nss_ipv4_notify_register(ecm_front_end_ipv4_net_dev_callback, NULL);
+	ecm_nss_ipv4_nss_ipv4_mgr = nss_ipv4_notify_register(ecm_nss_ipv4_net_dev_callback, NULL);
 
 	return 0;
 
 task_cleanup_2:
 	while (--i >= 0) {
-		device_remove_file(&ecm_front_end_ipv4_dev, ecm_front_end_ipv4_attrs[i]);
+		device_remove_file(&ecm_nss_ipv4_dev, ecm_nss_ipv4_attrs[i]);
 	}
-	device_unregister(&ecm_front_end_ipv4_dev);
+	device_unregister(&ecm_nss_ipv4_dev);
 task_cleanup_1:
-	bus_unregister(&ecm_front_end_ipv4_subsys);
+	bus_unregister(&ecm_nss_ipv4_subsys);
 
 	return result;
 }
-EXPORT_SYMBOL(ecm_front_end_ipv4_init);
+EXPORT_SYMBOL(ecm_nss_ipv4_init);
 
 /*
- * ecm_front_end_ipv4_exit()
+ * ecm_nss_ipv4_exit()
  */
-void ecm_front_end_ipv4_exit(void)
+void ecm_nss_ipv4_exit(void)
 {
 	int i;
-	DEBUG_INFO("ECM Front end IPv4 Module exit\n");
-	spin_lock_bh(&ecm_front_end_ipv4_lock);
-	ecm_front_end_ipv4_terminate_pending = true;
-	spin_unlock_bh(&ecm_front_end_ipv4_lock);
+	DEBUG_INFO("ECM NSS IPv4 Module exit\n");
+	spin_lock_bh(&ecm_nss_ipv4_lock);
+	ecm_nss_ipv4_terminate_pending = true;
+	spin_unlock_bh(&ecm_nss_ipv4_lock);
 
 	/*
 	 * Stop the network stack hooks
 	 */
-	nf_unregister_hooks(ecm_front_end_ipv4_netfilter_hooks,
-			    ARRAY_SIZE(ecm_front_end_ipv4_netfilter_hooks));
+	nf_unregister_hooks(ecm_nss_ipv4_netfilter_hooks,
+			    ARRAY_SIZE(ecm_nss_ipv4_netfilter_hooks));
 
 	/*
 	 * Unregister from the Linux NSS Network driver
 	 */
 	nss_ipv4_notify_unregister();
 
-	for (i = 0; i < ARRAY_SIZE(ecm_front_end_ipv4_attrs); i++) {
-		device_remove_file(&ecm_front_end_ipv4_dev, ecm_front_end_ipv4_attrs[i]);
+	for (i = 0; i < ARRAY_SIZE(ecm_nss_ipv4_attrs); i++) {
+		device_remove_file(&ecm_nss_ipv4_dev, ecm_nss_ipv4_attrs[i]);
 	}
 
-	device_unregister(&ecm_front_end_ipv4_dev);
-	bus_unregister(&ecm_front_end_ipv4_subsys);
+	device_unregister(&ecm_nss_ipv4_dev);
+	bus_unregister(&ecm_nss_ipv4_subsys);
 }
-EXPORT_SYMBOL(ecm_front_end_ipv4_exit);
+EXPORT_SYMBOL(ecm_nss_ipv4_exit);

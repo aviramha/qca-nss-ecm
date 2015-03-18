@@ -16,6 +16,8 @@
 #include <linux/module.h>
 #include <linux/of.h>
 
+#include "ecm_front_end_ipv4.h"
+
 extern int ecm_tracker_init(void);
 extern void ecm_tracker_exit(void);
 
