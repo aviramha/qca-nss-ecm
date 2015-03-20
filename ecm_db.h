@@ -94,9 +94,7 @@ bool ecm_db_timer_group_entry_reset(struct ecm_db_timer_group_entry *tge, ecm_db
 bool ecm_db_timer_group_entry_remove(struct ecm_db_timer_group_entry *tge);
 bool ecm_db_timer_group_entry_touch(struct ecm_db_timer_group_entry *tge);
 
-int ecm_db_host_mapping_count_get(struct ecm_db_host_instance *hi);
 int ecm_db_mapping_connections_total_count_get(struct ecm_db_mapping_instance *mi);
-int ecm_db_iface_node_count_get(struct ecm_db_iface_instance *ii);
 
 struct ecm_db_host_instance *ecm_db_mapping_host_get_and_ref(struct ecm_db_mapping_instance *mi);
 struct ecm_db_iface_instance *ecm_db_node_iface_get_and_ref(struct ecm_db_node_instance *ni);
@@ -189,6 +187,10 @@ struct ecm_db_node_instance *ecm_db_node_get_and_ref_next(struct ecm_db_node_ins
 struct ecm_db_iface_instance *ecm_db_interfaces_get_and_ref_first(void);
 struct ecm_db_iface_instance *ecm_db_interface_get_and_ref_next(struct ecm_db_iface_instance *ii);
 
+#ifdef ECM_DB_XREF_ENABLE
+int ecm_db_host_mapping_count_get(struct ecm_db_host_instance *hi);
+int ecm_db_iface_node_count_get(struct ecm_db_iface_instance *ii);
+
 struct ecm_db_connection_instance *ecm_db_mapping_connections_from_get_and_ref_first(struct ecm_db_mapping_instance *mi);
 struct ecm_db_connection_instance *ecm_db_mapping_connections_to_get_and_ref_first(struct ecm_db_mapping_instance *mi);
 struct ecm_db_connection_instance *ecm_db_connection_mapping_from_get_and_ref_next(struct ecm_db_connection_instance *ci);
@@ -210,6 +212,7 @@ struct ecm_db_connection_instance *ecm_db_connection_iface_nat_from_get_and_ref_
 struct ecm_db_connection_instance *ecm_db_connection_iface_nat_to_get_and_ref_next(struct ecm_db_connection_instance *ci);
 
 struct ecm_db_node_instance *ecm_db_iface_nodes_get_and_ref_first(struct ecm_db_iface_instance *ii);
+#endif
 
 struct ecm_db_node_instance *ecm_db_node_get_and_ref_next(struct ecm_db_node_instance *ni);
 struct ecm_db_host_instance *ecm_db_host_get_and_ref_next(struct ecm_db_host_instance *hi);
