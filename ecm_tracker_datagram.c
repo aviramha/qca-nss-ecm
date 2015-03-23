@@ -74,6 +74,7 @@
 struct ecm_tracker_datagram_internal_instance {
 	struct ecm_tracker_datagram_instance datagram_base;	/* MUST BE FIRST FIELD */
 
+#ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
 	/*
 	 * skb-next and skb->prev pointers are leveraged for these lists
 	 */
@@ -88,6 +89,7 @@ struct ecm_tracker_datagram_internal_instance {
 	int32_t dest_bytes_total;		/* Total bytes in all received datagrams */
 
 	int32_t data_limit;			/* Limit for tracked data */
+#endif
 
 	ecm_tracker_sender_state_t sender_state[ECM_TRACKER_SENDER_MAX];
 						/* State of each sender */
@@ -117,6 +119,7 @@ static ecm_tracker_connection_state_t ecm_tracker_datagram_connection_state_matr
 	/* Fault */		{ECM_TRACKER_CONNECTION_STATE_FAULT,		ECM_TRACKER_CONNECTION_STATE_FAULT,		ECM_TRACKER_CONNECTION_STATE_FAULT,		ECM_TRACKER_CONNECTION_STATE_FAULT,	ECM_TRACKER_CONNECTION_STATE_FAULT,	ECM_TRACKER_CONNECTION_STATE_FAULT},
 };
 
+#ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
 /*
  * ecm_tracker_datagram_datagram_discard()
  *	Discard n number of datagrams at the head of the datagram list that were sent to the target
@@ -229,6 +232,7 @@ static void ecm_tracker_datagram_discard_all_callback(struct ecm_tracker_instanc
 	struct ecm_tracker_datagram_internal_instance *dtii = (struct ecm_tracker_datagram_internal_instance *)ti;
 	ecm_tracker_datagram_discard_all(dtii);
 }
+#endif
 
 /*
  * ecm_tracker_datagram_ref()
@@ -279,11 +283,13 @@ static int ecm_tracker_datagram_deref(struct ecm_tracker_datagram_internal_insta
 
 	DEBUG_TRACE("%p: final\n", dtii);
 
+#ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
 	/*
 	 * Destroy all datagrams
 	 */
 	ecm_tracker_datagram_datagram_discard(dtii, ECM_TRACKER_SENDER_TYPE_SRC, dtii->src_count);
 	ecm_tracker_datagram_datagram_discard(dtii, ECM_TRACKER_SENDER_TYPE_DEST, dtii->dest_count);
+#endif
 
 	spin_lock_bh(&ecm_tracker_datagram_lock);
 	ecm_tracker_datagram_count--;
@@ -306,6 +312,7 @@ static int ecm_tracker_datagram_deref_callback(struct ecm_tracker_instance *ti)
 	return ecm_tracker_datagram_deref(dtii);
 }
 
+#ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
 /*
  * ecm_tracker_datagram_datagram_count_get()
  *	Return number of available datagrams sent to the specified target
@@ -596,6 +603,7 @@ static void ecm_tracker_datagram_data_limit_set_callback(struct ecm_tracker_inst
 	dtii->data_limit = data_limit;
 	spin_unlock_bh(&dtii->lock);
 }
+#endif
 
 /*
  * ecm_tracker_datagram_state_update_callback()
@@ -639,11 +647,13 @@ static void ecm_tracker_datagram_state_get_callback(struct ecm_tracker_instance 
 static int ecm_tracker_datagram_xml_state_get_callback(struct ecm_tracker_instance *ti, char *buf, int buf_sz)
 {
 	struct ecm_tracker_datagram_internal_instance *dtii = (struct ecm_tracker_datagram_internal_instance *)ti;
+#ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
 	int32_t src_count;
 	int32_t src_bytes_total;
 	int32_t dest_count;
 	int32_t dest_bytes_total;
 	int32_t data_limit;
+#endif
 	ecm_tracker_sender_state_t sender_state[ECM_TRACKER_SENDER_MAX];
 	ecm_tracker_connection_state_t connection_state;
 	DEBUG_CHECK_MAGIC(dtii, ECM_TRACKER_DATAGRAM_INSTANCE_MAGIC, "%p: magic failed", dtii);
@@ -652,24 +662,38 @@ static int ecm_tracker_datagram_xml_state_get_callback(struct ecm_tracker_instan
 	 * Capture state
 	 */
 	spin_lock_bh(&dtii->lock);
+#ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
 	src_count = dtii->src_count;
 	src_bytes_total = dtii->src_bytes_total;
 	dest_count = dtii->dest_count;
 	dest_bytes_total = dtii->dest_bytes_total;
 	data_limit = dtii->data_limit;
+#endif
 	sender_state[ECM_TRACKER_SENDER_TYPE_SRC] = dtii->sender_state[ECM_TRACKER_SENDER_TYPE_SRC];
 	sender_state[ECM_TRACKER_SENDER_TYPE_DEST] = dtii->sender_state[ECM_TRACKER_SENDER_TYPE_DEST];
 	spin_unlock_bh(&dtii->lock);
 	connection_state = ecm_tracker_datagram_connection_state_matrix[sender_state[ECM_TRACKER_SENDER_TYPE_SRC]][sender_state[ECM_TRACKER_SENDER_TYPE_DEST]];
 
-	return snprintf(buf, buf_sz, "<datagram_tracker src_count=\"%d\" src_bytes_total=\"%d\" "
-			"dest_count=\"%d\" dest_bytes_total=\"%d\" data_limit=\"%d\" timer_group=\"%d\""
-			" src_sender_state=\"%s\" dest_sender_state=\"%s\" connection_state=\"%s\"/>\n",
+	return snprintf(buf, buf_sz, "<datagram_tracker"
+#ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
+			" src_count=\"%d\""
+			" src_bytes_total=\"%d\""
+			" dest_count=\"%d\""
+			" dest_bytes_total=\"%d\""
+			" data_limit=\"%d\""
+#endif
+			" timer_group=\"%d\""
+			" src_sender_state=\"%s\""
+			" dest_sender_state=\"%s\""
+			" connection_state=\"%s\""
+			"/>\n",
+#ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
 			src_count,
 			src_bytes_total,
 			dest_count,
 			dest_bytes_total,
 			data_limit,
+#endif
 			ECM_DB_TIMER_GROUPS_CONNECTION_GENERIC_TIMEOUT,
 			ecm_tracker_sender_state_to_string(sender_state[ECM_TRACKER_SENDER_TYPE_SRC]),
 			ecm_tracker_sender_state_to_string(sender_state[ECM_TRACKER_SENDER_TYPE_DEST]),
@@ -687,9 +711,11 @@ void ecm_tracker_datagram_init(struct ecm_tracker_datagram_instance *uti, int32_
 	DEBUG_CHECK_MAGIC(dtii, ECM_TRACKER_DATAGRAM_INSTANCE_MAGIC, "%p: magic failed", dtii);
 	DEBUG_TRACE("%p: init tracker\n", uti);
 
+#ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
 	spin_lock_bh(&dtii->lock);
 	dtii->data_limit = data_limit;
 	spin_unlock_bh(&dtii->lock);
+#endif
 }
 EXPORT_SYMBOL(ecm_tracker_datagram_init);
 
@@ -708,6 +734,9 @@ struct ecm_tracker_datagram_instance *ecm_tracker_datagram_alloc(void)
 
 	dtii->datagram_base.base.ref = ecm_tracker_datagram_ref_callback;
 	dtii->datagram_base.base.deref = ecm_tracker_datagram_deref_callback;
+	dtii->datagram_base.base.state_update = ecm_tracker_datagram_state_update_callback;
+	dtii->datagram_base.base.state_get = ecm_tracker_datagram_state_get_callback;
+#ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
 	dtii->datagram_base.base.datagram_count_get = ecm_tracker_datagram_datagram_count_get_callback;
 	dtii->datagram_base.base.datagram_discard = ecm_tracker_datagram_datagram_discard_callback;
 	dtii->datagram_base.base.datagram_read = ecm_tracker_datagram_datagram_read_callback;
@@ -717,8 +746,7 @@ struct ecm_tracker_datagram_instance *ecm_tracker_datagram_alloc(void)
 	dtii->datagram_base.base.data_total_get = ecm_tracker_datagram_data_total_get_callback;
 	dtii->datagram_base.base.data_limit_get = ecm_tracker_datagram_data_limit_get_callback;
 	dtii->datagram_base.base.data_limit_set = ecm_tracker_datagram_data_limit_set_callback;
-	dtii->datagram_base.base.state_update = ecm_tracker_datagram_state_update_callback;
-	dtii->datagram_base.base.state_get = ecm_tracker_datagram_state_get_callback;
+#endif
 #ifdef ECM_STATE_OUTPUT_ENABLE
 	dtii->datagram_base.base.xml_state_get = ecm_tracker_datagram_xml_state_get_callback;
 #endif

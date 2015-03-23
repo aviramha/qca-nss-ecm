@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2014, The Linux Foundation.  All rights reserved.
+ * Copyright (c) 2014, 2015, The Linux Foundation.  All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -16,19 +16,23 @@
 
 struct ecm_tracker_udp_instance;
 
+#ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
 typedef int32_t (*ecm_tracker_udp_data_size_get_method_t)(struct ecm_tracker_udp_instance *uti, ecm_tracker_sender_type_t sender, int32_t i);
 										/* Return size in bytes of datagram data at index i that was sent by the sender */
 typedef int (*ecm_tracker_udp_data_read_method_t)(struct ecm_tracker_udp_instance *uti, ecm_tracker_sender_type_t sender, int32_t i, int32_t offset, int32_t size, void *buffer);
 										/* Read size bytes of data at index i into the buffer */
 typedef bool (*ecm_tracker_udp_datagram_add_method_t)(struct ecm_tracker_udp_instance *uti, ecm_tracker_sender_type_t sender, struct ecm_tracker_ip_header *ip_hdr, struct ecm_tracker_ip_protocol_header *ecm_udp_header, struct udphdr *udp_header, struct sk_buff *skb);
 										/* Add a pre-checked UDP datagram */
+#endif
 
 struct ecm_tracker_udp_instance {
 	struct ecm_tracker_instance base;					/* MUST BE FIRST FIELD */
 
+#ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
 	ecm_tracker_udp_data_read_method_t data_read;				/* Read data from a UDP datagram (headers not considered) */
 	ecm_tracker_udp_data_size_get_method_t data_size_get;			/* Get data size of datagram (headers not considered) */
 	ecm_tracker_udp_datagram_add_method_t datagram_add;			/* Add a pre-checked UDP datagram */
+#endif
 };
 
 

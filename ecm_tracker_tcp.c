@@ -107,6 +107,7 @@ static uint32_t ecm_tracker_tcp_valid_flags[ECM_TRACKER_TCP_VALID_FLAGS_MAX] = {
 #define ECM_TRACKER_TCP_SKB_CB_MAGIC 0x4398
 #define ECM_TRACKER_TCP_READER_INSTANCE_MAGIC 0x1123
 
+#ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
 /*
  * struct ecm_tracker_tcp_skb_cb_format
  *	Map of the cb[] array within our cached buffers - we use that area for our tracking
@@ -121,7 +122,6 @@ struct ecm_tracker_tcp_skb_cb_format {
 	uint16_t magic;
 #endif
 };
-
 
 /*
  * struct ecm_tracker_tcp_host_data
@@ -161,6 +161,7 @@ struct ecm_tracker_tcp_host_data {
 							 */
 
 };
+#endif
 
 /*
  * struct ecm_tracker_tcp_sender_state
@@ -177,9 +178,13 @@ struct ecm_tracker_tcp_sender_state {
  */
 struct ecm_tracker_tcp_internal_instance  {
 	struct ecm_tracker_tcp_instance tcp_base;					/* MUST BE FIRST FIELD */
+#ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
 	struct ecm_tracker_tcp_host_data sender_data[ECM_TRACKER_SENDER_MAX];		/* Data tracked sent by the src of the connection */
+#endif
 	struct ecm_tracker_tcp_sender_state sender_states[ECM_TRACKER_SENDER_MAX];	/* Sender states */
+#ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
 	int32_t data_limit;								/* Limit for tracked data */
+#endif
 	int refs;									/* Integer to trap we never go negative */
 	spinlock_t lock;
 #if (DEBUG_LEVEL > 0)
@@ -187,6 +192,7 @@ struct ecm_tracker_tcp_internal_instance  {
 #endif
 };
 
+#ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
 /*
  * struct ecm_tracker_tcp_reader_instance
  *	Reader.
@@ -222,6 +228,7 @@ struct ecm_tracker_tcp_reader_instance {
 	uint16_t magic;
 #endif
 };
+#endif
 
 /*
  * ecm_tracker_tcp_timer_group_from_state[]
@@ -238,7 +245,9 @@ static ecm_db_timer_group_t ecm_tracker_tcp_timer_group_from_state[] = {
 							ECM_DB_TIMER_GROUPS_CONNECTION_TCP_RESET_TIMEOUT,	/* ECM_TRACKER_CONNECTION_STATE_FAULT */
 							};
 int ecm_tracker_tcp_count = 0;		/* Counts the number of TCP data trackers right now */
+#ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
 int ecm_tracker_tcp_reader_count = 0;	/* Counts the number of TCP readers right now */
+#endif
 spinlock_t ecm_tracker_tcp_lock;	/* Global lock for the tracker globals */
 
 /*
@@ -311,6 +320,7 @@ struct tcphdr *ecm_tracker_tcp_check_header_and_read(struct sk_buff *skb, struct
 }
 EXPORT_SYMBOL(ecm_tracker_tcp_check_header_and_read);
 
+#ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
 /*
  * ecm_tracker_tcp_bytes_discard()
  *	Discard n bytes from the available in_order bytes
@@ -556,6 +566,7 @@ static void ecm_tracker_tcp_discard_all_callback(struct ecm_tracker_instance *ti
 	_ecm_tracker_tcp_discard_all(ttii);
 	spin_unlock_bh(&ttii->lock);
 }
+#endif
 
 /*
  * ecm_tracker_tcp_ref_callback()
@@ -595,7 +606,9 @@ int ecm_tracker_tcp_deref_callback(struct ecm_tracker_instance *ti)
 	}
 
 	DEBUG_TRACE("%p: final\n", ttii);
+#ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
 	_ecm_tracker_tcp_discard_all(ttii);
+#endif
 	spin_unlock_bh(&ttii->lock);
 
 	spin_lock_bh(&ecm_tracker_tcp_lock);
@@ -610,6 +623,7 @@ int ecm_tracker_tcp_deref_callback(struct ecm_tracker_instance *ti)
 	return 0;
 }
 
+#ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
 /*
  * ecm_tracker_tcp_datagram_count_get_callback()
  *	Return number of available datagrams sent to the specified target in the in_order list
@@ -1653,6 +1667,7 @@ static void ecm_tracker_tcp_data_limit_set_callback(struct ecm_tracker_instance 
 	ttii->data_limit = data_limit;
 	spin_unlock_bh(&ttii->lock);
 }
+#endif
 
 /*
  * ecm_tracker_tcp_state_update_callback()
@@ -1891,12 +1906,28 @@ static void ecm_tracker_tcp_state_get_callback(struct ecm_tracker_instance *ti, 
  * ecm_tracker_tcp_sender_xml_state_get()
  *	Return an XML state element
  */
-static int ecm_tracker_tcp_sender_xml_state_get(char *buf, int buf_sz, ecm_tracker_sender_type_t sender, struct ecm_tracker_tcp_host_data *data, struct ecm_tracker_tcp_sender_state *state)
+static int ecm_tracker_tcp_sender_xml_state_get(char *buf, int buf_sz, ecm_tracker_sender_type_t sender,
+#ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
+						struct ecm_tracker_tcp_host_data *data,
+#endif
+						struct ecm_tracker_tcp_sender_state *state)
 {
-	return snprintf(buf, buf_sz, "<sender_%s mss_seen=\"%s\" mss=\"%u\" "
-			"seq_no=\"%u\" num_seqs=\"%u\" seq_valid=\"%s\" bytes_total=\"%d\""
-			" buffers_total=\"%d\" state=\"%s\" syn_seq=\"%u\" fin_seq=\"%u\"/>\n",
+	return snprintf(buf, buf_sz, "<sender_%s"
+#ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
+			" mss_seen=\"%s\""
+			" mss=\"%u\""
+			" seq_no=\"%u\""
+			" num_seqs=\"%u\""
+			" seq_valid=\"%s\""
+			" bytes_total=\"%d\""
+			" buffers_total=\"%d\""
+#endif
+			" state=\"%s\""
+			" syn_seq=\"%u\""
+			" fin_seq=\"%u\""
+			"/>\n",
 			(sender == ECM_TRACKER_SENDER_TYPE_SRC)? "src" : "dest",
+#ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
 			(data->mss_seen)? "yes" : "no",
 			data->mss,
 			data->seq_no,
@@ -1904,6 +1935,7 @@ static int ecm_tracker_tcp_sender_xml_state_get(char *buf, int buf_sz, ecm_track
 			(data->seq_no_valid)? "yes" : "no",
 			data->recvd_bytes_total,
 			data->recvd_count,
+#endif
 			ecm_tracker_sender_state_to_string(state->state),
 			state->syn_seq,
 			state->fin_seq);
@@ -1918,9 +1950,11 @@ static int ecm_tracker_tcp_xml_state_get_callback(struct ecm_tracker_instance *t
 	struct ecm_tracker_tcp_internal_instance *ttii = (struct ecm_tracker_tcp_internal_instance *)ti;
 	int count;
 	int total;
-	struct ecm_tracker_tcp_host_data sender_data[ECM_TRACKER_SENDER_MAX];
 	struct ecm_tracker_tcp_sender_state sender_states[ECM_TRACKER_SENDER_MAX];
+#ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
+	struct ecm_tracker_tcp_host_data sender_data[ECM_TRACKER_SENDER_MAX];
 	int32_t data_limit;
+#endif
 	ecm_tracker_connection_state_t connection_state;
 	DEBUG_CHECK_MAGIC(ttii, ECM_TRACKER_TCP_INSTANCE_MAGIC, "%p: magic failed", ttii);
 
@@ -1928,9 +1962,11 @@ static int ecm_tracker_tcp_xml_state_get_callback(struct ecm_tracker_instance *t
 	 * Capture state
 	 */
 	spin_lock_bh(&ttii->lock);
+#ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
 	data_limit = ttii->data_limit;
 	sender_data[ECM_TRACKER_SENDER_TYPE_SRC] = ttii->sender_data[ECM_TRACKER_SENDER_TYPE_SRC];
 	sender_data[ECM_TRACKER_SENDER_TYPE_DEST] = ttii->sender_data[ECM_TRACKER_SENDER_TYPE_DEST];
+#endif
 	sender_states[ECM_TRACKER_SENDER_TYPE_SRC] = ttii->sender_states[ECM_TRACKER_SENDER_TYPE_SRC];
 	sender_states[ECM_TRACKER_SENDER_TYPE_DEST] = ttii->sender_states[ECM_TRACKER_SENDER_TYPE_DEST];
 	spin_unlock_bh(&ttii->lock);
@@ -1939,9 +1975,17 @@ static int ecm_tracker_tcp_xml_state_get_callback(struct ecm_tracker_instance *t
 	/*
 	 * Output our opening element
 	 */
-	count = snprintf(buf, buf_sz, "<tcp_tracker connection_state=\"%s\" data_limit=\"%d\">",
-			ecm_tracker_connection_state_to_string(connection_state),
-			data_limit);
+	count = snprintf(buf, buf_sz, "<tcp_tracker"
+			" connection_state=\"%s\""
+#ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
+			" data_limit=\"%d\""
+#endif
+			">",
+			ecm_tracker_connection_state_to_string(connection_state)
+#ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
+			, data_limit
+#endif
+			);
 	if ((count <= 0) || (count >= buf_sz)) {
 		return -1;
 	}
@@ -1951,7 +1995,13 @@ static int ecm_tracker_tcp_xml_state_get_callback(struct ecm_tracker_instance *t
 	/*
 	 * Output src sender
 	 */
-	count = ecm_tracker_tcp_sender_xml_state_get(buf + total, buf_sz, ECM_TRACKER_SENDER_TYPE_SRC, &sender_data[ECM_TRACKER_SENDER_TYPE_SRC], &sender_states[ECM_TRACKER_SENDER_TYPE_SRC]);
+	count = ecm_tracker_tcp_sender_xml_state_get(buf + total,
+			buf_sz,
+			ECM_TRACKER_SENDER_TYPE_SRC,
+#ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
+			&sender_data[ECM_TRACKER_SENDER_TYPE_SRC],
+#endif
+			&sender_states[ECM_TRACKER_SENDER_TYPE_SRC]);
 	if ((count <= 0) || (count >= buf_sz)) {
 		return -1;
 	}
@@ -1961,7 +2011,13 @@ static int ecm_tracker_tcp_xml_state_get_callback(struct ecm_tracker_instance *t
 	/*
 	 * Output dest sender
 	 */
-	count = ecm_tracker_tcp_sender_xml_state_get(buf + total, buf_sz, ECM_TRACKER_SENDER_TYPE_DEST, &sender_data[ECM_TRACKER_SENDER_TYPE_DEST], &sender_states[ECM_TRACKER_SENDER_TYPE_DEST]);
+	count = ecm_tracker_tcp_sender_xml_state_get(buf + total,
+			buf_sz,
+			ECM_TRACKER_SENDER_TYPE_DEST,
+#ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
+			&sender_data[ECM_TRACKER_SENDER_TYPE_DEST],
+#endif
+			&sender_states[ECM_TRACKER_SENDER_TYPE_DEST]);
 	if ((count <= 0) || (count >= buf_sz)) {
 		return -1;
 	}
@@ -1989,11 +2045,13 @@ void ecm_tracker_tcp_init(struct ecm_tracker_tcp_instance *tti, int32_t data_lim
 	struct ecm_tracker_tcp_internal_instance *ttii = (struct ecm_tracker_tcp_internal_instance *)tti;
 	DEBUG_CHECK_MAGIC(ttii, ECM_TRACKER_TCP_INSTANCE_MAGIC, "%p: magic failed", ttii);
 	DEBUG_TRACE("%p: init host addresses src mss: %d, dest mss: %d\n", ttii, mss_src_default, mss_dest_default);
+#ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
 	spin_lock_bh(&ttii->lock);
 	ttii->data_limit = data_limit;
 	ttii->sender_data[ECM_TRACKER_SENDER_TYPE_SRC].mss = mss_src_default;
 	ttii->sender_data[ECM_TRACKER_SENDER_TYPE_DEST].mss = mss_dest_default;
 	spin_unlock_bh(&ttii->lock);
+#endif
 }
 EXPORT_SYMBOL(ecm_tracker_tcp_init);
 
@@ -2012,6 +2070,9 @@ struct ecm_tracker_tcp_instance *ecm_tracker_tcp_alloc(void)
 
 	ttii->tcp_base.base.ref = ecm_tracker_tcp_ref_callback;
 	ttii->tcp_base.base.deref = ecm_tracker_tcp_deref_callback;
+	ttii->tcp_base.base.state_update = ecm_tracker_tcp_state_update_callback;
+	ttii->tcp_base.base.state_get = ecm_tracker_tcp_state_get_callback;
+#ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
 	ttii->tcp_base.base.datagram_count_get = ecm_tracker_tcp_datagram_count_get_callback;
 	ttii->tcp_base.base.datagram_discard = ecm_tracker_tcp_datagram_discard_callback;
 	ttii->tcp_base.base.datagram_read = ecm_tracker_tcp_datagram_read_callback;
@@ -2021,17 +2082,16 @@ struct ecm_tracker_tcp_instance *ecm_tracker_tcp_alloc(void)
 	ttii->tcp_base.base.data_total_get = ecm_tracker_tcp_data_total_get_callback;
 	ttii->tcp_base.base.data_limit_get = ecm_tracker_tcp_data_limit_get_callback;
 	ttii->tcp_base.base.data_limit_set = ecm_tracker_tcp_data_limit_set_callback;
-	ttii->tcp_base.base.state_update = ecm_tracker_tcp_state_update_callback;
-	ttii->tcp_base.base.state_get = ecm_tracker_tcp_state_get_callback;
-#ifdef ECM_STATE_OUTPUT_ENABLE
-	ttii->tcp_base.base.xml_state_get = ecm_tracker_tcp_xml_state_get_callback;
-#endif
 
 	ttii->tcp_base.bytes_avail_get = ecm_tracker_tcp_bytes_avail_get_callback;
 	ttii->tcp_base.bytes_read = ecm_tracker_tcp_bytes_read_callback;
 	ttii->tcp_base.bytes_discard = ecm_tracker_tcp_bytes_discard_callback;
 	ttii->tcp_base.mss_get = ecm_tracker_tcp_mss_get_callback;
 	ttii->tcp_base.segment_add = ecm_tracker_tcp_segment_add_callback;
+#endif
+#ifdef ECM_STATE_OUTPUT_ENABLE
+	ttii->tcp_base.base.xml_state_get = ecm_tracker_tcp_xml_state_get_callback;
+#endif
 
 	spin_lock_init(&ttii->lock);
 
@@ -2048,6 +2108,7 @@ struct ecm_tracker_tcp_instance *ecm_tracker_tcp_alloc(void)
 }
 EXPORT_SYMBOL(ecm_tracker_tcp_alloc);
 
+#ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
 /*
  * ecm_tracker_tcp_reader_fwd_read_u8()
  *	Read a byte, advancing the read position
@@ -2467,6 +2528,7 @@ struct ecm_tracker_tcp_reader_instance *ecm_tracker_tcp_reader_alloc(void)
 	return tri;
 }
 EXPORT_SYMBOL(ecm_tracker_tcp_reader_alloc);
+#endif
 
 /*
  * ecm_tracker_tcp_module_init()
