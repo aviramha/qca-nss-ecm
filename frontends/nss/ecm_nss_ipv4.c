@@ -1414,6 +1414,23 @@ static unsigned int ecm_nss_ipv4_bridge_post_routing_hook(const struct nf_hook_o
 		return NF_ACCEPT;
 	}
 
+	/*
+	 * Process the packet, if we have this mac address in the fdb table.
+	 * TODO: For the kernel versions later than 3.6.x, the API needs vlan id.
+	 * 	 For now, we are passing 0, but this needs to be handled later.
+	 */
+#if (LINUX_VERSION_CODE <= KERNEL_VERSION(3,6,0))
+	if (!br_fdb_has_entry((struct net_device *)out, skb_eth_hdr->h_dest)) {
+#else
+	if (!br_fdb_has_entry((struct net_device *)out, skb_eth_hdr->h_dest, 0)) {
+#endif
+		DEBUG_WARN("skb: %p, No fdb entry for this mac address %pM in the bridge: %p (%s)\n",
+				skb, skb_eth_hdr->h_dest, bridge, bridge->name);
+		dev_put(in);
+		dev_put(bridge);
+		return NF_ACCEPT;
+	}
+
 	DEBUG_TRACE("Bridge process skb: %p, bridge: %p (%s), In: %p (%s), Out: %p (%s)\n",
 			skb, bridge, bridge->name, in, in->name, out, out->name);
 	result = ecm_nss_ipv4_ip_process((struct net_device *)out, in,
