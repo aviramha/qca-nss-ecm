@@ -81,14 +81,18 @@ static int ecm_state_dev_major_id = 0;			/* Major ID of registered char dev from
 #define ECM_STATE_FILE_OUTPUT_NODES_CHAIN 256
 #define ECM_STATE_FILE_OUTPUT_INTERFACES_CHAIN 512
 #define ECM_STATE_FILE_OUTPUT_PROTOCOL_COUNTS 1024
+#ifdef ECM_DB_CTA_TRACK_ENABLE
 #define ECM_STATE_FILE_OUTPUT_CLASSIFIER_TYPE_ASSIGNMENTS 2048
+#endif
 
+#ifdef ECM_DB_CTA_TRACK_ENABLE
 /*
  * Assistive flags for classifier connection type assignments
  */
 #define ECM_STATE_FILE_CTA_FLAG_ELEMENT_START_UNWRITTEN 1
 #define ECM_STATE_FILE_CTA_FLAG_CONTENT_UNWRITTEN 2
 #define ECM_STATE_FILE_CTA_FLAG_ELEMENT_END_UNWRITTEN 4
+#endif
 
 /*
  * struct ecm_state_file_instance
@@ -101,10 +105,12 @@ struct ecm_state_file_instance {
 	struct ecm_db_host_instance *hi;		/* All hosts list iterator */
 	struct ecm_db_node_instance *ni;		/* All nodes list iterator */
 	struct ecm_db_iface_instance *ii;		/* All interfaces list iterator */
+#ifdef ECM_DB_CTA_TRACK_ENABLE
 	struct ecm_db_connection_instance *classifier_type_assignments[ECM_CLASSIFIER_TYPES];
 							/* Classifier type connection assignments iterator, one for each classifier type */
 	int classifier_type_assignments_flags[ECM_CLASSIFIER_TYPES];
 							/* Classifier type connection assignments flags to assist the iteration */
+#endif
 	int connection_hash_index;			/* Connection hash table lengths iterator */
 	int mapping_hash_index;				/* Mapping hash table lengths iterator */
 	int host_hash_index;				/* Host hash table lengths iterator */
@@ -630,6 +636,7 @@ static bool ecm_state_char_dev_protocol_count_msg_prep(struct ecm_state_file_ins
 	return true;
 }
 
+#ifdef ECM_DB_CTA_TRACK_ENABLE
 /*
  * ecm_state_char_dev_cta_msg_prep()
  *	Generate a classifier type assignment message
@@ -736,6 +743,7 @@ static void ecm_state_file_classifier_type_assignments_release(struct ecm_state_
 		ecm_db_connection_by_classifier_type_assignment_deref(ci, ca_type);
 	}
 }
+#endif
 
 /*
  * ecm_state_char_device_open()
@@ -795,6 +803,7 @@ static int ecm_state_char_device_open(struct inode *inode, struct file *file)
 	if (sfi->output_mask & ECM_STATE_FILE_OUTPUT_INTERFACES) {
 		sfi->ii = ecm_db_interfaces_get_and_ref_first();
 	}
+#ifdef ECM_DB_CTA_TRACK_ENABLE
 	if (sfi->output_mask & ECM_STATE_FILE_OUTPUT_CLASSIFIER_TYPE_ASSIGNMENTS) {
 		ecm_classifier_type_t ca_type;
 
@@ -813,6 +822,7 @@ static int ecm_state_char_device_open(struct inode *inode, struct file *file)
 			}
 		}
 	}
+#endif
 
 	DEBUG_INFO("State opened %p\n", sfi);
 
@@ -849,7 +859,9 @@ static int ecm_state_char_device_release(struct inode *inode, struct file *file)
 	if (sfi->ii) {
 		ecm_db_iface_deref(sfi->ii);
 	}
+#ifdef ECM_DB_CTA_TRACK_ENABLE
 	ecm_state_file_classifier_type_assignments_release(sfi);
+#endif
 
 	DEBUG_CLEAR_MAGIC(sfi);
 	kfree(sfi);
@@ -868,7 +880,9 @@ static ssize_t ecm_state_char_device_read(struct file *file,	/* see include/linu
 {
 	struct ecm_state_file_instance *sfi;
 	int bytes_read = 0;						/* Number of bytes actually written to the buffer */
+#ifdef ECM_DB_CTA_TRACK_ENABLE
 	ecm_classifier_type_t ca_type;
+#endif
 
 	sfi = (struct ecm_state_file_instance *)file->private_data;
 	DEBUG_CHECK_MAGIC(sfi, ECM_STATE_FILE_INSTANCE_MAGIC, "%p: magic failed", sfi);
@@ -1016,6 +1030,7 @@ static ssize_t ecm_state_char_device_read(struct file *file,	/* see include/linu
 		goto char_device_read_output;
 	}
 
+#ifdef ECM_DB_CTA_TRACK_ENABLE
 	for (ca_type = 0; ca_type < ECM_CLASSIFIER_TYPES; ++ca_type) {
 		int flags;
 
@@ -1032,6 +1047,7 @@ static ssize_t ecm_state_char_device_read(struct file *file,	/* see include/linu
 		}
 		goto char_device_read_output;
 	}
+#endif
 
 	if (!sfi->doc_end_written) {
 		sfi->msgp = sfi->msg_buffer;

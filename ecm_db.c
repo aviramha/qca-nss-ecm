@@ -77,7 +77,9 @@
 #define ECM_DB_LISTENER_INSTANCE_MAGIC 0x9876
 #define ECM_DB_NODE_INSTANCE_MAGIC 0x3312
 #define ECM_DB_IFACE_INSTANCE_MAGIC 0xAEF1
+#ifdef ECM_DB_CTA_TRACK_ENABLE
 #define ECM_DB_CLASSIFIER_TYPE_ASSIGNMENT_MAGIC 0xAEF4
+#endif
 
 /*
  * Global lists.
@@ -494,12 +496,21 @@ static struct ecm_db_timer_group ecm_db_timer_groups[ECM_DB_TIMER_GROUPS_MAX];
 								/* Timer groups */
 static struct timer_list ecm_db_timer;				/* Timer to drive timer groups */
 
+
+#ifdef ECM_DB_CTA_TRACK_ENABLE
 /*
- * Classifier assignments
+ * Classifier TYPE assignment lists.
  *
- * Each connection has a list of classifier instances that are assigned to it.  Only one instance of each type may be assigned to a connection at any time.
- * These structures store, in a list, all connections that are assigned to a TYPE of classifier.
- * This allows iterating of all connections that are currently assigned to a classifier TYPE.
+ * For each type of classifier a list is kept of all connections assigned a classifier of that type.
+ * This permits a classifier type to rapidly retrieve all connections with classifiers assigned to it of that type.
+ *
+ * NOTE: This is in addition to the basic functionality whereby a connection keeps a list of classifier instances
+ * that are assigned to it in descending order of priority.
+ */
+
+/*
+ * struct ecm_db_connection_classifier_type_assignment
+ *	List linkage
  */
 struct ecm_db_connection_classifier_type_assignment {
 	struct ecm_db_connection_instance *next;	/* Next connection assigned to a classifier of this type */
@@ -510,12 +521,18 @@ struct ecm_db_connection_classifier_type_assignment {
 	uint16_t magic;
 #endif
 };
+
+/*
+ * struct ecm_db_connection_classifier_type_assignment_list
+ *	A list, one for each classifier type.
+ */
 struct ecm_db_connection_classifier_type_assignment_list {
 	struct ecm_db_connection_instance *type_assignments_list;
 							/* Lists of connections assigned to this type of classifier */
 	int32_t type_assignment_count;			/* Number of connections in the list */
 } ecm_db_connection_classifier_type_assignments[ECM_CLASSIFIER_TYPES];
 							/* Each classifier type has a list of connections that are assigned to classifier instances of that type */
+#endif
 
 /*
  * struct ecm_db_connection_instance
@@ -668,7 +685,7 @@ struct ecm_db_connection_instance {
 	 * Classifiers attached to this connection
 	 */
 	struct ecm_classifier_instance *assignments;		/* A list of all classifiers that are still assigned to this connection.
-								 * When a connection is created, instances of every type of classifier are assigned to the connection.
+								 * When a connection is created, one instance of every type of classifier is assigned to the connection.
 								 * Classifiers are added in ascending order of priority - so the most important processes a packet last.
 								 * Classifiers may drop out of this list (become unassigned) at any time.
 								 */
@@ -676,8 +693,14 @@ struct ecm_db_connection_instance {
 								/* All assignments are also recorded in this array, since there can be only one of each type, this array allows
 								 * rapid retrieval of a classifier type, saving having to iterate the assignments list.
 								 */
+
+#ifdef ECM_DB_CTA_TRACK_ENABLE
 	struct ecm_db_connection_classifier_type_assignment type_assignment[ECM_CLASSIFIER_TYPES];
-								/* Each classifier TYPE has a list of connections that have a classifier instance (of that type) assigned to it */
+								/*
+								 * Each classifier TYPE has a list of connections that are assigned to it.
+								 * This permits a classifier TYPE to rapidly retrieve all connections associated with it.
+								 */
+#endif
 
 	uint16_t classifier_generation;				/* Used to detect when a re-evaluation of this connection is necessary */
 	uint32_t generations;					/* Tracks how many times re-generation was seen for this connection */
@@ -2305,6 +2328,7 @@ struct ecm_db_iface_instance *ecm_db_interface_get_and_ref_next(struct ecm_db_if
 }
 EXPORT_SYMBOL(ecm_db_interface_get_and_ref_next);
 
+#ifdef ECM_DB_CTA_TRACK_ENABLE
 /*
  * _ecm_db_classifier_type_assignment_remove()
  *	Remove the connection from the classifier type assignment list (of the given type)
@@ -2349,6 +2373,7 @@ static void _ecm_db_classifier_type_assignment_remove(struct ecm_db_connection_i
 
 	DEBUG_CLEAR_MAGIC(ta);
 }
+#endif
 
 /*
  * ecm_db_connection_deref()
@@ -2356,7 +2381,9 @@ static void _ecm_db_classifier_type_assignment_remove(struct ecm_db_connection_i
  */
 int ecm_db_connection_deref(struct ecm_db_connection_instance *ci)
 {
+#ifdef ECM_DB_CTA_TRACK_ENABLE
 	ecm_classifier_type_t ca_type;
+#endif
 	int32_t i;
 
 	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed", ci);
@@ -2372,6 +2399,7 @@ int ecm_db_connection_deref(struct ecm_db_connection_instance *ci)
 		return refs;
 	}
 
+#ifdef ECM_DB_CTA_TRACK_ENABLE
 	/*
 	 * Unlink from the "assignments by classifier type" lists.
 	 * 
@@ -2391,6 +2419,7 @@ int ecm_db_connection_deref(struct ecm_db_connection_instance *ci)
 		}
 		_ecm_db_classifier_type_assignment_remove(ci, ca_type);
 	}
+#endif
 
 	/*
 	 * Remove from database if inserted
@@ -4926,8 +4955,8 @@ static uint32_t ecm_db_timer_groups_check(uint32_t time_now)
  * ecm_db_connection_classifier_assign()
  *	Assign a classifier to the connection assigned classifier list.
  *
- * This adds the classifier in the ci->assignments list in priority order according to the classifier type.
- * Only assigned classifiers are in this list, allowing fast retrival of in-order current assignments, avoiding the need to skip over unassigned classifiers.
+ * This adds the classifier in the ci->assignments list in ascending priority order according to the classifier type.
+ * Only assigned classifiers are in this list, allowing fast retrival of current assignments, avoiding the need to skip over unassigned classifiers.
  * Because there is only one of each type of classifier the classifier is also recorded in an array, the position in which is its type value.
  * This allows fast lookup based on type too.
  * Further, the connection is recorded in the classifier type assignment array too, this permits iterating of all connections that are assigned to a TYPE of classifier.
@@ -4937,8 +4966,10 @@ void ecm_db_connection_classifier_assign(struct ecm_db_connection_instance *ci, 
 	struct ecm_classifier_instance *ca;
 	struct ecm_classifier_instance *ca_prev;
 	ecm_classifier_type_t new_ca_type;
+#ifdef ECM_DB_CTA_TRACK_ENABLE
 	struct ecm_db_connection_classifier_type_assignment *ta;
 	struct ecm_db_connection_classifier_type_assignment_list *tal;
+#endif
 
 	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed\n", ci);
 
@@ -4995,6 +5026,7 @@ void ecm_db_connection_classifier_assign(struct ecm_db_connection_instance *ci, 
 			ci, new_ca_type, new_ca, ci->assignments_by_type[new_ca_type]);
 	ci->assignments_by_type[new_ca_type] = new_ca;
 
+#ifdef ECM_DB_CTA_TRACK_ENABLE
 	/*
 	 * Add the connection into the type assignment list too.
 	 */
@@ -5049,7 +5081,7 @@ void ecm_db_connection_classifier_assign(struct ecm_db_connection_instance *ci, 
 	 */
 	tal->type_assignment_count++;
 	DEBUG_ASSERT(tal->type_assignment_count > 0, "Bad iteration count: %d\n", tal->type_assignment_count);
-
+#endif
 	spin_unlock_bh(&ecm_db_lock);
 }
 EXPORT_SYMBOL(ecm_db_connection_classifier_assign);
@@ -5129,8 +5161,9 @@ EXPORT_SYMBOL(ecm_db_connection_assigned_classifier_find_and_ref);
 void ecm_db_connection_classifier_unassign(struct ecm_db_connection_instance *ci, struct ecm_classifier_instance *cci)
 {
 	ecm_classifier_type_t ca_type;
+#ifdef ECM_DB_CTA_TRACK_ENABLE
 	struct ecm_db_connection_classifier_type_assignment *ta;
-
+#endif
 	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed\n", ci);
 
 	DEBUG_ASSERT(cci->type_get(cci) != ECM_CLASSIFIER_TYPE_DEFAULT, "%p: Cannot unassign default", ci);
@@ -5168,6 +5201,7 @@ void ecm_db_connection_classifier_unassign(struct ecm_db_connection_instance *ci
 		cci->ca_next->ca_prev = cci->ca_prev;
 	}
 
+#ifdef ECM_DB_CTA_TRACK_ENABLE
 	/*
 	 * Remove from the classifier type assignment list
 	 */
@@ -5190,6 +5224,7 @@ void ecm_db_connection_classifier_unassign(struct ecm_db_connection_instance *ci
 	 */
 	DEBUG_INFO("%p: Remove type assignment: %d\n", ci, ca_type);
 	_ecm_db_classifier_type_assignment_remove(ci, ca_type);
+#endif
 	spin_unlock_bh(&ecm_db_lock);
 	cci->deref(cci);
 }
@@ -5214,6 +5249,7 @@ struct ecm_classifier_default_instance *ecm_db_connection_classifier_default_get
 }
 EXPORT_SYMBOL(ecm_db_connection_classifier_default_get_and_ref);
 
+#ifdef ECM_DB_CTA_TRACK_ENABLE
 /*
  * ecm_db_connection_by_classifier_type_assignment_get_and_ref_first()
  *	Return a reference to the first connection for which a classifier of the given type is associated with
@@ -5390,6 +5426,7 @@ void ecm_db_connection_regenerate_by_assignment_type(ecm_classifier_type_t ca_ty
 	}
 }
 EXPORT_SYMBOL(ecm_db_connection_regenerate_by_assignment_type);
+#endif
 
 /*
  * ecm_db_connection_from_interfaces_get_and_ref()
@@ -9725,10 +9762,12 @@ int ecm_db_init(void)
 	 */
 	memset(ecm_db_connection_count_by_protocol, 0, sizeof(ecm_db_connection_count_by_protocol));
 
+#ifdef ECM_DB_CTA_TRACK_ENABLE
 	/*
 	 * Reset classifier type assignment lists
 	 */
 	memset(ecm_db_connection_classifier_type_assignments, 0, sizeof(ecm_db_connection_classifier_type_assignments));
+#endif
 
 	return 0;
 

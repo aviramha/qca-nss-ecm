@@ -144,6 +144,14 @@ ECM_TRACKER_DPI_SUPPORT_ENABLE=y
 ccflags-$(ECM_TRACKER_DPI_SUPPORT_ENABLE) += -DECM_TRACKER_DPI_SUPPORT_ENABLE
 
 # #############################################################################
+# Define ECM_DB_CLASSIFIER_TYPE_ASSIGNMENTS_TRACK_ENABLE=y in order to enable
+# support for the database keeping lists of connections that are assigned
+# on a per TYPE of classifier basis.
+# #############################################################################
+ECM_DB_CLASSIFIER_TYPE_ASSIGNMENTS_TRACK_ENABLE=y
+ccflags-$(ECM_DB_CLASSIFIER_TYPE_ASSIGNMENTS_TRACK_ENABLE) += -DECM_DB_CTA_TRACK_ENABLE
+
+# #############################################################################
 # Debug flags, set these to = 0 if you want to disable all debugging for that
 # file.
 # By turning off debugs you gain maximum ECM performance.
