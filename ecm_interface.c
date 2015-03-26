@@ -41,6 +41,7 @@
 #include <linux/in.h>
 #include <linux/udp.h>
 #include <linux/tcp.h>
+#include <linux/if_bridge.h>
 
 
 #include <linux/inetdevice.h>
@@ -2142,7 +2143,7 @@ static void ecm_interface_list_stats_update(int iface_list_first, struct ecm_db_
 		 * Note: A bridge port can be of different interface type, e.g VLAN, ethernet.
 		 * This check, therefore, should be performed for all interface types.
 		 */
-		if (is_valid_ether_addr(mac_addr) && ecm_front_end_is_bridge_port(dev)) {
+		if (is_valid_ether_addr(mac_addr) && ecm_front_end_is_bridge_port(dev) && rx_packets) {
 			DEBUG_TRACE("Update bridge fdb entry for mac: %pM\n", mac_addr);
 			br_refresh_fdb_entry(dev, mac_addr);
 		}
@@ -2531,6 +2532,48 @@ static void ecm_interface_dev_release(struct device *dev)
 
 }
 
+
+/*
+ * ecm_interfae_node_br_fdb_notify_event()
+ *	This is a call back for "bridge fdb update event/ageing timer expire
+ *	event".
+ */
+static int ecm_interface_node_br_fdb_notify_event(struct notifier_block *nb,
+					       unsigned long val,
+					       void *data)
+{
+	uint8_t *mac =  (uint8_t *)data;
+	struct ecm_db_node_instance *node = NULL;
+
+	if(unlikely(!mac)) {
+		DEBUG_WARN("mac address passed to ecm_interface_node_br_fdb_notify_event is null \n");
+		return NOTIFY_DONE;
+	}
+
+	/*
+	 * find node instance corresponding to mac address
+	 */
+	node = ecm_db_node_find_and_ref(mac);
+
+	if(unlikely(!node)) {
+		DEBUG_WARN("node address is null \n");
+		return NOTIFY_DONE;
+	}
+
+	ecm_db_traverse_node_from_connection_list_and_decelerate(node);
+	ecm_db_traverse_node_to_connection_list_and_decelerate(node);
+	ecm_db_traverse_node_from_nat_connection_list_and_decelerate(node);
+	ecm_db_traverse_node_to_nat_connection_list_and_decelerate(node);
+
+	ecm_db_node_deref(node);
+
+	return NOTIFY_DONE;
+}
+
+static struct notifier_block ecm_interface_node_br_fdb_update_nb = {
+	.notifier_call = ecm_interface_node_br_fdb_notify_event,
+};
+
 /*
  * ecm_interface_init()
  */
@@ -2581,6 +2624,11 @@ int ecm_interface_init(void)
 		goto task_cleanup_2;
 	}
 
+	/*
+	 * register for bridge fdb database modificationevents
+	 */
+        br_fdb_update_register_notify(&ecm_interface_node_br_fdb_update_nb);
+
 	return 0;
 
 task_cleanup_2:
@@ -2608,5 +2656,10 @@ void ecm_interface_exit(void)
 	device_remove_file(&ecm_interface_dev, &dev_attr_stop);
 	device_unregister(&ecm_interface_dev);
 	bus_unregister(&ecm_interface_subsys);
+
+	/*
+	 * unregister for bridge fdb update events
+	 */
+        br_fdb_update_unregister_notify(&ecm_interface_node_br_fdb_update_nb);
 }
 EXPORT_SYMBOL(ecm_interface_exit);

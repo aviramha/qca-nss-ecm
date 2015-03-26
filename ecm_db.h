@@ -17,8 +17,17 @@
 /*
  * API's
  */
+#ifndef ECM_DB_H_
+#define ECM_DB_H_
+
+
 uint32_t ecm_db_time_get(void);
 void ecm_db_connection_defunct_all(void);
+
+void ecm_db_traverse_node_from_connection_list_and_decelerate(struct ecm_db_node_instance *node);
+void ecm_db_traverse_node_to_connection_list_and_decelerate(struct ecm_db_node_instance *node);
+void ecm_db_traverse_node_from_nat_connection_list_and_decelerate(struct ecm_db_node_instance *node);
+void ecm_db_traverse_node_to_nat_connection_list_and_decelerate(struct ecm_db_node_instance *node);
 
 int ecm_db_connection_count_get(void);
 
@@ -312,4 +321,4 @@ int ecm_db_iface_hash_index_get_first(void);
 int ecm_db_protocol_get_next(int protocol);
 int ecm_db_protocol_get_first(void);
 #endif
-
+#endif
