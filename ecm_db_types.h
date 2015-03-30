@@ -253,6 +253,7 @@ struct ecm_db_interface_info_ipsec_tunnel {		/* type == ECM_DB_IFACE_TYPE_IPSEC_
 	// GGG TODO Flesh this out with tunnel endpoint addressing detal
 };
 
+#ifdef ECM_INTERFACE_SIT_ENABLE
 struct ecm_db_interface_info_sit {			/* type == ECM_DB_IFACE_TYPE_SIT */
 	uint32_t prefix[4];				/* 6rd prefix */
 	uint32_t relay_prefix;				/* Relay prefix */
@@ -263,6 +264,7 @@ struct ecm_db_interface_info_sit {			/* type == ECM_DB_IFACE_TYPE_SIT */
 	uint8_t  tos;					/* Tunnel tos field */
 	uint8_t  ttl;					/* Tunnel ttl field */
 };
+#endif
 
 struct ecm_db_interface_info_tunipip6 {			/* type == ECM_DB_IFACE_TYPE_TUNIPIP6 */
 	ip_addr_t saddr;				/* Tunnel source address */

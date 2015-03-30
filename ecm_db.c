@@ -235,7 +235,9 @@ struct ecm_db_iface_instance {
 		struct ecm_db_interface_info_unknown unknown;		/* type == ECM_DB_IFACE_TYPE_UNKNOWN */
 		struct ecm_db_interface_info_loopback loopback;		/* type == ECM_DB_IFACE_TYPE_LOOPBACK */
 		struct ecm_db_interface_info_ipsec_tunnel ipsec_tunnel;	/* type == ECM_DB_IFACE_TYPE_IPSEC_TUNNEL */
+#ifdef ECM_INTERFACE_SIT_ENABLE
 		struct ecm_db_interface_info_sit sit;			/* type == ECM_DB_IFACE_TYPE_SIT (6-in-4) */
+#endif
 		struct ecm_db_interface_info_tunipip6 tunipip6;		/* type == ECM_DB_IFACE_TYPE_TUNIPIP6 (IPIP v6 Tunnel i.e. TUNNEL6) */
 	} type_info;
 
@@ -3359,6 +3361,7 @@ static inline ecm_db_node_hash_t ecm_db_node_generate_hash_index(uint8_t *addres
 	return (ecm_db_node_hash_t)hash_val;
 }
 
+#ifdef ECM_INTERFACE_SIT_ENABLE
 /*
  * ecm_db_iface_generate_hash_index_sit()
  * 	Calculate the hash index.
@@ -3372,6 +3375,7 @@ static inline ecm_db_iface_hash_t ecm_db_iface_generate_hash_index_sit(ip_addr_t
 	hash_val = (temp >> 24) ^ (temp >> 16) ^ (temp >> 8) ^ temp;
 	return (ecm_db_iface_hash_t)(hash_val & (ECM_DB_IFACE_HASH_SLOTS - 1));
 }
+#endif
 
 /*
  * ecm_db_iface_generate_hash_index_tunipip6()
@@ -3883,6 +3887,7 @@ struct ecm_db_iface_instance *ecm_db_iface_find_and_ref_ipsec_tunnel(uint32_t os
 }
 EXPORT_SYMBOL(ecm_db_iface_find_and_ref_ipsec_tunnel);
 
+#ifdef ECM_INTERFACE_SIT_ENABLE
 /*
  * ecm_db_iface_find_and_ref_sit()
  *	Lookup and return a iface reference if any
@@ -3923,6 +3928,7 @@ struct ecm_db_iface_instance *ecm_db_iface_find_and_ref_sit(ip_addr_t saddr, ip_
 	return NULL;
 }
 EXPORT_SYMBOL(ecm_db_iface_find_and_ref_sit);
+#endif
 
 /*
  * ecm_db_iface_find_and_ref_tunipip6()
@@ -7652,6 +7658,7 @@ void ecm_db_iface_add_loopback(struct ecm_db_iface_instance *ii, uint32_t os_spe
 }
 EXPORT_SYMBOL(ecm_db_iface_add_loopback);
 
+#ifdef ECM_INTERFACE_SIT_ENABLE
 /*
  * ecm_db_iface_sit_daddr_is_null()
  *	The sit addr is null or not
@@ -7754,6 +7761,7 @@ void ecm_db_iface_add_sit(struct ecm_db_iface_instance *ii, struct ecm_db_interf
 	}
 }
 EXPORT_SYMBOL(ecm_db_iface_add_sit);
+#endif
 
 /*
  * ecm_db_iface_add_tunipip6()
