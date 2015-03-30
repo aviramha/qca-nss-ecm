@@ -72,6 +72,12 @@ ECM_INTERFACE_VLAN_ENABLE=y
 ccflags-$(ECM_INTERFACE_VLAN_ENABLE) += -DECM_INTERFACE_VLAN_ENABLE
 
 # #############################################################################
+# Define ECM_INTERFACE_IPSEC_ENABLE=y in order to enable support for IPSEC
+# #############################################################################
+ECM_INTERFACE_IPSEC_ENABLE=y
+ccflags-$(ECM_INTERFACE_IPSEC_ENABLE) += -DECM_INTERFACE_IPSEC_ENABLE
+
+# #############################################################################
 # Define ECM_FRONT_END_IPV6_ENABLE=y in order to enable IPv6 front end.
 # #############################################################################
 ECM_FRONT_END_IPV6_ENABLE=y

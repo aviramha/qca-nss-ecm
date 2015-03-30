@@ -234,7 +234,9 @@ struct ecm_db_iface_instance {
 #endif
 		struct ecm_db_interface_info_unknown unknown;		/* type == ECM_DB_IFACE_TYPE_UNKNOWN */
 		struct ecm_db_interface_info_loopback loopback;		/* type == ECM_DB_IFACE_TYPE_LOOPBACK */
+#ifdef ECM_INTERFACE_IPSEC_ENABLE
 		struct ecm_db_interface_info_ipsec_tunnel ipsec_tunnel;	/* type == ECM_DB_IFACE_TYPE_IPSEC_TUNNEL */
+#endif
 #ifdef ECM_INTERFACE_SIT_ENABLE
 		struct ecm_db_interface_info_sit sit;			/* type == ECM_DB_IFACE_TYPE_SIT (6-in-4) */
 #endif
@@ -3433,6 +3435,7 @@ static inline ecm_db_iface_hash_t ecm_db_iface_generate_hash_index_loopback(uint
 	return (ecm_db_iface_hash_t)(os_specific_ident & (ECM_DB_IFACE_HASH_SLOTS - 1));
 }
 
+#ifdef ECM_INTERFACE_IPSEC_ENABLE
 /*
  * ecm_db_iface_generate_hash_index_ipsec_tunnel()
  * 	Calculate the hash index.
@@ -3442,6 +3445,7 @@ static inline ecm_db_iface_hash_t ecm_db_iface_generate_hash_index_ipsec_tunnel(
 {
 	return (ecm_db_iface_hash_t)(os_specific_ident & (ECM_DB_IFACE_HASH_SLOTS - 1));
 }
+#endif
 
 /*
  * ecm_db_host_find_and_ref()
@@ -3852,6 +3856,7 @@ struct ecm_db_iface_instance *ecm_db_iface_find_and_ref_loopback(uint32_t os_spe
 }
 EXPORT_SYMBOL(ecm_db_iface_find_and_ref_loopback);
 
+#ifdef ECM_INTERFACE_IPSEC_ENABLE
 /*
  * ecm_db_iface_find_and_ref_ipsec_tunnel()
  *	Lookup and return a iface reference if any.
@@ -3890,6 +3895,7 @@ struct ecm_db_iface_instance *ecm_db_iface_find_and_ref_ipsec_tunnel(uint32_t os
 	return NULL;
 }
 EXPORT_SYMBOL(ecm_db_iface_find_and_ref_ipsec_tunnel);
+#endif
 
 #ifdef ECM_INTERFACE_SIT_ENABLE
 /*
@@ -7427,6 +7433,7 @@ static int ecm_db_iface_loopback_xml_state_get(struct ecm_db_iface_instance *ii,
 	return total;
 }
 
+#ifdef ECM_INTERFACE_IPSEC_ENABLE
 /*
  * ecm_db_iface_ipsec_tunnel_xml_state_get()
  * 	Return interface type specific state
@@ -7473,6 +7480,7 @@ static int ecm_db_iface_ipsec_tunnel_xml_state_get(struct ecm_db_iface_instance 
 	total += count;
 	return total;
 }
+#endif
 
 /*
  * ecm_db_iface_add_unknown()
@@ -7864,6 +7872,7 @@ void ecm_db_iface_add_tunipip6(struct ecm_db_iface_instance *ii, struct ecm_db_i
 EXPORT_SYMBOL(ecm_db_iface_add_tunipip6);
 #endif
 
+#ifdef ECM_INTERFACE_IPSEC_ENABLE
 /*
  * ecm_db_iface_add_ipsec_tunnel()
  *	Add a iface instance into the database
@@ -7960,6 +7969,7 @@ void ecm_db_iface_add_ipsec_tunnel(struct ecm_db_iface_instance *ii, uint32_t os
 	}
 }
 EXPORT_SYMBOL(ecm_db_iface_add_ipsec_tunnel);
+#endif
 
 /*
  * ecm_db_listener_add()

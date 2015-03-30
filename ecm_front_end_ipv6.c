@@ -1679,6 +1679,7 @@ static void ecm_front_end_ipv6_connection_tcp_front_end_accelerate(struct ecm_fr
 #endif
 			break;
 		case ECM_DB_IFACE_TYPE_IPSEC_TUNNEL:
+#ifdef ECM_INTERFACE_IPSEC_ENABLE
 			DEBUG_TRACE("%p: IPSEC\n", fecti);
 			if (interface_type_counts[ii_type] != 0) {
 				/*
@@ -1689,6 +1690,10 @@ static void ecm_front_end_ipv6_connection_tcp_front_end_accelerate(struct ecm_fr
 				break;
 			}
 			nircm->conn_rule.flow_interface_num = NSS_C2C_TX_INTERFACE;
+#else
+			rule_invalid = true;
+			DEBUG_TRACE("%p: IPSEC - unsupported\n", fecti);
+#endif
 			break;
 		default:
 			DEBUG_TRACE("%p: Ignoring: %d (%s)\n", fecti, ii_type, ii_name);
@@ -1841,6 +1846,7 @@ static void ecm_front_end_ipv6_connection_tcp_front_end_accelerate(struct ecm_fr
 #endif
 			break;
 		case ECM_DB_IFACE_TYPE_IPSEC_TUNNEL:
+#ifdef ECM_INTERFACE_IPSEC_ENABLE
 			DEBUG_TRACE("%p: IPSEC\n", fecti);
 			if (interface_type_counts[ii_type] != 0) {
 				/*
@@ -1851,6 +1857,10 @@ static void ecm_front_end_ipv6_connection_tcp_front_end_accelerate(struct ecm_fr
 				break;
 			}
 			nircm->conn_rule.return_interface_num = NSS_C2C_TX_INTERFACE;
+#else
+			rule_invalid = true;
+			DEBUG_TRACE("%p: IPSEC - unsupported\n", fecti);
+#endif
 			break;
 		default:
 			DEBUG_TRACE("%p: Ignoring: %d (%s)\n", fecti, ii_type, ii_name);
@@ -3102,6 +3112,7 @@ static void ecm_front_end_ipv6_connection_udp_front_end_accelerate(struct ecm_fr
 #endif
 			break;
 		case ECM_DB_IFACE_TYPE_IPSEC_TUNNEL:
+#ifdef ECM_INTERFACE_IPSEC_ENABLE
 			DEBUG_TRACE("%p: IPSEC\n", fecui);
 			if (interface_type_counts[ii_type] != 0) {
 				/*
@@ -3112,6 +3123,10 @@ static void ecm_front_end_ipv6_connection_udp_front_end_accelerate(struct ecm_fr
 				break;
 			}
 			nircm->conn_rule.flow_interface_num = NSS_C2C_TX_INTERFACE;
+#else
+			rule_invalid = true;
+			DEBUG_TRACE("%p: IPSEC - unsupported\n", fecui);
+#endif
 			break;
 		default:
 			DEBUG_TRACE("%p: Ignoring: %d (%s)\n", fecui, ii_type, ii_name);
@@ -3264,6 +3279,7 @@ static void ecm_front_end_ipv6_connection_udp_front_end_accelerate(struct ecm_fr
 #endif
 			break;
 		case ECM_DB_IFACE_TYPE_IPSEC_TUNNEL:
+#ifdef ECM_INTERFACE_IPSEC_ENABLE
 			DEBUG_TRACE("%p: IPSEC\n", fecui);
 			if (interface_type_counts[ii_type] != 0) {
 				/*
@@ -3274,6 +3290,10 @@ static void ecm_front_end_ipv6_connection_udp_front_end_accelerate(struct ecm_fr
 				break;
 			}
 			nircm->conn_rule.return_interface_num = NSS_C2C_TX_INTERFACE;
+#else
+			rule_invalid = true;
+			DEBUG_TRACE("%p: IPSEC - unsupported\n", fecui);
+#endif
 			break;
 		default:
 			DEBUG_TRACE("%p: Ignoring: %d (%s)\n", fecui, ii_type, ii_name);
@@ -4498,6 +4518,7 @@ static void ecm_front_end_ipv6_connection_non_ported_front_end_accelerate(struct
 #endif
 			break;
 		case ECM_DB_IFACE_TYPE_IPSEC_TUNNEL:
+#ifdef ECM_INTERFACE_IPSEC_ENABLE
 			DEBUG_TRACE("%p: IPSEC\n", fecnpi);
 			if (interface_type_counts[ii_type] != 0) {
 				/*
@@ -4508,6 +4529,10 @@ static void ecm_front_end_ipv6_connection_non_ported_front_end_accelerate(struct
 				break;
 			}
 			nircm->conn_rule.flow_interface_num = NSS_C2C_TX_INTERFACE;
+#else
+			rule_invalid = true;
+			DEBUG_TRACE("%p: IPSEC - unsupported\n", fecnpi);
+#endif
 			break;
 		default:
 			DEBUG_TRACE("%p: Ignoring: %d (%s)\n", fecnpi, ii_type, ii_name);
@@ -4660,6 +4685,7 @@ static void ecm_front_end_ipv6_connection_non_ported_front_end_accelerate(struct
 #endif
 			break;
 		case ECM_DB_IFACE_TYPE_IPSEC_TUNNEL:
+#ifdef ECM_INTERFACE_IPSEC_ENABLE
 			DEBUG_TRACE("%p: IPSEC\n", fecnpi);
 			if (interface_type_counts[ii_type] != 0) {
 				/*
@@ -4670,6 +4696,10 @@ static void ecm_front_end_ipv6_connection_non_ported_front_end_accelerate(struct
 				break;
 			}
 			nircm->conn_rule.return_interface_num = NSS_C2C_TX_INTERFACE;
+#else
+			rule_invalid = true;
+			DEBUG_TRACE("%p: IPSEC - unsupported\n", fecnpi);
+#endif
 			break;
 		default:
 			DEBUG_TRACE("%p: Ignoring: %d (%s)\n", fecnpi, ii_type, ii_name);
