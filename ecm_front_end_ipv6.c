@@ -88,7 +88,9 @@
 #ifdef ECM_CLASSIFIER_HYFI_ENABLE
 #include "ecm_classifier_hyfi.h"
 #endif
+#ifdef ECM_CLASSIFIER_DSCP_ENABLE
 #include "ecm_classifier_dscp.h"
+#endif
 #include "ecm_interface.h"
 
 /*
@@ -1882,6 +1884,7 @@ static void ecm_front_end_ipv6_connection_tcp_front_end_accelerate(struct ecm_fr
 	nircm->qos_rule.return_qos_tag = (uint32_t)pr->return_qos_tag;
 	nircm->valid_flags |= NSS_IPV6_RULE_CREATE_QOS_VALID;
 
+#ifdef ECM_CLASSIFIER_DSCP_ENABLE
 	/*
 	 * DSCP information?
 	 */
@@ -1891,7 +1894,7 @@ static void ecm_front_end_ipv6_connection_tcp_front_end_accelerate(struct ecm_fr
 		nircm->rule_flags |= NSS_IPV6_RULE_CREATE_FLAG_DSCP_MARKING;
 		nircm->valid_flags |= NSS_IPV6_RULE_CREATE_DSCP_MARKING_VALID;
 	}
-
+#endif
 	/*
 	 * Set protocol
 	 */
@@ -3304,6 +3307,7 @@ static void ecm_front_end_ipv6_connection_udp_front_end_accelerate(struct ecm_fr
 	nircm->qos_rule.return_qos_tag = (uint32_t)pr->return_qos_tag;
 	nircm->valid_flags |= NSS_IPV6_RULE_CREATE_QOS_VALID;
 
+#ifdef ECM_CLASSIFIER_DSCP_ENABLE
 	/*
 	 * DSCP information?
 	 */
@@ -3313,7 +3317,7 @@ static void ecm_front_end_ipv6_connection_udp_front_end_accelerate(struct ecm_fr
 		nircm->rule_flags |= NSS_IPV6_RULE_CREATE_FLAG_DSCP_MARKING;
 		nircm->valid_flags |= NSS_IPV6_RULE_CREATE_DSCP_MARKING_VALID;
 	}
-
+#endif
 	/*
 	 * Set protocol
 	 */
@@ -4703,6 +4707,7 @@ static void ecm_front_end_ipv6_connection_non_ported_front_end_accelerate(struct
 	nircm->qos_rule.return_qos_tag = (uint32_t)pr->return_qos_tag;
 	nircm->valid_flags |= NSS_IPV6_RULE_CREATE_QOS_VALID;
 
+#ifdef ECM_CLASSIFIER_DSCP_ENABLE
 	/*
 	 * DSCP information?
 	 */
@@ -4712,7 +4717,7 @@ static void ecm_front_end_ipv6_connection_non_ported_front_end_accelerate(struct
 		nircm->rule_flags |= NSS_IPV6_RULE_CREATE_FLAG_DSCP_MARKING;
 		nircm->valid_flags |= NSS_IPV6_RULE_CREATE_DSCP_MARKING_VALID;
 	}
-
+#endif
 	/*
 	 * Set protocol
 	 */
@@ -6162,6 +6167,7 @@ static unsigned int ecm_front_end_ipv6_tcp_process(struct net_device *out_dev,
 			prevalent_pr.return_qos_tag = aci_pr.return_qos_tag;
 		}
 
+#ifdef ECM_CLASSIFIER_DSCP_ENABLE
 		/*
 		 * If any classifier denied DSCP remarking then that overrides every classifier
 		 */
@@ -6184,6 +6190,7 @@ static unsigned int ecm_front_end_ipv6_tcp_process(struct net_device *out_dev,
 				prevalent_pr.return_dscp = aci_pr.return_dscp;
 			}
 		}
+#endif
 	}
 	ecm_db_connection_assignments_release(assignment_count, assignments);
 
@@ -6687,6 +6694,7 @@ static unsigned int ecm_front_end_ipv6_udp_process(struct net_device *out_dev,
 			prevalent_pr.return_qos_tag = aci_pr.return_qos_tag;
 		}
 
+#ifdef ECM_CLASSIFIER_DSCP_ENABLE
 		/*
 		 * If any classifier denied DSCP remarking then that overrides every classifier
 		 */
@@ -6709,6 +6717,7 @@ static unsigned int ecm_front_end_ipv6_udp_process(struct net_device *out_dev,
 				prevalent_pr.return_dscp = aci_pr.return_dscp;
 			}
 		}
+#endif
 	}
 	ecm_db_connection_assignments_release(assignment_count, assignments);
 
@@ -7168,6 +7177,7 @@ static unsigned int ecm_front_end_ipv6_non_ported_process(struct net_device *out
 			prevalent_pr.return_qos_tag = aci_pr.return_qos_tag;
 		}
 
+#ifdef ECM_CLASSIFIER_DSCP_ENABLE
 		/*
 		 * If any classifier denied DSCP remarking then that overrides every classifier
 		 */
@@ -7190,6 +7200,7 @@ static unsigned int ecm_front_end_ipv6_non_ported_process(struct net_device *out
 				prevalent_pr.return_dscp = aci_pr.return_dscp;
 			}
 		}
+#endif
 	}
 	ecm_db_connection_assignments_release(assignment_count, assignments);
 
