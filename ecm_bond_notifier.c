@@ -82,7 +82,7 @@
 #include "ecm_tracker_datagram.h"
 #include "ecm_db.h"
 #include "ecm_classifier_default.h"
-#include "ecm_front_end_ipv4_nss.h"
+#include "ecm_nss_ipv4.h"
 #include "ecm_interface.h"
 // GGG #include "ecm_front_end_ipv6.h"
 

@@ -14,18 +14,16 @@
  **************************************************************************
  */
 
-extern int ecm_front_end_ipv4_tcp_accelerated_count;		/* Number of TCP connections currently offloaded */
-
-extern unsigned int ecm_front_end_ipv4_tcp_process(struct net_device *out_dev, struct net_device *out_dev_nat,
+extern unsigned int ecm_nss_non_ported_ipv4_process(struct net_device *out_dev, struct net_device *out_dev_nat,
 							struct net_device *in_dev, struct net_device *in_dev_nat,
 							uint8_t *src_node_addr, uint8_t *src_node_addr_nat,
 							uint8_t *dest_node_addr, uint8_t *dest_node_addr_nat,
 							bool can_accel, bool is_routed, struct sk_buff *skb,
-							struct ecm_tracker_ip_header *iph,
+							struct ecm_tracker_ip_header *ip_hdr,
 							struct nf_conn *ct, ecm_tracker_sender_type_t sender, ecm_db_direction_t ecm_dir,
 							struct nf_conntrack_tuple *orig_tuple, struct nf_conntrack_tuple *reply_tuple,
 							ip_addr_t ip_src_addr, ip_addr_t ip_dest_addr, ip_addr_t ip_src_addr_nat, ip_addr_t ip_dest_addr_nat);
-
-extern ssize_t ecm_front_end_ipv4_get_tcp_accelerated_count(struct device *dev,
+extern ssize_t ecm_nss_non_ported_ipv4_get_accelerated_count(struct device *dev,
 				  struct device_attribute *attr,
 				  char *buf);
+

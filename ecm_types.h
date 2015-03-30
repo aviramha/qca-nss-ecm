@@ -17,10 +17,6 @@
 #include <linux/printk.h>
 
 /*
- * Ported typedefs
- */
-
-/*
  * Some constants used with constructing NSS acceleration rules.
  * GGG TODO These should be provided by the NSS driver itself!
  */
