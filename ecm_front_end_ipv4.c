@@ -4161,8 +4161,8 @@ static void ecm_front_end_ipv4_connection_non_ported_front_end_accelerate(struct
 			rule_invalid = true;
 #endif
 			break;
-#ifdef ECM_INTERFACE_VLAN_ENABLE
 		case ECM_DB_IFACE_TYPE_VLAN:
+#ifdef ECM_INTERFACE_VLAN_ENABLE
 			DEBUG_TRACE("%p: VLAN\n", fecnpi);
 			if (interface_type_counts[ii_type] > 1) {
 				/*

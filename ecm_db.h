@@ -120,11 +120,15 @@ void ecm_db_iface_bridge_address_get(struct ecm_db_iface_instance *ii, uint8_t *
 #ifdef ECM_INTERFACE_PPP_ENABLE
 void ecm_db_iface_pppoe_session_info_get(struct ecm_db_iface_instance *ii, struct ecm_db_interface_info_pppoe *pppoe_info);
 #endif
+#ifdef ECM_INTERFACE_VLAN_ENABLE
 void ecm_db_iface_vlan_info_get(struct ecm_db_iface_instance *ii, struct ecm_db_interface_info_vlan *vlan_info);
+#endif
 
 struct ecm_db_iface_instance *ecm_db_iface_ifidx_find_and_ref_ethernet(uint8_t *address, int32_t idx);
 struct ecm_db_iface_instance *ecm_db_iface_find_and_ref_lag(uint8_t *address);
+#ifdef ECM_INTERFACE_VLAN_ENABLE
 struct ecm_db_iface_instance *ecm_db_iface_find_and_ref_vlan(uint8_t *address, uint16_t vlan_tag, uint16_t vlan_tpid);
+#endif
 struct ecm_db_iface_instance *ecm_db_iface_find_and_ref_bridge(uint8_t *address);
 struct ecm_db_iface_instance *ecm_db_iface_find_and_ref_unknown(uint32_t os_specific_ident);
 #ifdef ECM_INTERFACE_PPP_ENABLE
@@ -210,7 +214,9 @@ void ecm_db_listener_add(struct ecm_db_listener_instance *li, ecm_db_iface_liste
 void ecm_db_iface_add_ethernet(struct ecm_db_iface_instance *ii, uint8_t *address, char *name, int32_t mtu, int32_t interface_identifier, int32_t nss_interface_identifier, ecm_db_iface_final_callback_t final, void *arg);
 void ecm_db_iface_add_lag(struct ecm_db_iface_instance *ii, uint8_t *address, char *name, int32_t mtu, int32_t interface_identifier, int32_t nss_interface_identifier, ecm_db_iface_final_callback_t final, void *arg);
 void ecm_db_iface_add_bridge(struct ecm_db_iface_instance *ii, uint8_t *address, char *name, int32_t mtu, int32_t interface_identifier, int32_t nss_interface_identifier, ecm_db_iface_final_callback_t final, void *arg);
+#ifdef ECM_INTERFACE_VLAN_ENABLE
 void ecm_db_iface_add_vlan(struct ecm_db_iface_instance *ii, uint8_t *address, uint16_t vlan_tag, uint16_t vlan_tpid, char *name, int32_t mtu, int32_t interface_identifier, int32_t nss_interface_identifier, ecm_db_iface_final_callback_t final, void *arg);
+#endif
 #ifdef ECM_INTERFACE_PPP_ENABLE
 void ecm_db_iface_add_pppoe(struct ecm_db_iface_instance *ii, uint16_t pppoe_session_id, uint8_t *remote_mac, char *name, int32_t mtu, int32_t interface_identifier, int32_t nss_interface_identifier, ecm_db_iface_final_callback_t final, void *arg);
 #endif
