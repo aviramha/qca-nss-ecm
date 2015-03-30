@@ -3399,9 +3399,6 @@ static void ecm_front_end_ipv6_connection_udp_front_end_accelerate(struct ecm_fr
 			"egress_outer_vlan_tag: %u\n"
 			"rule_flags: %x\n"
 			"valid_flags: %x\n"
-
-
-
 			"return_pppoe_session_id: %u\n"
 			"return_pppoe_remote_mac: %pM\n"
 			"flow_pppoe_session_id: %u\n"
@@ -3410,7 +3407,6 @@ static void ecm_front_end_ipv6_connection_udp_front_end_accelerate(struct ecm_fr
 			"return_qos_tag: %x (%u)\n"
 			"flow_dscp: %x\n"
 			"return_dscp: %x\n",
-
 			fecui,
 			feci->ci,
 			nircm->tuple.protocol,
