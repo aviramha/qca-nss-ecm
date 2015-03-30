@@ -81,7 +81,7 @@
 #include "ecm_tracker_datagram.h"
 #include "ecm_db.h"
 #include "ecm_classifier_default.h"
-#include "ecm_front_end_ipv4.h"
+#include "ecm_front_end_ipv4_nss.h"
 #ifdef ECM_FRONT_END_IPV6_ENABLE
 #include "ecm_front_end_ipv6.h"
 #endif

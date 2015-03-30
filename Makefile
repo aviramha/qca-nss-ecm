@@ -23,7 +23,10 @@ ecm-y := \
 	 ecm_tracker_tcp.o \
 	 ecm_tracker_datagram.o \
 	 ecm_tracker.o \
-	 ecm_front_end_ipv4.o \
+	 frontends/ecm_front_end_ipv4_nss.o \
+	 frontends/ecm_front_end_ipv4_nss_tcp.o \
+	 frontends/ecm_front_end_ipv4_nss_udp.o \
+	 frontends/ecm_front_end_ipv4_nss_non_ported.o \
 	 ecm_db.o \
 	 ecm_classifier_default.o \
 	 ecm_conntrack_notifier.o \
@@ -81,7 +84,7 @@ ccflags-$(ECM_INTERFACE_IPSEC_ENABLE) += -DECM_INTERFACE_IPSEC_ENABLE
 # Define ECM_FRONT_END_IPV6_ENABLE=y in order to enable IPv6 front end.
 # #############################################################################
 ECM_FRONT_END_IPV6_ENABLE=y
-ecm-$(ECM_FRONT_END_IPV6_ENABLE) += ecm_front_end_ipv6.o
+ecm-$(ECM_FRONT_END_IPV6_ENABLE) += frontends/ecm_front_end_ipv6.o
 ccflags-$(ECM_FRONT_END_IPV6_ENABLE) += -DECM_FRONT_END_IPV6_ENABLE
 
 # #############################################################################
@@ -127,6 +130,8 @@ ccflags-y += -DECM_TRACKER_TCP_DEBUG_LEVEL=1
 ccflags-y += -DECM_TRACKER_UDP_DEBUG_LEVEL=1
 ccflags-y += -DECM_BOND_NOTIFIER_DEBUG_LEVEL=1
 ccflags-y += -DECM_INTERFACE_DEBUG_LEVEL=1
+
+ccflags-y += -I$(obj)/ -I$(obj)/frontends
 
 obj ?= .
 
