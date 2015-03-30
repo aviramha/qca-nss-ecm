@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2014, The Linux Foundation.  All rights reserved.
+ * Copyright (c) 2014, 2015, The Linux Foundation.  All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -74,6 +74,11 @@ extern void ecm_conntrack_notifier_exit(void);
 #ifdef ECM_CLASSIFIER_DSCP_ENABLE
 extern int ecm_classifier_dscp_init(void);
 extern void ecm_classifier_dscp_exit(void);
+#endif
+
+#ifdef ECM_STATE_OUTPUT_ENABLE
+extern int ecm_state_init(void);
+extern void ecm_state_exit(void);
 #endif
 
 /*
@@ -174,9 +179,20 @@ static int __init ecm_init(void)
 		goto err_ct;
 	}
 
+#ifdef ECM_STATE_OUTPUT_ENABLE
+	ret = ecm_state_init();
+	if (0 != ret) {
+		goto err_state;
+	}
+#endif
+
 	printk(KERN_INFO "ECM init complete\n");
 	return 0;
 
+#ifdef ECM_STATE_OUTPUT_ENABLE
+err_state:
+	ecm_conntrack_notifier_exit();
+#endif
 err_ct:
 #ifdef ECM_FRONT_END_IPV6_ENABLE
 	ecm_front_end_ipv6_exit();
@@ -255,6 +271,10 @@ static void __exit ecm_exit(void)
 	ecm_db_connection_defunct_all();
 
 	/* now call exit on each module */
+#ifdef ECM_STATE_OUTPUT_ENABLE
+	printk(KERN_INFO "stop state\n");
+	ecm_state_exit();
+#endif
 	printk(KERN_INFO "exit conntrack notifier\n");
 	ecm_conntrack_notifier_exit();
 	printk(KERN_INFO "exit front_end_ipv4\n");

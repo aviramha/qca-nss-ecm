@@ -291,4 +291,3 @@ struct ecm_db_interface_info_tunipip6 {			/* type == ECM_DB_IFACE_TYPE_TUNIPIP6 
  * Lists have a finite size.
  */
 #define ECM_DB_IFACE_HEIRARCHY_MAX 10		/* This is the number of interfaces allowed in a heirarchy */
-

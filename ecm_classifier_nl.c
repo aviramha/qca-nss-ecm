@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2014, The Linux Foundation.  All rights reserved.
+ * Copyright (c) 2014, 2015, The Linux Foundation.  All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -829,6 +829,7 @@ static void ecm_classifier_nl_reclassify(struct ecm_classifier_instance *ci)
 	spin_unlock_bh(&ecm_classifier_nl_lock);
 }
 
+#ifdef ECM_STATE_OUTPUT_ENABLE
 /*
  * ecm_classifier_nl_xml_state_get()
  *	Return an XML state element
@@ -874,6 +875,7 @@ static int ecm_classifier_nl_xml_state_get(struct ecm_classifier_instance *ci, c
 	total += count;
 	return total;
 }
+#endif
 
 /*
  * ecm_classifier_nl_ct_get_and_ref()
@@ -1060,7 +1062,9 @@ struct ecm_classifier_nl_instance *ecm_classifier_nl_instance_alloc(struct ecm_d
 	cnli->base.last_process_response_get = ecm_classifier_nl_last_process_response_get;
 	cnli->base.reclassify_allowed = ecm_classifier_nl_reclassify_allowed;
 	cnli->base.reclassify = ecm_classifier_nl_reclassify;
+#ifdef ECM_STATE_OUTPUT_ENABLE
 	cnli->base.xml_state_get = ecm_classifier_nl_xml_state_get;
+#endif
 	cnli->base.ref = ecm_classifier_nl_ref;
 	cnli->base.deref = ecm_classifier_nl_deref;
 	cnli->ci_serial = ecm_db_connection_serial_get(ci);

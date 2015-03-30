@@ -1886,6 +1886,7 @@ static void ecm_tracker_tcp_state_get_callback(struct ecm_tracker_instance *ti, 
 	*tg = ecm_tracker_tcp_timer_group_from_state[*state];
 }
 
+#ifdef ECM_STATE_OUTPUT_ENABLE
 /*
  * ecm_tracker_tcp_sender_xml_state_get()
  *	Return an XML state element
@@ -1977,6 +1978,7 @@ static int ecm_tracker_tcp_xml_state_get_callback(struct ecm_tracker_instance *t
 	total += count;
 	return total;
 }
+#endif
 
 /*
  * ecm_tracker_tcp_init()
@@ -2021,7 +2023,9 @@ struct ecm_tracker_tcp_instance *ecm_tracker_tcp_alloc(void)
 	ttii->tcp_base.base.data_limit_set = ecm_tracker_tcp_data_limit_set_callback;
 	ttii->tcp_base.base.state_update = ecm_tracker_tcp_state_update_callback;
 	ttii->tcp_base.base.state_get = ecm_tracker_tcp_state_get_callback;
+#ifdef ECM_STATE_OUTPUT_ENABLE
 	ttii->tcp_base.base.xml_state_get = ecm_tracker_tcp_xml_state_get_callback;
+#endif
 
 	ttii->tcp_base.bytes_avail_get = ecm_tracker_tcp_bytes_avail_get_callback;
 	ttii->tcp_base.bytes_read = ecm_tracker_tcp_bytes_read_callback;
