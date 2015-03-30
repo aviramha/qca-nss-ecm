@@ -718,6 +718,7 @@ static struct ecm_db_iface_instance *ecm_interface_bridge_interface_establish(st
 	return nii;
 }
 
+#ifdef ECM_INTERFACE_BOND_ENABLE
 /*
  * ecm_interface_lag_interface_establish()
  *	Returns a reference to a iface of the LAG type, possibly creating one if necessary.
@@ -767,6 +768,7 @@ static struct ecm_db_iface_instance *ecm_interface_lag_interface_establish(struc
 	DEBUG_TRACE("%p: lag iface established\n", nii);
 	return nii;
 }
+#endif
 
 /*
  * ecm_interface_ethernet_interface_establish()
@@ -1144,7 +1146,9 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct net_device 
 #ifdef ECM_INTERFACE_VLAN_ENABLE
 		struct ecm_db_interface_info_vlan vlan;			/* type == ECM_DB_IFACE_TYPE_VLAN */
 #endif
+#ifdef ECM_INTERFACE_BOND_ENABLE
 		struct ecm_db_interface_info_lag lag;			/* type == ECM_DB_IFACE_TYPE_LAG */
+#endif
 		struct ecm_db_interface_info_bridge bridge;		/* type == ECM_DB_IFACE_TYPE_BRIDGE */
 #ifdef ECM_INTERFACE_PPP_ENABLE
 		struct ecm_db_interface_info_pppoe pppoe;		/* type == ECM_DB_IFACE_TYPE_PPPOE */
@@ -1229,6 +1233,7 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct net_device 
 			return ii;
 		}
 
+#ifdef ECM_INTERFACE_BOND_ENABLE
 		/*
 		 * LAG?
 		 */
@@ -1247,6 +1252,7 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct net_device 
 			ii = ecm_interface_lag_interface_establish(&type_info.lag, dev_name, dev_interface_num, nss_interface_num, dev_mtu);
 			return ii;
 		}
+#endif
 
 		/*
 		 * ETHERNET!

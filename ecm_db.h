@@ -125,7 +125,9 @@ void ecm_db_iface_vlan_info_get(struct ecm_db_iface_instance *ii, struct ecm_db_
 #endif
 
 struct ecm_db_iface_instance *ecm_db_iface_ifidx_find_and_ref_ethernet(uint8_t *address, int32_t idx);
+#ifdef ECM_INTERFACE_BOND_ENABLE
 struct ecm_db_iface_instance *ecm_db_iface_find_and_ref_lag(uint8_t *address);
+#endif
 #ifdef ECM_INTERFACE_VLAN_ENABLE
 struct ecm_db_iface_instance *ecm_db_iface_find_and_ref_vlan(uint8_t *address, uint16_t vlan_tag, uint16_t vlan_tpid);
 #endif
@@ -212,7 +214,9 @@ char *ecm_db_interface_type_to_string(ecm_db_iface_type_t type);
 void ecm_db_listener_add(struct ecm_db_listener_instance *li, ecm_db_iface_listener_added_callback_t iface_added, ecm_db_iface_listener_removed_callback_t iface_removed, ecm_db_node_listener_added_callback_t node_added, ecm_db_node_listener_removed_callback_t node_removed, ecm_db_host_listener_added_callback_t host_added, ecm_db_host_listener_removed_callback_t host_removed, ecm_db_mapping_listener_added_callback_t mapping_added, ecm_db_mapping_listener_removed_callback_t mapping_removed, ecm_db_connection_listener_added_callback_t connection_added, ecm_db_connection_listener_removed_callback_t connection_removed, ecm_db_listener_final_callback_t final, void *arg);
 
 void ecm_db_iface_add_ethernet(struct ecm_db_iface_instance *ii, uint8_t *address, char *name, int32_t mtu, int32_t interface_identifier, int32_t nss_interface_identifier, ecm_db_iface_final_callback_t final, void *arg);
+#ifdef ECM_INTERFACE_BOND_ENABLE
 void ecm_db_iface_add_lag(struct ecm_db_iface_instance *ii, uint8_t *address, char *name, int32_t mtu, int32_t interface_identifier, int32_t nss_interface_identifier, ecm_db_iface_final_callback_t final, void *arg);
+#endif
 void ecm_db_iface_add_bridge(struct ecm_db_iface_instance *ii, uint8_t *address, char *name, int32_t mtu, int32_t interface_identifier, int32_t nss_interface_identifier, ecm_db_iface_final_callback_t final, void *arg);
 #ifdef ECM_INTERFACE_VLAN_ENABLE
 void ecm_db_iface_add_vlan(struct ecm_db_iface_instance *ii, uint8_t *address, uint16_t vlan_tag, uint16_t vlan_tpid, char *name, int32_t mtu, int32_t interface_identifier, int32_t nss_interface_identifier, ecm_db_iface_final_callback_t final, void *arg);
