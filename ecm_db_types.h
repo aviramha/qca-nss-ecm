@@ -266,6 +266,7 @@ struct ecm_db_interface_info_sit {			/* type == ECM_DB_IFACE_TYPE_SIT */
 };
 #endif
 
+#ifdef ECM_INTERFACE_TUNIPIP6_ENABLE
 struct ecm_db_interface_info_tunipip6 {			/* type == ECM_DB_IFACE_TYPE_TUNIPIP6 */
 	ip_addr_t saddr;				/* Tunnel source address */
 	ip_addr_t daddr;				/* Tunnel destination address */
@@ -273,7 +274,7 @@ struct ecm_db_interface_info_tunipip6 {			/* type == ECM_DB_IFACE_TYPE_TUNIPIP6 
 	uint32_t flags;					/* Tunnel additional flags */
 	uint8_t  hop_limit;				/* Tunnel ipv6 hop limit */
 };
-
+#endif
 /*
  * Interface Heirarchy
  * Each connection instance keeps four lists of interfaces.
