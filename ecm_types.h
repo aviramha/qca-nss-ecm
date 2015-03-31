@@ -57,9 +57,11 @@ typedef uint32_t ip_addr_t[4];
  */
 static inline void ecm_nss_type_check_ecm_ip_addr(ip_addr_t ipaddr){}
 static inline void ecm_nss_type_check_linux_ipv4(__be32 ipaddr){}
+static inline void ecm_nss_type_check_nss_ipv4(uint32_t addr){}
+#ifdef ECM_IPV6_ENABLE
 static inline void ecm_nss_type_check_linux_ipv6(struct in6_addr in6){}
 static inline void ecm_nss_type_check_nss_ipv6(uint32_t ip6[4]){}
-static inline void ecm_nss_type_check_nss_ipv4(uint32_t addr){}
+#endif
 
 /*
  * This macro copies ip_addr_t's
@@ -80,6 +82,56 @@ static inline void ecm_nss_type_check_nss_ipv4(uint32_t addr){}
 		__ECM_IP_ADDR_COPY_NO_CHECK(d,s); \
 	}
 
+/*
+ * This macro converts from Linux IPv4 address (network order) to ECM ip_addr_t
+ */
+#define ECM_NIN4_ADDR_TO_IP_ADDR(ipaddrt, nin4) \
+	{ \
+		ecm_nss_type_check_ecm_ip_addr(ipaddrt); \
+		ecm_nss_type_check_linux_ipv4(nin4); \
+		ipaddrt[0] = ntohl(nin4); \
+		ipaddrt[1] = 0x0000ffff; \
+		ipaddrt[2] = 0x00000000; \
+		ipaddrt[3] = 0x00000000; \
+	}
+
+/*
+ * This macro converts from ECM ip_addr_t to Linux network IPv4 address
+ */
+#define ECM_IP_ADDR_TO_NIN4_ADDR(nin4, ipaddrt) \
+	{ \
+		nin4 = 0; \
+		ecm_nss_type_check_linux_ipv4(nin4); \
+		ecm_nss_type_check_ecm_ip_addr(ipaddrt); \
+		DEBUG_ASSERT(!ipaddrt[3] && !ipaddrt[2] && (ipaddrt[1] == 0x0000ffff), "Not IPv4 address: " ECM_IP_ADDR_OCTAL_FMT "\n", ECM_IP_ADDR_TO_OCTAL(ipaddrt)); \
+		nin4 = htonl(ipaddrt[0]); \
+	}
+
+/*
+ * This macro converts from Linux IPv4 address (host order) to ECM ip_addr_t
+ */
+#define ECM_HIN4_ADDR_TO_IP_ADDR(ipaddrt, hin4) \
+	{ \
+		ecm_nss_type_check_linux_ipv4(hin4); \
+		ecm_nss_type_check_ecm_ip_addr(ipaddrt); \
+		ipaddrt[0] = hin4; \
+		ipaddrt[1] = 0x0000ffff; \
+		ipaddrt[2] = 0x00000000; \
+		ipaddrt[3] = 0x00000000; \
+	}
+
+/*
+ * This macro converts from ECM ip_addr_t to Linux Host IPv4 address
+ */
+#define ECM_IP_ADDR_TO_HIN4_ADDR(hin4, ipaddrt) \
+	{ \
+		ecm_nss_type_check_linux_ipv4(hin4); \
+		ecm_nss_type_check_ecm_ip_addr(ipaddrt); \
+		DEBUG_ASSERT(!ipaddrt[3] && !ipaddrt[2] && (ipaddrt[1] == 0x0000ffff), "Not IPv4 address: " ECM_IP_ADDR_OCTAL_FMT "\n", ECM_IP_ADDR_TO_OCTAL(ipaddrt)); \
+		hin4 = ipaddrt[0]; \
+	}
+
+#ifdef ECM_IPV6_ENABLE
 #define ECM_LINUX6_TO_IP_ADDR(d,s) \
 	{ \
 		ecm_nss_type_check_ecm_ip_addr(d); \
@@ -128,31 +180,6 @@ static inline void ecm_nss_type_check_nss_ipv4(uint32_t addr){}
 	}
 
 /*
- * This macro converts from Linux IPv4 address (network order) to ECM ip_addr_t
- */
-#define ECM_NIN4_ADDR_TO_IP_ADDR(ipaddrt, nin4) \
-	{ \
-		ecm_nss_type_check_ecm_ip_addr(ipaddrt); \
-		ecm_nss_type_check_linux_ipv4(nin4); \
-		ipaddrt[0] = ntohl(nin4); \
-		ipaddrt[1] = 0x0000ffff; \
-		ipaddrt[2] = 0x00000000; \
-		ipaddrt[3] = 0x00000000; \
-	}
-
-/*
- * This macro converts from ECM ip_addr_t to Linux network IPv4 address
- */
-#define ECM_IP_ADDR_TO_NIN4_ADDR(nin4, ipaddrt) \
-	{ \
-		nin4 = 0; \
-		ecm_nss_type_check_linux_ipv4(nin4); \
-		ecm_nss_type_check_ecm_ip_addr(ipaddrt); \
-		DEBUG_ASSERT(!ipaddrt[3] && !ipaddrt[2] && (ipaddrt[1] == 0x0000ffff), "Not IPv4 address: " ECM_IP_ADDR_OCTAL_FMT "\n", ECM_IP_ADDR_TO_OCTAL(ipaddrt)); \
-		nin4 = htonl(ipaddrt[0]); \
-	}
-
-/*
  * This macro converts from Linux IPv6 address (host order) to ECM ip_addr_t
  */
 #define ECM_HIN6_ADDR_TO_IP_ADDR(ipaddrt, hin6) \
@@ -176,30 +203,6 @@ static inline void ecm_nss_type_check_nss_ipv4(uint32_t addr){}
 		in6.in6_u.u6_addr32[2] = ipaddrt[2]; \
 		in6.in6_u.u6_addr32[1] = ipaddrt[1]; \
 		in6.in6_u.u6_addr32[0] = ipaddrt[0]; \
-	}
-
-/*
- * This macro converts from Linux IPv4 address (host order) to ECM ip_addr_t
- */
-#define ECM_HIN4_ADDR_TO_IP_ADDR(ipaddrt, hin4) \
-	{ \
-		ecm_nss_type_check_linux_ipv4(hin4); \
-		ecm_nss_type_check_ecm_ip_addr(ipaddrt); \
-		ipaddrt[0] = hin4; \
-		ipaddrt[1] = 0x0000ffff; \
-		ipaddrt[2] = 0x00000000; \
-		ipaddrt[3] = 0x00000000; \
-	}
-
-/*
- * This macro converts from ECM ip_addr_t to Linux Host IPv4 address
- */
-#define ECM_IP_ADDR_TO_HIN4_ADDR(hin4, ipaddrt) \
-	{ \
-		ecm_nss_type_check_linux_ipv4(hin4); \
-		ecm_nss_type_check_ecm_ip_addr(ipaddrt); \
-		DEBUG_ASSERT(!ipaddrt[3] && !ipaddrt[2] && (ipaddrt[1] == 0x0000ffff), "Not IPv4 address: " ECM_IP_ADDR_OCTAL_FMT "\n", ECM_IP_ADDR_TO_OCTAL(ipaddrt)); \
-		hin4 = ipaddrt[0]; \
 	}
 
 /*
@@ -227,6 +230,7 @@ static inline void ecm_nss_type_check_nss_ipv4(uint32_t addr){}
 		ipaddrt[2] = nss6[1]; \
 		ipaddrt[3] = nss6[0]; \
 	}
+#endif
 
 /*
  * ecm_mac_addr_equal()
@@ -250,23 +254,25 @@ static inline bool ecm_mac_addr_equal(const u8 *addr1, const u8 *addr2)
  */
 static inline bool ecm_ip_addr_is_non_unicast(ip_addr_t addr)
 {
-	if (ECM_IP_ADDR_IS_V4(addr)) {
-		uint32_t v4_addr = addr[0];
-		if (ECM_IP_ADDR_IS_NULL(addr) || ((v4_addr & 0xe0000000) == 0xe0000000)) {
+	uint32_t v4_addr = addr[0];
+
+#ifdef ECM_IPV6_ENABLE
+	if (!ECM_IP_ADDR_IS_V4(addr)) {
+		/*
+		 * IPv6
+		 * ff00::0/8 are multicast
+		 */
+		if (ECM_IP_ADDR_IS_NULL(addr) || ((addr[3] & 0xff000000) == 0xff000000)) {
 			return true;
 		}
 		return false;
 	}
+#endif
 
-	/*
-	 * IPv6
-	 * ff00::0/8 are multicast
-	 */
-	if (ECM_IP_ADDR_IS_NULL(addr) || ((addr[3] & 0xff000000) == 0xff000000)) {
+	if (ECM_IP_ADDR_IS_NULL(addr) || ((v4_addr & 0xe0000000) == 0xe0000000)) {
 		return true;
 	}
 	return false;
-
 }
 
 /*
@@ -312,17 +318,19 @@ test_end:
  */
 static inline void ecm_ip_addr_to_string(char *str, ip_addr_t a)
 {
-	if (ECM_IP_ADDR_IS_V4(a)) {
-		sprintf(str, ECM_IP_ADDR_DOT_FMT, ECM_IP_ADDR_TO_DOT(a));
-		return;
+#ifdef ECM_IPV6_ENABLE
+	if (!ECM_IP_ADDR_IS_V4(a)) {
+		sprintf(str, ECM_IP_ADDR_OCTAL_FMT, ECM_IP_ADDR_TO_OCTAL(a));
 	}
-	sprintf(str, ECM_IP_ADDR_OCTAL_FMT, ECM_IP_ADDR_TO_OCTAL(a));
+#endif
+
+	sprintf(str, ECM_IP_ADDR_DOT_FMT, ECM_IP_ADDR_TO_DOT(a));
 }
 
 
 /*
  * ecm_string_to_ip_addr()
- *	Convert a string IP (v6 or v4) address to its ECM ip_addr_t representation
+ *	Convert a string IP address to its ECM ip_addr_t representation
  */
 static inline bool ecm_string_to_ip_addr(ip_addr_t addr, char *ip_str)
 {
@@ -335,6 +343,7 @@ static inline bool ecm_string_to_ip_addr(ip_addr_t addr, char *ip_str)
 		ECM_NIN4_ADDR_TO_IP_ADDR(addr, dbuf.s6_addr[0]);
 		return true;
 	}
+#ifdef ECM_IPV6_ENABLE
 	if (in6_pton(ip_str, -1, dptr, '\0', NULL) > 0) {
 		/*
 		 * IPv6
@@ -342,6 +351,7 @@ static inline bool ecm_string_to_ip_addr(ip_addr_t addr, char *ip_str)
 		ECM_NIN6_ADDR_TO_IP_ADDR(addr, dbuf);
 		return true;
 	}
+#endif
 	return false;
 }
 

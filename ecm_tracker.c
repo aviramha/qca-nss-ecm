@@ -81,11 +81,13 @@ static bool ecm_tracker_ip_header_helper_tcp(struct ecm_tracker_ip_protocols *et
 static bool ecm_tracker_ip_header_helper_udp(struct ecm_tracker_ip_protocols *etip, struct ecm_tracker_ip_protocol_header *etiph, struct ecm_tracker_ip_header *ip_hdr, struct sk_buff *skb, uint8_t protocol, ecm_tracker_ip_protocol_type_t ecm_ip_protocol, uint32_t offset, uint32_t remain, int16_t *next_hdr);
 static bool ecm_tracker_ip_header_helper_icmp(struct ecm_tracker_ip_protocols *etip, struct ecm_tracker_ip_protocol_header *etiph, struct ecm_tracker_ip_header *ip_hdr, struct sk_buff *skb, uint8_t protocol, ecm_tracker_ip_protocol_type_t ecm_ip_protocol, uint32_t offset, uint32_t remain, int16_t *next_hdr);
 static bool ecm_tracker_ip_header_helper_unknown(struct ecm_tracker_ip_protocols *etip, struct ecm_tracker_ip_protocol_header *etiph, struct ecm_tracker_ip_header *ip_hdr, struct sk_buff *skb, uint8_t protocol, ecm_tracker_ip_protocol_type_t ecm_ip_protocol, uint32_t offset, uint32_t remain, int16_t *next_hdr);
+static bool ecm_tracker_ip_header_helper_gre(struct ecm_tracker_ip_protocols *etip, struct ecm_tracker_ip_protocol_header *etiph, struct ecm_tracker_ip_header *ip_hdr, struct sk_buff *skb, uint8_t protocol, ecm_tracker_ip_protocol_type_t ecm_ip_protocol, uint32_t offset, uint32_t remain, int16_t *next_hdr);
+#ifdef ECM_IPV6_ENABLE
 static bool ecm_tracker_ip_header_helper_ipv6_generic(struct ecm_tracker_ip_protocols *etip, struct ecm_tracker_ip_protocol_header *etiph, struct ecm_tracker_ip_header *ip_hdr, struct sk_buff *skb, uint8_t protocol, ecm_tracker_ip_protocol_type_t ecm_ip_protocol, uint32_t offset, uint32_t remain, int16_t *next_hdr);
 static bool ecm_tracker_ip_header_helper_ipv6_fragment(struct ecm_tracker_ip_protocols *etip, struct ecm_tracker_ip_protocol_header *etiph, struct ecm_tracker_ip_header *ip_hdr, struct sk_buff *skb, uint8_t protocol, ecm_tracker_ip_protocol_type_t ecm_ip_protocol, uint32_t offset, uint32_t remain, int16_t *next_hdr);
-static bool ecm_tracker_ip_header_helper_gre(struct ecm_tracker_ip_protocols *etip, struct ecm_tracker_ip_protocol_header *etiph, struct ecm_tracker_ip_header *ip_hdr, struct sk_buff *skb, uint8_t protocol, ecm_tracker_ip_protocol_type_t ecm_ip_protocol, uint32_t offset, uint32_t remain, int16_t *next_hdr);
 static bool ecm_tracker_ip_header_helper_ah(struct ecm_tracker_ip_protocols *etip, struct ecm_tracker_ip_protocol_header *etiph, struct ecm_tracker_ip_header *ip_hdr, struct sk_buff *skb, uint8_t protocol, ecm_tracker_ip_protocol_type_t ecm_ip_protocol, uint32_t offset, uint32_t remain, int16_t *next_hdr);
 static bool ecm_tracker_ip_header_helper_ipv6_icmp(struct ecm_tracker_ip_protocols *etip, struct ecm_tracker_ip_protocol_header *etiph, struct ecm_tracker_ip_header *ip_hdr, struct sk_buff *skb, uint8_t protocol, ecm_tracker_ip_protocol_type_t ecm_ip_protocol, uint32_t offset, uint32_t remain, int16_t *next_hdr);
+#endif
 
 /*
  * struct ecm_tracker_ip_protocols_known[]
@@ -100,7 +102,11 @@ static struct ecm_tracker_ip_protocols {
 	ecm_tracker_ip_header_helper_method_t header_helper;	/* A function used to help process the header, e.g. its size etc. When a NULL helper is located, header processing stops. */
 } ecm_tracker_ip_protocols_known[256] =
 {
+#ifdef ECM_IPV6_ENABLE
 	{0, ECM_TRACKER_IP_PROTOCOL_TYPE_IPV6_HBH, "ipv6_hbh", ecm_tracker_ip_header_helper_ipv6_generic},
+#else
+	{0, ECM_TRACKER_IP_PROTOCOL_TYPE_UNKNOWN, "0", ecm_tracker_ip_header_helper_unknown},
+#endif
 	{1, ECM_TRACKER_IP_PROTOCOL_TYPE_ICMP, "icmp", ecm_tracker_ip_header_helper_icmp},
 	{2, ECM_TRACKER_IP_PROTOCOL_TYPE_UNKNOWN, "2", ecm_tracker_ip_header_helper_unknown},
 	{3, ECM_TRACKER_IP_PROTOCOL_TYPE_UNKNOWN, "3", ecm_tracker_ip_header_helper_unknown},
@@ -143,24 +149,41 @@ static struct ecm_tracker_ip_protocols {
 	{40, ECM_TRACKER_IP_PROTOCOL_TYPE_UNKNOWN, "40", ecm_tracker_ip_header_helper_unknown},
 	{41, ECM_TRACKER_IP_PROTOCOL_TYPE_UNKNOWN, "41", ecm_tracker_ip_header_helper_unknown},
 	{42, ECM_TRACKER_IP_PROTOCOL_TYPE_UNKNOWN, "42", ecm_tracker_ip_header_helper_unknown},
+#ifdef ECM_IPV6_ENABLE
 	{43, ECM_TRACKER_IP_PROTOCOL_TYPE_IPV6_ROUTING, "ipv6_routing", ecm_tracker_ip_header_helper_ipv6_generic},
 	{44, ECM_TRACKER_IP_PROTOCOL_TYPE_IPV6_FRAGMENT, "ipv6_fragment", ecm_tracker_ip_header_helper_ipv6_fragment},
+#else
+	{43, ECM_TRACKER_IP_PROTOCOL_TYPE_UNKNOWN, "43", ecm_tracker_ip_header_helper_unknown},
+	{44, ECM_TRACKER_IP_PROTOCOL_TYPE_UNKNOWN, "44", ecm_tracker_ip_header_helper_unknown},
+#endif
 	{45, ECM_TRACKER_IP_PROTOCOL_TYPE_UNKNOWN, "45", ecm_tracker_ip_header_helper_unknown},
 	{46, ECM_TRACKER_IP_PROTOCOL_TYPE_UNKNOWN, "46", ecm_tracker_ip_header_helper_unknown},
 	{47, ECM_TRACKER_IP_PROTOCOL_TYPE_GRE, "gre", ecm_tracker_ip_header_helper_gre},
 	{48, ECM_TRACKER_IP_PROTOCOL_TYPE_UNKNOWN, "48", ecm_tracker_ip_header_helper_unknown},
 	{49, ECM_TRACKER_IP_PROTOCOL_TYPE_UNKNOWN, "49", ecm_tracker_ip_header_helper_unknown},
 	{50, ECM_TRACKER_IP_PROTOCOL_TYPE_UNKNOWN, "50", ecm_tracker_ip_header_helper_unknown},
+#ifdef ECM_IPV6_ENABLE
 	{51, ECM_TRACKER_IP_PROTOCOL_TYPE_AH, "ah", ecm_tracker_ip_header_helper_ah},
+#else
+	{51, ECM_TRACKER_IP_PROTOCOL_TYPE_UNKNOWN, "51", ecm_tracker_ip_header_helper_unknown},
+#endif
 	{52, ECM_TRACKER_IP_PROTOCOL_TYPE_UNKNOWN, "52", ecm_tracker_ip_header_helper_unknown},
 	{53, ECM_TRACKER_IP_PROTOCOL_TYPE_UNKNOWN, "53", ecm_tracker_ip_header_helper_unknown},
 	{54, ECM_TRACKER_IP_PROTOCOL_TYPE_UNKNOWN, "54", ecm_tracker_ip_header_helper_unknown},
 	{55, ECM_TRACKER_IP_PROTOCOL_TYPE_UNKNOWN, "55", ecm_tracker_ip_header_helper_unknown},
+#ifdef ECM_IPV6_ENABLE
 	{56, ECM_TRACKER_IP_PROTOCOL_TYPE_IPV6_ICMP, "ipv6_icmp", ecm_tracker_ip_header_helper_ipv6_icmp},
+#else
+	{56, ECM_TRACKER_IP_PROTOCOL_TYPE_UNKNOWN, "56", ecm_tracker_ip_header_helper_unknown},
+#endif
 	{57, ECM_TRACKER_IP_PROTOCOL_TYPE_UNKNOWN, "57", ecm_tracker_ip_header_helper_unknown},
 	{58, ECM_TRACKER_IP_PROTOCOL_TYPE_UNKNOWN, "58", ecm_tracker_ip_header_helper_unknown},
 	{59, ECM_TRACKER_IP_PROTOCOL_TYPE_UNKNOWN, "59", ecm_tracker_ip_header_helper_unknown},
+#ifdef ECM_IPV6_ENABLE
 	{60, ECM_TRACKER_IP_PROTOCOL_TYPE_IPV6_DO, "ipv6_do", ecm_tracker_ip_header_helper_ipv6_generic},
+#else
+	{60, ECM_TRACKER_IP_PROTOCOL_TYPE_UNKNOWN, "60", ecm_tracker_ip_header_helper_unknown},
+#endif
 	{61, ECM_TRACKER_IP_PROTOCOL_TYPE_UNKNOWN, "61", ecm_tracker_ip_header_helper_unknown},
 	{62, ECM_TRACKER_IP_PROTOCOL_TYPE_UNKNOWN, "62", ecm_tracker_ip_header_helper_unknown},
 	{63, ECM_TRACKER_IP_PROTOCOL_TYPE_UNKNOWN, "63", ecm_tracker_ip_header_helper_unknown},
@@ -377,41 +400,50 @@ static char *ecm_tracker_connection_state_strings[] = {
 
 /*
  * ecm_tracker_ip_check_header_and_read()
- *	Check that we have a complete network-level IPv4 or V6 header, check it and return true if so.
+ *	Check that we have a complete network-level IP header, check it and return true if so.
  */
 bool ecm_tracker_ip_check_header_and_read(struct ecm_tracker_ip_header *ip_hdr, struct sk_buff *skb)
 {
 	struct iphdr *v4_hdr = NULL;
+	uint16_t remain;
+#ifdef ECM_IPV6_ENABLE
 	struct ipv6hdr *v6_hdr = NULL;
 	int16_t this_header;
 	uint32_t offset;
-	uint16_t remain;
+#endif
 
 	memset(ip_hdr, 0, sizeof(*ip_hdr));
 
 	ip_hdr->skb = skb;
 
 	/*
-	 * Dealing with IPv4 or IPv6?
+	 * What version of IP header are we dealing with?
 	 */
 	v4_hdr = skb_header_pointer(skb, 0, sizeof(struct iphdr), &ip_hdr->h.v4_hdr);
 	if (v4_hdr && (v4_hdr->version == 4)) {
 		DEBUG_TRACE("%p: skb: %p is ipv4\n", ip_hdr, skb);
 		ip_hdr->is_v4 = true;
-	} else {
-		/*
-		 * Try V6
-		 */
-		DEBUG_TRACE("skb: %p contains no v4 header\n", skb);
-		v6_hdr = skb_header_pointer(skb, 0, sizeof(struct ipv6hdr), &ip_hdr->h.v6_hdr);
-		if (!v6_hdr || (v6_hdr->version != 6)) {
-			DEBUG_TRACE("skb: %p contains no v6 header\n", skb);
-			return false;
-		}
-		DEBUG_TRACE("%p: skb: %p is ipv6\n", ip_hdr, skb);
-		ip_hdr->is_v4 = false;
+		goto version_check_done;
 	}
 
+#ifdef ECM_IPV6_ENABLE
+	/*
+	 * Try V6
+	 */
+	DEBUG_TRACE("skb: %p contains no v4 header\n", skb);
+	v6_hdr = skb_header_pointer(skb, 0, sizeof(struct ipv6hdr), &ip_hdr->h.v6_hdr);
+	if (!v6_hdr || (v6_hdr->version != 6)) {
+		DEBUG_TRACE("skb: %p contains no v6 header\n", skb);
+		return false;
+	}
+	DEBUG_TRACE("%p: skb: %p is ipv6\n", ip_hdr, skb);
+	ip_hdr->is_v4 = false;
+#else
+	DEBUG_TRACE("skb: %p Other IP header versions unsupported\n", skb);
+	return false;
+#endif
+
+version_check_done:
 	if (ip_hdr->is_v4) {
 		uint8_t protocol;
 		int16_t next_unused;
@@ -493,6 +525,9 @@ bool ecm_tracker_ip_check_header_and_read(struct ecm_tracker_ip_header *ip_hdr, 
 		return true;
 	}
 
+#ifndef ECM_IPV6_ENABLE
+	return false;
+#else
 	/*
 	 * IPv6
 	 */
@@ -560,10 +595,12 @@ bool ecm_tracker_ip_check_header_and_read(struct ecm_tracker_ip_header *ip_hdr, 
 	 */
 	ip_hdr->protocol = (int)this_header;
 
-	return ip_hdr;
+	return true;
+#endif
 }
 EXPORT_SYMBOL(ecm_tracker_ip_check_header_and_read);
 
+#ifdef ECM_IPV6_ENABLE
 /*
  * ecm_tracker_ip_header_helper_ipv6_generic()
  *	Interpret a Generic IPv6 extension header
@@ -652,6 +689,92 @@ static bool ecm_tracker_ip_header_helper_ipv6_fragment(struct ecm_tracker_ip_pro
 	*next_hdr = (int16_t)gen_header->next_protocol;
 	return true;
 }
+
+/*
+ * ecm_tracker_ip_header_helper_ah()
+ *	Interpret an Authentication Header
+ */
+static bool ecm_tracker_ip_header_helper_ah(struct ecm_tracker_ip_protocols *etip, struct ecm_tracker_ip_protocol_header *etiph, struct ecm_tracker_ip_header *ip_hdr,
+						struct sk_buff *skb, uint8_t protocol, ecm_tracker_ip_protocol_type_t ecm_ip_protocol, uint32_t offset, uint32_t remain, int16_t *next_hdr)
+{
+	struct ah_gen_hdr {
+		uint8_t next_protocol;
+		uint8_t header_len;
+	} gen_header_buffer;
+	struct ah_gen_hdr *gen_header;
+	uint16_t hdr_size;
+
+	/*
+	 * At least 8 bytes
+	 */
+	if (remain < 8) {
+		return false;
+	}
+
+	gen_header = skb_header_pointer(skb, offset, sizeof(struct ah_gen_hdr), &gen_header_buffer);
+	if (!gen_header) {
+		return false;
+	}
+
+	hdr_size = gen_header->header_len + 2;
+	hdr_size <<= 2;
+
+	if (!ip_hdr->is_v4) {
+		/*
+		 * hdr_size needs to be a multiple of 8 in a v6 frame
+		 */
+		if (hdr_size % 8) {
+			DEBUG_WARN("AH packet %p not multiple of 8 for v6 frame: %u\n", skb, hdr_size);
+			return false;
+		}
+	}
+
+	if (remain < hdr_size) {
+		DEBUG_WARN("AH packet %p too short (total_length: %u, require: %u)\n", skb, ip_hdr->total_length, offset + hdr_size);
+		return false;
+	}
+	if (unlikely(ip_hdr->total_length < (offset + hdr_size))) {
+		DEBUG_WARN("AH packet %p too short (total_length: %u, require: %u)\n", skb, ip_hdr->total_length, offset + hdr_size);
+		return false;
+	}
+
+	/*
+	 * What header follows this one?
+	 */
+	*next_hdr = gen_header->next_protocol;
+
+	etiph->protocol_number = protocol;
+	etiph->header_size = hdr_size;
+	etiph->size = hdr_size;
+	etiph->offset = offset;
+	return true;
+}
+
+/*
+ * ecm_tracker_ip_header_helper_ipv6_icmp()
+ *	Interpret a ICMP V6 header
+ */
+static bool ecm_tracker_ip_header_helper_ipv6_icmp(struct ecm_tracker_ip_protocols *etip, struct ecm_tracker_ip_protocol_header *etiph, struct ecm_tracker_ip_header *ip_hdr,
+						struct sk_buff *skb, uint8_t protocol, ecm_tracker_ip_protocol_type_t ecm_ip_protocol, uint32_t offset, uint32_t remain, int16_t *next_hdr)
+{
+	if (remain < 4) {
+		DEBUG_WARN("v6 icmp: %p too small: %u\n", skb, remain);
+		return false;
+	}
+
+	etiph->protocol_number = protocol;
+	etiph->header_size = 4;
+	etiph->size = remain;
+	etiph->offset = offset;
+
+	/*
+	 * There is no header following a V6 ICMP header
+	 */
+	*next_hdr = -1;
+	return true;
+}
+
+#endif
 
 /*
  * ecm_tracker_ip_header_helper_tcp()
@@ -760,66 +883,6 @@ static bool ecm_tracker_ip_header_helper_gre(struct ecm_tracker_ip_protocols *et
 	 * There is no header following a GRE header
 	 */
 	*next_hdr = -1;
-	return true;
-}
-
-/*
- * ecm_tracker_ip_header_helper_ah()
- *	Interpret an Authentication Header
- */
-static bool ecm_tracker_ip_header_helper_ah(struct ecm_tracker_ip_protocols *etip, struct ecm_tracker_ip_protocol_header *etiph, struct ecm_tracker_ip_header *ip_hdr,
-						struct sk_buff *skb, uint8_t protocol, ecm_tracker_ip_protocol_type_t ecm_ip_protocol, uint32_t offset, uint32_t remain, int16_t *next_hdr)
-{
-	struct ah_gen_hdr {
-		uint8_t next_protocol;
-		uint8_t header_len;
-	} gen_header_buffer;
-	struct ah_gen_hdr *gen_header;
-	uint16_t hdr_size;
-
-	/*
-	 * At least 8 bytes
-	 */
-	if (remain < 8) {
-		return false;
-	}
-
-	gen_header = skb_header_pointer(skb, offset, sizeof(struct ah_gen_hdr), &gen_header_buffer);
-	if (!gen_header) {
-		return false;
-	}
-
-	hdr_size = gen_header->header_len + 2;
-	hdr_size <<= 2;
-
-	if (!ip_hdr->is_v4) {
-		/*
-		 * hdr_size needs to be a multiple of 8 in a v6 frame
-		 */
-		if (hdr_size % 8) {
-			DEBUG_WARN("AH packet %p not multiple of 8 for v6 frame: %u\n", skb, hdr_size);
-			return false;
-		}
-	}
-
-	if (remain < hdr_size) {
-		DEBUG_WARN("AH packet %p too short (total_length: %u, require: %u)\n", skb, ip_hdr->total_length, offset + hdr_size);
-		return false;
-	}
-	if (unlikely(ip_hdr->total_length < (offset + hdr_size))) {
-		DEBUG_WARN("AH packet %p too short (total_length: %u, require: %u)\n", skb, ip_hdr->total_length, offset + hdr_size);
-		return false;
-	}
-
-	/*
-	 * What header follows this one?
-	 */
-	*next_hdr = gen_header->next_protocol;
-
-	etiph->protocol_number = protocol;
-	etiph->header_size = hdr_size;
-	etiph->size = hdr_size;
-	etiph->offset = offset;
 	return true;
 }
 
@@ -935,30 +998,6 @@ static bool ecm_tracker_ip_header_helper_icmp(struct ecm_tracker_ip_protocols *e
 
 	/*
 	 * There is no header following a ICMP header
-	 */
-	*next_hdr = -1;
-	return true;
-}
-
-/*
- * ecm_tracker_ip_header_helper_ipv6_icmp()
- *	Interpret a ICMP V6 header
- */
-static bool ecm_tracker_ip_header_helper_ipv6_icmp(struct ecm_tracker_ip_protocols *etip, struct ecm_tracker_ip_protocol_header *etiph, struct ecm_tracker_ip_header *ip_hdr,
-						struct sk_buff *skb, uint8_t protocol, ecm_tracker_ip_protocol_type_t ecm_ip_protocol, uint32_t offset, uint32_t remain, int16_t *next_hdr)
-{
-	if (remain < 4) {
-		DEBUG_WARN("v6 icmp: %p too small: %u\n", skb, remain);
-		return false;
-	}
-
-	etiph->protocol_number = protocol;
-	etiph->header_size = 4;
-	etiph->size = remain;
-	etiph->offset = offset;
-
-	/*
-	 * There is no header following a V6 ICMP header
 	 */
 	*next_hdr = -1;
 	return true;

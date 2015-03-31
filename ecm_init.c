@@ -61,7 +61,7 @@ extern int ecm_front_end_ipv4_init(void);
 extern void ecm_front_end_ipv4_stop(int);
 extern void ecm_front_end_ipv4_exit(void);
 
-#ifdef ECM_FRONT_END_IPV6_ENABLE
+#ifdef ECM_IPV6_ENABLE
 extern int ecm_front_end_ipv6_init(void);
 extern void ecm_front_end_ipv6_stop(int);
 extern void ecm_front_end_ipv6_exit(void);
@@ -167,7 +167,7 @@ static int __init ecm_init(void)
 		goto err_fe_ipv4;
 	}
 
-#ifdef ECM_FRONT_END_IPV6_ENABLE
+#ifdef ECM_IPV6_ENABLE
 	ret = ecm_front_end_ipv6_init();
 	if (0 != ret) {
 		goto err_fe_ipv6;
@@ -194,7 +194,7 @@ err_state:
 	ecm_conntrack_notifier_exit();
 #endif
 err_ct:
-#ifdef ECM_FRONT_END_IPV6_ENABLE
+#ifdef ECM_IPV6_ENABLE
 	ecm_front_end_ipv6_exit();
 err_fe_ipv6:
 #endif
@@ -257,7 +257,7 @@ static void __exit ecm_exit(void)
 	ecm_conntrack_notifier_stop(1);
 	printk(KERN_INFO "stop front_end_ipv4\n");
 	ecm_front_end_ipv4_stop(1);
-#ifdef ECM_FRONT_END_IPV6_ENABLE
+#ifdef ECM_IPV6_ENABLE
 	printk(KERN_INFO "stop front_end_ipv6\n");
 	ecm_front_end_ipv6_stop(1);
 #endif
@@ -279,7 +279,7 @@ static void __exit ecm_exit(void)
 	ecm_conntrack_notifier_exit();
 	printk(KERN_INFO "exit front_end_ipv4\n");
 	ecm_front_end_ipv4_exit();
-#ifdef ECM_FRONT_END_IPV6_ENABLE
+#ifdef ECM_IPV6_ENABLE
 	printk(KERN_INFO "exit front_end_ipv6\n");
 	ecm_front_end_ipv6_exit();
 #endif
