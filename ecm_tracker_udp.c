@@ -74,6 +74,7 @@
  */
 #define ECM_TRACKER_UDP_HEADER_SIZE 8		/* UDP header is always 8 bytes RFC 768 Page 1 */
 
+#ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
 /*
  * struct ecm_tracker_udp_skb_cb_format
  *	Map of the cb[] array within our cached buffers - we use that area for our tracking
@@ -85,6 +86,7 @@ struct ecm_tracker_udp_skb_cb_format {
 	uint16_t magic;
 #endif
 };
+#endif
 
 /*
  * struct ecm_tracker_udp_internal_instance
@@ -92,6 +94,7 @@ struct ecm_tracker_udp_skb_cb_format {
 struct ecm_tracker_udp_internal_instance {
 	struct ecm_tracker_udp_instance udp_base;			/* MUST BE FIRST FIELD */
 
+#ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
 	/*
 	 * skb-next and skb->prev pointers are leveraged for these lists
 	 */
@@ -106,6 +109,7 @@ struct ecm_tracker_udp_internal_instance {
 	int32_t dest_bytes_total;		/* Total bytes in all received datagrams */
 
 	int32_t data_limit;			/* Limit for tracked data */
+#endif
 
 	ecm_tracker_sender_state_t sender_state[ECM_TRACKER_SENDER_MAX];
 						/* State of each sender */
@@ -157,6 +161,7 @@ struct udphdr *ecm_tracker_udp_check_header_and_read(struct sk_buff *skb, struct
 }
 EXPORT_SYMBOL(ecm_tracker_udp_check_header_and_read);
 
+#ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
 /*
  * ecm_tracker_udp_datagram_discard()
  *	Discard n number of datagrams at the head of the datagram list that were sent to the target
@@ -261,6 +266,7 @@ static void ecm_tracker_udp_discard_all_callback(struct ecm_tracker_instance *ti
 	struct ecm_tracker_udp_internal_instance *utii = (struct ecm_tracker_udp_internal_instance *)ti;
 	ecm_tracker_udp_discard_all(utii);
 }
+#endif
 
 /*
  * ecm_tracker_udp_ref()
@@ -309,11 +315,13 @@ static int ecm_tracker_udp_deref(struct ecm_tracker_udp_internal_instance *utii)
 
 	DEBUG_TRACE("%p: final\n", utii);
 
+#ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
 	/*
 	 * Destroy all datagrams
 	 */
 	ecm_tracker_udp_datagram_discard(utii, ECM_TRACKER_SENDER_TYPE_SRC, utii->src_count);
 	ecm_tracker_udp_datagram_discard(utii, ECM_TRACKER_SENDER_TYPE_DEST, utii->dest_count);
+#endif
 
 	spin_lock_bh(&ecm_tracker_udp_lock);
 	ecm_tracker_udp_count--;
@@ -336,6 +344,7 @@ int ecm_tracker_udp_deref_callback(struct ecm_tracker_instance *ti)
 	return ecm_tracker_udp_deref(utii);
 }
 
+#ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
 /*
  * ecm_tracker_udp_datagram_count_get()
  *	Return number of available datagrams sent to the specified target
@@ -777,6 +786,7 @@ static int32_t ecm_tracker_udp_data_size_get_callback(struct ecm_tracker_udp_ins
 
 	return size;
 }
+#endif
 
 /*
  * ecm_tracker_udp_state_update_callback()
@@ -820,11 +830,13 @@ static void ecm_tracker_udp_state_get_callback(struct ecm_tracker_instance *ti, 
 static int ecm_tracker_udp_xml_state_get_callback(struct ecm_tracker_instance *ti, char *buf, int buf_sz)
 {
 	struct ecm_tracker_udp_internal_instance *utii = (struct ecm_tracker_udp_internal_instance *)ti;
+#ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
 	int32_t src_count;
 	int32_t src_bytes_total;
 	int32_t dest_count;
 	int32_t dest_bytes_total;
 	int32_t data_limit;
+#endif
 	ecm_db_timer_group_t timer_group;
 	ecm_tracker_sender_state_t sender_state[ECM_TRACKER_SENDER_MAX];
 	ecm_tracker_connection_state_t connection_state;
@@ -834,25 +846,40 @@ static int ecm_tracker_udp_xml_state_get_callback(struct ecm_tracker_instance *t
 	 * Capture state
 	 */
 	spin_lock_bh(&utii->lock);
+#ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
 	src_count = utii->src_count;
 	src_bytes_total = utii->src_bytes_total;
 	dest_count = utii->dest_count;
 	dest_bytes_total = utii->dest_bytes_total;
 	data_limit = utii->data_limit;
+#endif
 	sender_state[ECM_TRACKER_SENDER_TYPE_SRC] = utii->sender_state[ECM_TRACKER_SENDER_TYPE_SRC];
 	sender_state[ECM_TRACKER_SENDER_TYPE_DEST] = utii->sender_state[ECM_TRACKER_SENDER_TYPE_DEST];
 	timer_group = utii->timer_group;
 	spin_unlock_bh(&utii->lock);
 	connection_state = ecm_tracker_udp_connection_state_matrix[sender_state[ECM_TRACKER_SENDER_TYPE_SRC]][sender_state[ECM_TRACKER_SENDER_TYPE_DEST]];
 
-	return snprintf(buf, buf_sz, "<udp_tracker src_count=\"%d\" src_bytes_total=\"%d\" "
-			"dest_count=\"%d\" dest_bytes_total=\"%d\" data_limit=\"%d\" timer_group=\"%d\""
-			" src_sender_state=\"%s\" dest_sender_state=\"%s\" connection_state=\"%s\"/>\n",
+	return snprintf(buf, buf_sz,
+			"<udp_tracker"
+#ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
+			" src_count=\"%d\""
+			" src_bytes_total=\"%d\""
+			" dest_count=\"%d\""
+			" dest_bytes_total=\"%d\""
+			" data_limit=\"%d\""
+#endif
+			" timer_group=\"%d\""
+			" src_sender_state=\"%s\""
+			" dest_sender_state=\"%s\""
+			" connection_state=\"%s\""
+			"/>\n",
+#ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
 			src_count,
 			src_bytes_total,
 			dest_count,
 			dest_bytes_total,
 			data_limit,
+#endif
 			timer_group,
 			ecm_tracker_sender_state_to_string(sender_state[ECM_TRACKER_SENDER_TYPE_SRC]),
 			ecm_tracker_sender_state_to_string(sender_state[ECM_TRACKER_SENDER_TYPE_DEST]),
@@ -871,7 +898,9 @@ void ecm_tracker_udp_init(struct ecm_tracker_udp_instance *uti, int32_t data_lim
 	DEBUG_TRACE("%p: init udp tracker\n", utii);
 
 	spin_lock_bh(&utii->lock);
+#ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
 	utii->data_limit = data_limit;
+#endif
 	if ((src_port < 1024) || (dest_port < 1024)) {
 		/*
 		 * Because UDP connections can be reaped we assign well known ports to the WKP timer group.
@@ -902,6 +931,9 @@ struct ecm_tracker_udp_instance *ecm_tracker_udp_alloc(void)
 
 	utii->udp_base.base.ref = ecm_tracker_udp_ref_callback;
 	utii->udp_base.base.deref = ecm_tracker_udp_deref_callback;
+	utii->udp_base.base.state_update = ecm_tracker_udp_state_update_callback;
+	utii->udp_base.base.state_get = ecm_tracker_udp_state_get_callback;
+#ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
 	utii->udp_base.base.datagram_count_get = ecm_tracker_udp_datagram_count_get_callback;
 	utii->udp_base.base.datagram_discard = ecm_tracker_udp_datagram_discard_callback;
 	utii->udp_base.base.datagram_read = ecm_tracker_udp_datagram_read_callback;
@@ -911,15 +943,14 @@ struct ecm_tracker_udp_instance *ecm_tracker_udp_alloc(void)
 	utii->udp_base.base.data_total_get = ecm_tracker_udp_data_total_get_callback;
 	utii->udp_base.base.data_limit_get = ecm_tracker_udp_data_limit_get_callback;
 	utii->udp_base.base.data_limit_set = ecm_tracker_udp_data_limit_set_callback;
-	utii->udp_base.base.state_update = ecm_tracker_udp_state_update_callback;
-	utii->udp_base.base.state_get = ecm_tracker_udp_state_get_callback;
-#ifdef ECM_STATE_OUTPUT_ENABLE
-	utii->udp_base.base.xml_state_get = ecm_tracker_udp_xml_state_get_callback;
-#endif
 
 	utii->udp_base.data_read = ecm_tracker_udp_data_read_callback;
 	utii->udp_base.data_size_get = ecm_tracker_udp_data_size_get_callback;
 	utii->udp_base.datagram_add = ecm_tracker_udp_datagram_add_checked_callback;
+#endif
+#ifdef ECM_STATE_OUTPUT_ENABLE
+	utii->udp_base.base.xml_state_get = ecm_tracker_udp_xml_state_get_callback;
+#endif
 
 	spin_lock_init(&utii->lock);
 

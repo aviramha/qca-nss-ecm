@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2014, The Linux Foundation.  All rights reserved.
+ * Copyright (c) 2014, 2015, The Linux Foundation.  All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -62,11 +62,13 @@
 #include "ecm_db_types.h"
 #include "ecm_tracker.h"
 
+#ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
 int ecm_tracker_data_total = 0;				/* Data total for all skb list instances */
 int ecm_tracker_data_buffer_total = 0;			/* Data buffer total allocated for all skb list instances */
 int ecm_tracker_data_limit = ECM_TRACKER_GLOBAL_DATA_LIMIT_DEFAULT;
 int ecm_tracker_data_buffer_limit = ECM_TRACKER_GLOBAL_DATA_BUFFER_LIMIT_DEFAULT;
 							/* Tracked limit for data across all instances */
+#endif
 spinlock_t ecm_tracker_lock;				/* Global lock for the tracker globals */
 
 struct ecm_tracker_ip_protocols;
@@ -1003,6 +1005,7 @@ static bool ecm_tracker_ip_header_helper_icmp(struct ecm_tracker_ip_protocols *e
 	return true;
 }
 
+#ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
 /*
  * ecm_tracker_data_limit_set()
  *	Set global tracked data limit
@@ -1100,6 +1103,7 @@ void ecm_tracker_data_total_decrease(uint32_t n, uint32_t data_buffer_size)
 	spin_unlock_bh(&ecm_tracker_lock);
 }
 EXPORT_SYMBOL(ecm_tracker_data_total_decrease);
+#endif
 
 /*
  * ecm_tracker_module_get()
@@ -1121,15 +1125,21 @@ void ecm_tracker_module_put(void)
 }
 EXPORT_SYMBOL(ecm_tracker_module_put);
 
-const char *
-ecm_tracker_sender_state_to_string(enum ecm_tracker_sender_states s)
+/*
+ * ecm_tracker_sender_state_to_string()
+ *	Convert a sender state to a string equivalent
+ */
+const char *ecm_tracker_sender_state_to_string(enum ecm_tracker_sender_states s)
 {
 	return ecm_tracker_sender_state_strings[s];
 }
 EXPORT_SYMBOL(ecm_tracker_sender_state_to_string);
 
-const char *
-ecm_tracker_connection_state_to_string(enum ecm_tracker_connection_states s)
+/*
+ * ecm_tracker_connection_state_to_string()
+ *	Convert a connection state to its string equivalent
+ */
+const char *ecm_tracker_connection_state_to_string(enum ecm_tracker_connection_states s)
 {
 	return ecm_tracker_connection_state_strings[s];
 }

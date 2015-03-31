@@ -86,6 +86,7 @@ struct ecm_classifier_default_internal_instance {
 	struct ecm_classifier_default_instance base;		/* Base type */
 
 	uint32_t ci_serial;					/* RO: Serial of the connection */
+	int protocol;						/* RO: Protocol of the connection */
 
 	struct ecm_classifier_process_response process_response;
 								/* Last process response computed */
@@ -95,8 +96,7 @@ struct ecm_classifier_default_internal_instance {
 	ecm_tracker_sender_type_t ingress_sender;		/* RO: Which sender is sending ingress data */
 	ecm_tracker_sender_type_t egress_sender;		/* RO: Which sender is sending egress data */
 
-	struct ecm_tracker_instance *ti;			/* RO: Tracker used while we detect MSS. Pointer will not change so safe to access outside of lock. */
-	bool tracking;						/* Are we tracking? */
+	struct ecm_tracker_instance *ti;			/* RO: Tracker used for state and timer group checking. Pointer will not change so safe to access outside of lock. */
 
 	int refs;						/* Integer to trap we never go negative */
 #if (DEBUG_LEVEL > 0)
@@ -219,33 +219,11 @@ static void ecm_classifier_default_process(struct ecm_classifier_instance *aci, 
 	ecm_tracker_sender_state_t to_state;
 	ecm_tracker_connection_state_t prevailing_state;
 	ecm_db_timer_group_t tg;
-	struct ecm_tracker_tcp_instance *tti;
-	bool tracking;
 	struct ecm_classifier_default_internal_instance *cdii = (struct ecm_classifier_default_internal_instance *)aci;
 	struct nf_conn *ct;
 	enum ip_conntrack_info ctinfo;
-	struct ecm_db_connection_instance *ci;
-	int protocol;
 	DEBUG_CHECK_MAGIC(cdii, ECM_CLASSIFIER_DEFAULT_INTERNAL_INSTANCE_MAGIC, "%p: invalid state magic\n", cdii);
 
-	/*
-	 * Lookup the associated connection to identify its protocol type.
-	 */
-	ci = ecm_db_connection_serial_find_and_ref(cdii->ci_serial);
-	if (!ci) {
-		DEBUG_TRACE("%p: No ci found for %u\n", cdii, cdii->ci_serial);
-
-		/*
-		 * Still relevant but have no actions that need processing
-		 */
-		spin_lock_bh(&ecm_classifier_default_lock);
-		cdii->process_response.process_actions = 0;
-		*process_response = cdii->process_response;
-		spin_unlock_bh(&ecm_classifier_default_lock);
-		return;
-	}
-	protocol = ecm_db_connection_protocol_get(ci);
-	ecm_db_connection_deref(ci);
 
 	spin_lock_bh(&ecm_classifier_default_lock);
 
@@ -302,7 +280,7 @@ static void ecm_classifier_default_process(struct ecm_classifier_instance *aci, 
 	/*
 	 * Handle non-TCP case
 	 */
-	if (protocol != IPPROTO_TCP) {
+	if (cdii->protocol != IPPROTO_TCP) {
 		if (unlikely(prevailing_state != ECM_TRACKER_CONNECTION_STATE_ESTABLISHED)) {
 			cdii->process_response.accel_mode = ECM_CLASSIFIER_ACCELERATION_MODE_NO;
 		}
@@ -310,28 +288,9 @@ static void ecm_classifier_default_process(struct ecm_classifier_instance *aci, 
 	}
 
 	/*
-	 * Until the connection is established we track data, only to detect mss
-	 */
-	spin_lock_bh(&ecm_classifier_default_lock);
-	tracking = cdii->tracking;
-	spin_unlock_bh(&ecm_classifier_default_lock);
-	if (tracking) {
-		if (!ti->datagram_add(ti, sender, skb)) {
-			spin_lock_bh(&ecm_classifier_default_lock);
-			cdii->tracking = false;
-			spin_unlock_bh(&ecm_classifier_default_lock);
-		} else {
-			/*
-			 * Discard as we don't actually need it, we just wanted the tracker to detect MSS
-			 */
-			ti->discard_all(ti);
-		}
-	}
-
-	/*
 	 * Check the TCP connection state.
-	 * If we are not established then we deny acceleration but, if tracking,
-	 * continue to track for MSS.
+	 * If we are not established then we deny acceleration.
+	 * Take lead from conntrack if exists.
 	 */
 	ct = nf_ct_get(skb, &ctinfo);
 	if (ct == NULL) {
@@ -364,19 +323,6 @@ static void ecm_classifier_default_process(struct ecm_classifier_instance *aci, 
 		}
 		spin_unlock_bh(&ct->lock);
 	}
-
-	/*
-	 * The connection is now established.
-	 * There is no longer a need to track for MSS because that is only available at the SYN stages.
-	 */
-	spin_lock_bh(&ecm_classifier_default_lock);
-	cdii->tracking = false;
-	spin_unlock_bh(&ecm_classifier_default_lock);
-
-	/*
-	 * By implication the tracker is a TCP tracker
-	 */
-	tti = (struct ecm_tracker_tcp_instance *)ti;
 
 return_response:
 	;
@@ -519,7 +465,6 @@ static int ecm_classifier_default_xml_state_get(struct ecm_classifier_instance *
 	ecm_db_timer_group_t timer_group;
 	ecm_tracker_sender_type_t ingress_sender;
 	ecm_tracker_sender_type_t egress_sender;
-	bool tracking;
 	int count;
 	int total;
 
@@ -527,7 +472,6 @@ static int ecm_classifier_default_xml_state_get(struct ecm_classifier_instance *
 	DEBUG_CHECK_MAGIC(cdii, ECM_CLASSIFIER_DEFAULT_INTERNAL_INSTANCE_MAGIC, "%p: magic failed", cdii);
 
 	spin_lock_bh(&ecm_classifier_default_lock);
-	tracking = cdii->tracking;
 	egress_sender = cdii->egress_sender;
 	ingress_sender = cdii->ingress_sender;
 	timer_group = cdii->timer_group;
@@ -535,11 +479,10 @@ static int ecm_classifier_default_xml_state_get(struct ecm_classifier_instance *
 	spin_unlock_bh(&ecm_classifier_default_lock);
 
 	count = snprintf(buf, buf_sz, "<ecm_classifier_default ingress_sender=\"%d\" egress_sender=\"%d\" "
-			"timer_group=\"%d\" tracking=\"%u\">\n",
+			"timer_group=\"%d\">\n",
 			ingress_sender,
 			egress_sender,
-			timer_group,
-			tracking);
+			timer_group);
 	if ((count <= 0) || (count >= buf_sz)) {
 		return -1;
 	}
@@ -608,7 +551,6 @@ struct ecm_classifier_default_instance *ecm_classifier_default_instance_alloc(st
 			return NULL;
 		}
 		ecm_tracker_tcp_init((struct ecm_tracker_tcp_instance *)cdii->ti, ECM_TRACKER_CONNECTION_TRACKING_LIMIT_DEFAULT, 1500, 1500);
-		cdii->tracking = true;
 	} else if (protocol == IPPROTO_UDP) {
 		DEBUG_TRACE("%p: Alloc tracker for UDP connection: %p\n", cdii, ci);
 		cdii->ti = (struct ecm_tracker_instance *)ecm_tracker_udp_alloc();
@@ -632,6 +574,7 @@ struct ecm_classifier_default_instance *ecm_classifier_default_instance_alloc(st
 	DEBUG_SET_MAGIC(cdii, ECM_CLASSIFIER_DEFAULT_INTERNAL_INSTANCE_MAGIC);
 	cdii->refs = 1;
 	cdii->ci_serial = ecm_db_connection_serial_get(ci);
+	cdii->protocol = protocol;
 
 	/*
 	 * We are always relevant to the connection

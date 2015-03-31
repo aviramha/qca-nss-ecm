@@ -150,6 +150,7 @@ struct ecm_tracker_ip_header {
 					/* Use one of the ECM_TRACKER_IP_PROTOCOL_TYPE_XYZ constants to index into this to locate the header you want to inspect.  If the size is zero then the header was not found. */
 };
 
+#ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
 typedef int32_t (*ecm_tracker_datagram_count_get_method_t)(struct ecm_tracker_instance *ti, ecm_tracker_sender_type_t sender);
 													/* Return number of available datagrams sent by the sender */
 typedef void (*ecm_tracker_datagram_discard_method_t)(struct ecm_tracker_instance *ti, ecm_tracker_sender_type_t sender, int32_t n);
@@ -160,9 +161,6 @@ typedef int (*ecm_tracker_datagram_read_method_t)(struct ecm_tracker_instance *t
 													/* Read size bytes from datagram at index i into the buffer */
 typedef bool (*ecm_tracker_datagram_add_method_t)(struct ecm_tracker_instance *ti, ecm_tracker_sender_type_t sender, struct sk_buff *skb);
 													/* Add (append) the datagram into the tracker */
-typedef void (*ecm_tracker_ref_method_t)(struct ecm_tracker_instance *ti);
-typedef int (*ecm_tracker_deref_method_t)(struct ecm_tracker_instance *ti);
-
 typedef void (*ecm_tracker_discard_all_method_t)(struct ecm_tracker_instance *ti);
 													/* Discard all tracked data */
 typedef int32_t (*ecm_tracker_data_total_get_method_t)(struct ecm_tracker_instance *ti);
@@ -171,6 +169,10 @@ typedef int32_t (*ecm_tracker_data_limit_get_method_t)(struct ecm_tracker_instan
 													/* Return the limit on the number of bytes we can track */
 typedef void (*ecm_tracker_data_limit_set_method_t)(struct ecm_tracker_instance *ti, int32_t data_limit);
 													/* Set the limit on the number of bytes we can track */
+#endif
+typedef void (*ecm_tracker_ref_method_t)(struct ecm_tracker_instance *ti);
+typedef int (*ecm_tracker_deref_method_t)(struct ecm_tracker_instance *ti);
+
 typedef void (*ecm_tracker_state_update_method_t)(struct ecm_tracker_instance *ti, ecm_tracker_sender_type_t sender, struct ecm_tracker_ip_header *ip_hdr, struct sk_buff *skb);
 													/* Update state of the sender */
 typedef void (*ecm_tracker_state_get_method_t)(struct ecm_tracker_instance *ti, ecm_tracker_sender_state_t *src_state, ecm_tracker_sender_state_t *dest_state, ecm_tracker_connection_state_t *state, ecm_db_timer_group_t *tg);
@@ -191,6 +193,7 @@ typedef int (*ecm_tracker_xml_state_get_callback_t)(struct ecm_tracker_instance 
  * ALL trackers must be castable to a type of this, i.e. this structure must be the first element of their own data type.
  */
 struct ecm_tracker_instance {
+#ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
 	ecm_tracker_data_total_get_method_t data_total_get;
 	ecm_tracker_data_limit_get_method_t data_limit_get;
 	ecm_tracker_data_limit_set_method_t data_limit_set;
@@ -200,6 +203,7 @@ struct ecm_tracker_instance {
 	ecm_tracker_datagram_read_method_t datagram_read;
 	ecm_tracker_datagram_add_method_t datagram_add;
 	ecm_tracker_discard_all_method_t discard_all;
+#endif
 	ecm_tracker_state_update_method_t state_update;
 	ecm_tracker_state_get_method_t state_get;
 #ifdef ECM_STATE_OUTPUT_ENABLE
@@ -210,10 +214,12 @@ struct ecm_tracker_instance {
 };
 
 bool ecm_tracker_ip_check_header_and_read(struct ecm_tracker_ip_header *ip_hdr, struct sk_buff *skb);
+#ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
 uint32_t ecm_tracker_data_limit_get(void);
 void ecm_tracker_data_limit_set(uint32_t limit);
 uint32_t ecm_tracker_data_total_get(void);
 uint32_t ecm_tracker_data_buffer_total_get(void);
 bool ecm_tracker_data_total_increase(uint32_t n, uint32_t data_bufer_size);
 void ecm_tracker_data_total_decrease(uint32_t n, uint32_t data_bufer_size);
+#endif
 
