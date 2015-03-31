@@ -130,6 +130,13 @@ ECM_DB_ADVANCED_STATS_ENABLE=y
 ccflags-$(ECM_DB_ADVANCED_STATS_ENABLE) += -DECM_DB_ADVANCED_STATS_ENABLE
 
 # #############################################################################
+# Define ECM_DB_CONNECTION_CROSS_REFERENCING_ENABLE=y in order to enable
+# the database to track relationships between objects.
+# #############################################################################
+ECM_DB_CONNECTION_CROSS_REFERENCING_ENABLE=y
+ccflags-$(ECM_DB_CONNECTION_CROSS_REFERENCING_ENABLE) += -DECM_DB_XREF_ENABLE
+
+# #############################################################################
 # Debug flags, set these to = 0 if you want to disable all debugging for that
 # file.
 # By turning off debugs you gain maximum ECM performance.

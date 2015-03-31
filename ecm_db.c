@@ -184,8 +184,6 @@ struct ecm_db_iface_instance {
 	struct ecm_db_iface_instance *hash_next;	/* Next Interface in the chain of Interfaces */
 	struct ecm_db_iface_instance *hash_prev;	/* previous Interface in the chain of Interfaces */
 	ecm_db_iface_type_t type;			/* RO: Type of interface */
-	struct ecm_db_node_instance *nodes;		/* Nodes associated with this Interface */
-	int node_count;					/* Number of Nodes in the nodes list */
 	uint32_t time_added;				/* RO: DB time stamp when the Interface was added into the database */
 
 	int32_t interface_identifier;			/* RO: The operating system dependent identifier of this interface */
@@ -204,6 +202,7 @@ struct ecm_db_iface_instance {
 	uint64_t to_packet_total_dropped;
 #endif
 
+#ifdef ECM_DB_XREF_ENABLE
 	/*
 	 * For convenience interfaces keep lists of connections that have been established
 	 * from them and to them.
@@ -216,6 +215,14 @@ struct ecm_db_iface_instance {
 
 	struct ecm_db_connection_instance *from_nat_connections;	/* list of NAT connections made from this interface */
 	struct ecm_db_connection_instance *to_nat_connections;		/* list of NAT connections made to this interface */
+
+	/*
+	 * Normally only the node refers to the interfaces which it is reachable upon.
+	 * The interface  also keeps a list of all nodes that can be reached.
+	 */
+	struct ecm_db_node_instance *nodes;				/* Nodes associated with this Interface */
+	int node_count;							/* Number of Nodes in the nodes list */
+#endif
 
 	/*
 	 * Interface specific information.
@@ -277,6 +284,7 @@ struct ecm_db_node_instance {
 	struct ecm_db_node_instance *hash_prev;		/* previous node in the chain of nodes */
 	uint8_t address[ETH_ALEN];			/* RO: MAC Address of this node */
 
+#ifdef ECM_DB_XREF_ENABLE
 	/*
 	 * For convenience nodes keep lists of connections that have been established from them and to them.
 	 * In fact the same connection could be listed as from & to on the same interface (think: WLAN<>WLAN AP function)
@@ -293,6 +301,14 @@ struct ecm_db_node_instance {
 	int from_nat_connections_count;					/* Number of connections in the from_nat_connections list */
 	int to_nat_connections_count;					/* Number of connections in the to_nat_connections list */
 
+	/*
+	 * Nodes reachable from an interface are stored in a linked list maintained by that interface.
+	 * This is so, given an interface, you can examine all nodes reachable from it.
+	 */
+	struct ecm_db_node_instance *node_next;				/* The next node within the same iface nodes list */
+	struct ecm_db_node_instance *node_prev;				/* The previous node within the same iface nodes list */
+#endif
+
 	uint32_t time_added;				/* RO: DB time stamp when the node was added into the database */
 
 #ifdef ECM_DB_ADVANCED_STATS_ENABLE
@@ -307,8 +323,6 @@ struct ecm_db_node_instance {
 #endif
 
 	struct ecm_db_iface_instance *iface;		/* The interface to which this node relates */
-	struct ecm_db_node_instance *node_next;		/* The next node within the same iface nodes list */
-	struct ecm_db_node_instance *node_prev;		/* The previous node within the same iface nodes list */
 
 	ecm_db_node_final_callback_t final;		/* Callback to owner when object is destroyed */
 	void *arg;					/* Argument returned to owner in callbacks */
@@ -335,9 +349,16 @@ struct ecm_db_host_instance {
 	struct ecm_db_host_instance *hash_prev;		/* previous host in the chain of hosts */
 	ip_addr_t address;				/* RO: IPv4/v6 Address of this host */
 	bool on_link;					/* RO: false when this host is reached via a gateway */
+	uint32_t time_added;				/* RO: DB time stamp when the host was added into the database */
+
+#ifdef ECM_DB_XREF_ENABLE
+	/*
+	 * Normally the mapping refers to the host it requires.
+	 * However the host also keeps a list of all mappings that are associated with it.
+	 */
 	struct ecm_db_mapping_instance *mappings;	/* Mappings made on this host */
 	int mapping_count;				/* Number of mappings in the mapping list */
-	uint32_t time_added;				/* RO: DB time stamp when the host was added into the database */
+#endif
 
 #ifdef ECM_DB_ADVANCED_STATS_ENABLE
 	uint64_t from_data_total;			/* Total of data sent by this host */
@@ -378,14 +399,27 @@ struct ecm_db_mapping_instance {
 	uint32_t time_added;						/* RO: DB time stamp when the connection was added into the database */
 	struct ecm_db_host_instance *host;				/* The host to which this mapping relates */
 	int port;							/* RO: The port number on the host - only applicable for mapping protocols that are port based */
-	struct ecm_db_mapping_instance *mapping_next;			/* Next mapping in the list of mappings for the host */
-	struct ecm_db_mapping_instance *mapping_prev;			/* previous mapping in the list of mappings for the host */
 
+#ifdef ECM_DB_XREF_ENABLE
+	/*
+	 * For convenience mappings keep lists of connections that have been established from them and to them.
+	 * In fact the same connection could be listed as from & to on the same interface (think: WLAN<>WLAN AP function)
+	 * Mappings keep this information for rapid iteration of connections e.g. given a mapping we
+	 * can defunct all associated connections or destroy any NSS rules.
+	 */
 	struct ecm_db_connection_instance *from_connections;		/* list of connections made from this host mapping */
 	struct ecm_db_connection_instance *to_connections;		/* list of connections made to this host mapping */
 
 	struct ecm_db_connection_instance *from_nat_connections;	/* list of NAT connections made from this host mapping */
 	struct ecm_db_connection_instance *to_nat_connections;		/* list of NAT connections made to this host mapping */
+
+	/*
+	 * While a mapping refers to the host it requires.
+	 * The host also keeps a list of all mappings that are associated with it, this is that list linkage.
+	 */
+	struct ecm_db_mapping_instance *mapping_next;			/* Next mapping in the list of mappings for the host */
+	struct ecm_db_mapping_instance *mapping_prev;			/* previous mapping in the list of mappings for the host */
+#endif
 
 	/*
 	 * Connection counts
@@ -400,12 +434,12 @@ struct ecm_db_mapping_instance {
 	int udp_nat_to;
 
 	/*
-	 * Total counts
+	 * Connection counts
 	 */
-	int from;
-	int to;
-	int nat_from;
-	int nat_to;
+	int from;							/* Number of connections made from */
+	int to;								/* Number of connections made to */
+	int nat_from;							/* Number of connections made from (nat) */
+	int nat_to;							/* Number of connections made to (nat) */
 
 #ifdef ECM_DB_ADVANCED_STATS_ENABLE
 	/*
@@ -509,10 +543,6 @@ struct ecm_db_connection_instance {
 	 */
 	struct ecm_db_mapping_instance *mapping_from;		/* The connection was established from this mapping */
 	struct ecm_db_mapping_instance *mapping_to;		/* The connection was established to this mapping */
-	struct ecm_db_connection_instance *from_next;		/* Next connection made from the same mapping */
-	struct ecm_db_connection_instance *from_prev;		/* Previous connection made from the same mapping */
-	struct ecm_db_connection_instance *to_next;		/* Next connection made to the same mapping */
-	struct ecm_db_connection_instance *to_prev;		/* Previous connection made to the same mapping */
 
 	/*
 	 * Connection endpoint mapping for NAT purposes
@@ -520,6 +550,32 @@ struct ecm_db_connection_instance {
 	 */
 	struct ecm_db_mapping_instance *mapping_nat_from;	/* The connection was established from this mapping */
 	struct ecm_db_mapping_instance *mapping_nat_to;		/* The connection was established to this mapping */
+
+	/*
+	 * From / To Node (NAT and non-NAT).
+	 * Connections keep references to the nodes upon which they operate.
+	 * Gut feeling would tell us this is unusual since it should be the case that
+	 * the HOST refer to the node, e.g. IP address to a MAC address.
+	 * However there are some 'interesting' usage models where the same IP address may appear
+	 * from different nodes / MAC addresses because of this the unique element here is the connection
+	 * and so we record the node information directly here.
+	 */
+	struct ecm_db_node_instance *from_node;			/* Node from which this connection was established */
+	struct ecm_db_node_instance *to_node;			/* Node to which this connection was established */
+	struct ecm_db_node_instance *from_nat_node;		/* Node from which this connection was established */
+	struct ecm_db_node_instance *to_nat_node;		/* Node to which this connection was established */
+
+#ifdef ECM_DB_XREF_ENABLE
+	/*
+	 * The connection has references to the mappings (both nat and non-nat) as required above.
+	 * Also mappings keep lists of connections made to/from them so that they may be iterated
+	 * to determine associated connections in each direction/situation (e.g. "defuncting all connections made to/from a mapping").
+	 */
+	struct ecm_db_connection_instance *from_next;		/* Next connection made from the same mapping */
+	struct ecm_db_connection_instance *from_prev;		/* Previous connection made from the same mapping */
+	struct ecm_db_connection_instance *to_next;		/* Next connection made to the same mapping */
+	struct ecm_db_connection_instance *to_prev;		/* Previous connection made to the same mapping */
+
 	struct ecm_db_connection_instance *from_nat_next;	/* Next connection made from the same mapping */
 	struct ecm_db_connection_instance *from_nat_prev;	/* Previous connection made from the same mapping */
 	struct ecm_db_connection_instance *to_nat_next;		/* Next connection made to the same mapping */
@@ -527,7 +583,8 @@ struct ecm_db_connection_instance {
 
 	/*
 	 * Connection endpoint interface
-	 * GGG TODO Deprecated - use interface lists instead.  To be removed.
+	 * GGG TODO Deprecated - use interface lists instead.
+	 * To be removed when interface heirarchies are implemented to provide the same functionality.
 	 */
 	struct ecm_db_connection_instance *iface_from_next;	/* Next connection made from the same interface */
 	struct ecm_db_connection_instance *iface_from_prev;	/* Previous connection made from the same interface */
@@ -537,12 +594,28 @@ struct ecm_db_connection_instance {
 	/*
 	 * Connection endpoint interface for NAT purposes
 	 * NOTE: For non-NAT connections these would be identical to the endpoint interface.
-	 * GGG TODO Deprecated - use interface lists instead.  To be removed.
+	 * GGG TODO Deprecated - use interface lists instead.
+	 * To be removed when interface heirarchies are implemented to provide the same functionality.
 	 */
 	struct ecm_db_connection_instance *iface_from_nat_next;	/* Next connection made from the same interface */
 	struct ecm_db_connection_instance *iface_from_nat_prev;	/* Previous connection made from the same interface */
 	struct ecm_db_connection_instance *iface_to_nat_next;	/* Next connection made to the same interface */
 	struct ecm_db_connection_instance *iface_to_nat_prev;	/* Previous connection made to the same interface */
+
+	/*
+	 * As well as keeping a reference to the node which this connection uses the nodes
+	 * also keep lists of connections made from/to them.
+	 */
+	struct ecm_db_connection_instance *node_from_next;	/* Next connection in the nodes from_connections list */
+	struct ecm_db_connection_instance *node_from_prev;	/* Prev connection in the nodes from_connections list */
+	struct ecm_db_connection_instance *node_to_next;	/* Next connection in the nodes to_connections list */
+	struct ecm_db_connection_instance *node_to_prev;	/* Prev connection in the nodes to_connections list */
+
+	struct ecm_db_connection_instance *node_from_nat_next;	/* Next connection in the nodes from_nat_connections list */
+	struct ecm_db_connection_instance *node_from_nat_prev;	/* Prev connection in the nodes from_nat_connections list */
+	struct ecm_db_connection_instance *node_to_nat_next;	/* Next connection in the nodes to_nat_connections list */
+	struct ecm_db_connection_instance *node_to_nat_prev;	/* Prev connection in the nodes to_nat_connections list */
+#endif
 
 	/*
 	 * From / To interfaces list
@@ -573,27 +646,6 @@ struct ecm_db_connection_instance {
 								/* The outermost to innnermost interface this connection is using in the to path */
 	int32_t to_nat_interface_first;				/* The index of the first interface in the list */
 	bool to_nat_interface_set;				/* True when a list has been set - even if there is NO list, it's still deliberately set that way. */
-
-	/*
-	 * From / To Node
-	 */
-	struct ecm_db_node_instance *from_node;			/* Node from which this connection was established */
-	struct ecm_db_node_instance *to_node;			/* Node to which this connection was established */
-	struct ecm_db_connection_instance *node_from_next;	/* Next connection in the nodes from_connections list */
-	struct ecm_db_connection_instance *node_from_prev;	/* Prev connection in the nodes from_connections list */
-	struct ecm_db_connection_instance *node_to_next;	/* Next connection in the nodes to_connections list */
-	struct ecm_db_connection_instance *node_to_prev;	/* Prev connection in the nodes to_connections list */
-
-	/*
-	 * From / To Node (NAT)
-	 * GGG TODO Evaluate this, these may not be beneficial.  Added in for now for completeness.
-	 */
-	struct ecm_db_node_instance *from_nat_node;		/* Node from which this connection was established */
-	struct ecm_db_node_instance *to_nat_node;		/* Node to which this connection was established */
-	struct ecm_db_connection_instance *node_from_nat_next;	/* Next connection in the nodes from_nat_connections list */
-	struct ecm_db_connection_instance *node_from_nat_prev;	/* Prev connection in the nodes from_nat_connections list */
-	struct ecm_db_connection_instance *node_to_nat_next;	/* Next connection in the nodes to_nat_connections list */
-	struct ecm_db_connection_instance *node_to_nat_prev;	/* Prev connection in the nodes to_nat_connections list */
 
 	/*
 	 * Time values in seconds
@@ -678,7 +730,7 @@ struct ecm_db_listener_instance {
 /*
  * Listener flags
  */
-#define ECM_DB_LISTENER_FLAGS_INSERTED 1				/* Is inserted into database */
+#define ECM_DB_LISTENER_FLAGS_INSERTED 1			/* Is inserted into database */
 
 /*
  * Simple stats
@@ -2347,10 +2399,12 @@ int ecm_db_connection_deref(struct ecm_db_connection_instance *ci)
 		spin_unlock_bh(&ecm_db_lock);
 	} else {
 		struct ecm_db_listener_instance *li;
+#ifdef ECM_DB_XREF_ENABLE
 		struct ecm_db_iface_instance *iface_from;
 		struct ecm_db_iface_instance *iface_to;
 		struct ecm_db_iface_instance *iface_nat_from;
 		struct ecm_db_iface_instance *iface_nat_to;
+#endif
 
 		/*
 		 * Remove it from the connection hash table
@@ -2395,6 +2449,7 @@ int ecm_db_connection_deref(struct ecm_db_connection_instance *ci)
 			ci->next->prev = ci->prev;
 		}
 
+#ifdef ECM_DB_XREF_ENABLE
 		/*
 		 * Remove connection from the "from" mapping connection list
 		 */
@@ -2566,6 +2621,7 @@ int ecm_db_connection_deref(struct ecm_db_connection_instance *ci)
 		}
 		ci->to_nat_node->to_nat_connections_count--;
 		DEBUG_ASSERT(ci->to_nat_node->to_nat_connections_count >= 0, "%p: bad count\n", ci);
+#endif
 
 		/*
 		 * Update the counters in the mappings
@@ -2721,14 +2777,21 @@ int ecm_db_mapping_deref(struct ecm_db_mapping_instance *mi)
 		return refs;
 	}
 
-	DEBUG_ASSERT(!mi->from_connections && !mi->tcp_from && !mi->udp_from && !mi->from, "%p: from not null: %p, %d, %d, %d\n",
-			mi, mi->from_connections, mi->tcp_from, mi->udp_from, mi->from);
-	DEBUG_ASSERT(!mi->to_connections && !mi->tcp_to && !mi->udp_to && !mi->to, "%p: to not null: %p, %d, %d, %d\n",
-			mi, mi->to_connections, mi->tcp_to, mi->udp_to, mi->to);
-	DEBUG_ASSERT(!mi->from_nat_connections && !mi->tcp_nat_from && !mi->udp_nat_from && !mi->nat_from, "%p: nat_from not null: %p, %d, %d, %d\n",
-			mi, mi->from_nat_connections, mi->tcp_nat_from, mi->udp_nat_from, mi->nat_from);
-	DEBUG_ASSERT(!mi->to_nat_connections && !mi->tcp_nat_to && !mi->udp_nat_to && !mi->nat_to, "%p: nat_to not null: %p, %d, %d, %d\n",
-			mi, mi->to_nat_connections, mi->tcp_nat_to, mi->udp_nat_to, mi->nat_to);
+	DEBUG_ASSERT(!mi->tcp_from && !mi->udp_from && !mi->from, "%p: from not zero: %d, %d, %d\n",
+			mi, mi->tcp_from, mi->udp_from, mi->from);
+	DEBUG_ASSERT(!mi->tcp_to && !mi->udp_to && !mi->to, "%p: to not zero: %d, %d, %d\n",
+			mi, mi->tcp_to, mi->udp_to, mi->to);
+	DEBUG_ASSERT(!mi->tcp_nat_from && !mi->udp_nat_from && !mi->nat_from, "%p: nat_from not zero: %d, %d, %d\n",
+			mi, mi->tcp_nat_from, mi->udp_nat_from, mi->nat_from);
+	DEBUG_ASSERT(!mi->tcp_nat_to && !mi->udp_nat_to && !mi->nat_to, "%p: nat_to not zero: %d, %d, %d\n",
+			mi, mi->tcp_nat_to, mi->udp_nat_to, mi->nat_to);
+
+#ifdef ECM_DB_XREF_ENABLE
+	DEBUG_ASSERT(!mi->from_connections, "%p: from not null: %p\n", mi, mi->from_connections);
+	DEBUG_ASSERT(!mi->to_connections, "%p: to not null: %p\n", mi, mi->to_connections);
+	DEBUG_ASSERT(!mi->from_nat_connections, "%p: nat_from not null: %p\n", mi, mi->from_nat_connections);
+	DEBUG_ASSERT(!mi->to_nat_connections, "%p: nat_to not null: %p\n", mi, mi->to_nat_connections);
+#endif
 
 	/*
 	 * Remove from database if inserted
@@ -2768,6 +2831,7 @@ int ecm_db_mapping_deref(struct ecm_db_mapping_instance *mi)
 		ecm_db_mapping_table_lengths[mi->hash_index]--;
 		DEBUG_ASSERT(ecm_db_mapping_table_lengths[mi->hash_index] >= 0, "%p: invalid table len %d\n", mi, ecm_db_mapping_table_lengths[mi->hash_index]);
 
+#ifdef ECM_DB_XREF_ENABLE
 		/*
 		 * Unlink it from the host mapping list
 		 */
@@ -2784,6 +2848,7 @@ int ecm_db_mapping_deref(struct ecm_db_mapping_instance *mi)
 		mi->mapping_prev = NULL;
 
 		mi->host->mapping_count--;
+#endif
 		spin_unlock_bh(&ecm_db_lock);
 
 		/*
@@ -2857,7 +2922,9 @@ int ecm_db_host_deref(struct ecm_db_host_instance *hi)
 		return refs;
 	}
 
+#ifdef ECM_DB_XREF_ENABLE
 	DEBUG_ASSERT((hi->mappings == NULL) && (hi->mapping_count == 0), "%p: mappings not null\n", hi);
+#endif
 
 	/*
 	 * Remove from database if inserted
@@ -2963,10 +3030,12 @@ int ecm_db_node_deref(struct ecm_db_node_instance *ni)
 		return refs;
 	}
 
+#ifdef ECM_DB_XREF_ENABLE
 	DEBUG_ASSERT((ni->from_connections == NULL) && (ni->from_connections_count == 0), "%p: from_connections not null\n", ni);
 	DEBUG_ASSERT((ni->to_connections == NULL) && (ni->to_connections_count == 0), "%p: to_connections not null\n", ni);
 	DEBUG_ASSERT((ni->from_nat_connections == NULL) && (ni->from_nat_connections_count == 0), "%p: from_nat_connections not null\n", ni);
 	DEBUG_ASSERT((ni->to_nat_connections == NULL) && (ni->to_nat_connections_count == 0), "%p: to_nat_connections not null\n", ni);
+#endif
 
 	/*
 	 * Remove from database if inserted
@@ -3006,6 +3075,7 @@ int ecm_db_node_deref(struct ecm_db_node_instance *ni)
 		ecm_db_node_table_lengths[ni->hash_index]--;
 		DEBUG_ASSERT(ecm_db_node_table_lengths[ni->hash_index] >= 0, "%p: invalid table len %d\n", ni, ecm_db_node_table_lengths[ni->hash_index]);
 
+#ifdef ECM_DB_XREF_ENABLE
 		/*
 		 * Unlink it from the iface node list
 		 */
@@ -3021,6 +3091,8 @@ int ecm_db_node_deref(struct ecm_db_node_instance *ni)
 		ni->node_next = NULL;
 		ni->node_prev = NULL;
 		ni->iface->node_count--;
+#endif
+
 		spin_unlock_bh(&ecm_db_lock);
 
 		/*
@@ -3097,7 +3169,9 @@ int ecm_db_iface_deref(struct ecm_db_iface_instance *ii)
 		return refs;
 	}
 
+#ifdef ECM_DB_XREF_ENABLE
 	DEBUG_ASSERT((ii->nodes == NULL) && (ii->node_count == 0), "%p: nodes not null\n", ii);
+#endif
 
 	/*
 	 * Remove from database if inserted
@@ -4237,6 +4311,44 @@ connection_found:
 EXPORT_SYMBOL(ecm_db_connection_serial_find_and_ref);
 
 /*
+ * ecm_db_connection_node_to_get_and_ref()
+ *	Return node reference
+ */
+struct ecm_db_node_instance *ecm_db_connection_node_to_get_and_ref(struct ecm_db_connection_instance *ci)
+{
+	struct ecm_db_node_instance *ni;
+
+	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed\n", ci);
+
+	spin_lock_bh(&ecm_db_lock);
+	ni = ci->to_node;
+	DEBUG_CHECK_MAGIC(ni, ECM_DB_NODE_INSTANCE_MAGIC, "%p: magic failed\n", ni);
+	_ecm_db_node_ref(ni);
+	spin_unlock_bh(&ecm_db_lock);
+	return ni;
+}
+EXPORT_SYMBOL(ecm_db_connection_node_to_get_and_ref);
+
+/*
+ * ecm_db_connection_node_from_get_and_ref()
+ *	Return node reference
+ */
+struct ecm_db_node_instance *ecm_db_connection_node_from_get_and_ref(struct ecm_db_connection_instance *ci)
+{
+	struct ecm_db_node_instance *ni;
+
+	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed\n", ci);
+
+	spin_lock_bh(&ecm_db_lock);
+	ni = ci->from_node;
+	_ecm_db_node_ref(ni);
+	spin_unlock_bh(&ecm_db_lock);
+	return ni;
+}
+EXPORT_SYMBOL(ecm_db_connection_node_from_get_and_ref);
+
+#ifdef ECM_DB_XREF_ENABLE
+/*
  * ecm_db_mapping_connections_from_get_and_ref_first()
  *	Return a reference to the first connection made from this mapping
  */
@@ -4319,25 +4431,6 @@ struct ecm_db_connection_instance *ecm_db_mapping_connections_nat_to_get_and_ref
 	return ci;
 }
 EXPORT_SYMBOL(ecm_db_mapping_connections_nat_to_get_and_ref_first);
-
-/*
- * ecm_db_connection_node_from_get_and_ref()
- *	Return node reference
- */
-struct ecm_db_node_instance *ecm_db_connection_node_to_get_and_ref(struct ecm_db_connection_instance *ci)
-{
-	struct ecm_db_node_instance *ni;
-
-	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed\n", ci);
-
-	spin_lock_bh(&ecm_db_lock);
-	ni = ci->to_node;
-	DEBUG_CHECK_MAGIC(ni, ECM_DB_NODE_INSTANCE_MAGIC, "%p: magic failed\n", ni);
-	_ecm_db_node_ref(ni);
-	spin_unlock_bh(&ecm_db_lock);
-	return ni;
-}
-EXPORT_SYMBOL(ecm_db_connection_node_to_get_and_ref);
 
 /*
  * ecm_db_connection_mapping_from_get_and_ref_next()
@@ -4613,34 +4706,6 @@ struct ecm_db_node_instance *ecm_db_iface_nodes_get_and_ref_first(struct ecm_db_
 EXPORT_SYMBOL(ecm_db_iface_nodes_get_and_ref_first);
 
 /*
- * ecm_db_mapping_host_get_and_ref()
- */
-struct ecm_db_host_instance *ecm_db_mapping_host_get_and_ref(struct ecm_db_mapping_instance *mi)
-{
-	DEBUG_CHECK_MAGIC(mi, ECM_DB_MAPPING_INSTANCE_MAGIC, "%p: magic failed\n", mi);
-
-	spin_lock_bh(&ecm_db_lock);
-	_ecm_db_host_ref(mi->host);
-	spin_unlock_bh(&ecm_db_lock);
-	return mi->host;
-}
-EXPORT_SYMBOL(ecm_db_mapping_host_get_and_ref);
-
-/*
- * ecm_db_node_iface_get_and_ref()
- */
-struct ecm_db_iface_instance *ecm_db_node_iface_get_and_ref(struct ecm_db_node_instance *ni)
-{
-	DEBUG_CHECK_MAGIC(ni, ECM_DB_NODE_INSTANCE_MAGIC, "%p: magic failed\n", ni);
-
-	spin_lock_bh(&ecm_db_lock);
-	_ecm_db_iface_ref(ni->iface);
-	spin_unlock_bh(&ecm_db_lock);
-	return ni->iface;
-}
-EXPORT_SYMBOL(ecm_db_node_iface_get_and_ref);
-
-/*
  * ecm_db_iface_node_count_get()
  *	Return the number of nodes to this iface
  */
@@ -4673,6 +4738,35 @@ int ecm_db_host_mapping_count_get(struct ecm_db_host_instance *hi)
 	return count;
 }
 EXPORT_SYMBOL(ecm_db_host_mapping_count_get);
+#endif
+
+/*
+ * ecm_db_mapping_host_get_and_ref()
+ */
+struct ecm_db_host_instance *ecm_db_mapping_host_get_and_ref(struct ecm_db_mapping_instance *mi)
+{
+	DEBUG_CHECK_MAGIC(mi, ECM_DB_MAPPING_INSTANCE_MAGIC, "%p: magic failed\n", mi);
+
+	spin_lock_bh(&ecm_db_lock);
+	_ecm_db_host_ref(mi->host);
+	spin_unlock_bh(&ecm_db_lock);
+	return mi->host;
+}
+EXPORT_SYMBOL(ecm_db_mapping_host_get_and_ref);
+
+/*
+ * ecm_db_node_iface_get_and_ref()
+ */
+struct ecm_db_iface_instance *ecm_db_node_iface_get_and_ref(struct ecm_db_node_instance *ni)
+{
+	DEBUG_CHECK_MAGIC(ni, ECM_DB_NODE_INSTANCE_MAGIC, "%p: magic failed\n", ni);
+
+	spin_lock_bh(&ecm_db_lock);
+	_ecm_db_iface_ref(ni->iface);
+	spin_unlock_bh(&ecm_db_lock);
+	return ni->iface;
+}
+EXPORT_SYMBOL(ecm_db_node_iface_get_and_ref);
 
 /*
  * ecm_db_mapping_connections_total_count_get()
@@ -4763,24 +4857,6 @@ struct ecm_db_mapping_instance *ecm_db_connection_mapping_nat_to_get_and_ref(str
 	return mi;
 }
 EXPORT_SYMBOL(ecm_db_connection_mapping_nat_to_get_and_ref);
-
-/*
- * ecm_db_connection_node_from_get_and_ref()
- *	Return node reference
- */
-struct ecm_db_node_instance *ecm_db_connection_node_from_get_and_ref(struct ecm_db_connection_instance *ci)
-{
-	struct ecm_db_node_instance *ni;
-
-	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed\n", ci);
-
-	spin_lock_bh(&ecm_db_lock);
-	ni = ci->from_node;
-	_ecm_db_node_ref(ni);
-	spin_unlock_bh(&ecm_db_lock);
-	return ni;
-}
-EXPORT_SYMBOL(ecm_db_connection_node_from_get_and_ref);
 
 /*
  * ecm_db_timer_groups_check()
@@ -5887,10 +5963,12 @@ void ecm_db_connection_add(struct ecm_db_connection_instance *ci,
 	ecm_db_connection_hash_t hash_index;
 	ecm_db_connection_serial_hash_t serial_hash_index;
 	struct ecm_db_listener_instance *li;
+#ifdef ECM_DB_XREF_ENABLE
 	struct ecm_db_iface_instance *iface_from;
 	struct ecm_db_iface_instance *iface_to;
 	struct ecm_db_iface_instance *iface_nat_from;
 	struct ecm_db_iface_instance *iface_nat_to;
+#endif
 
 	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed\n", ci);
 	DEBUG_CHECK_MAGIC(mapping_from, ECM_DB_MAPPING_INSTANCE_MAGIC, "%p: magic failed\n", mapping_from);
@@ -5985,8 +6063,6 @@ void ecm_db_connection_add(struct ecm_db_connection_instance *ci,
 	ecm_db_connection_count_by_protocol[protocol]++;
 	DEBUG_ASSERT(ecm_db_connection_count_by_protocol[protocol] > 0, "%p: Invalid protocol count %d\n", ci, ecm_db_connection_count_by_protocol[protocol]);
 
-	DEBUG_TRACE("c\n");
-
 	/*
 	 * Set time
 	 */
@@ -6008,7 +6084,7 @@ void ecm_db_connection_add(struct ecm_db_connection_instance *ci,
 	ci->flags |= ECM_DB_CONNECTION_FLAGS_INSERTED;
 
 	/*
-	 * Insert mapping into the connections hash table
+	 * Insert connection into the connections hash table
 	 */
 	ci->hash_next = ecm_db_connection_table[hash_index];
 	if (ecm_db_connection_table[hash_index]) {
@@ -6029,6 +6105,7 @@ void ecm_db_connection_add(struct ecm_db_connection_instance *ci,
 	ecm_db_connection_serial_table_lengths[serial_hash_index]++;
 	DEBUG_ASSERT(ecm_db_connection_serial_table_lengths[serial_hash_index] > 0, "%p: invalid table len %d\n", ci, ecm_db_connection_serial_table_lengths[serial_hash_index]);
 
+#ifdef ECM_DB_XREF_ENABLE
 	/*
 	 * Add this connection into the FROM node
 	 */
@@ -6168,7 +6245,7 @@ void ecm_db_connection_add(struct ecm_db_connection_instance *ci,
 		iface_nat_to->to_nat_connections->iface_to_nat_prev = ci;
 	}
 	iface_nat_to->to_nat_connections = ci;
-
+#endif
 
 	/*
 	 * NOTE: The interface heirarchy lists are deliberately left empty - these are completed
@@ -6244,11 +6321,14 @@ void ecm_db_mapping_add(struct ecm_db_mapping_instance *mi, struct ecm_db_host_i
 	spin_lock_bh(&ecm_db_lock);
 	DEBUG_CHECK_MAGIC(mi, ECM_DB_MAPPING_INSTANCE_MAGIC, "%p: magic failed\n", mi);
 	DEBUG_CHECK_MAGIC(hi, ECM_DB_HOST_INSTANCE_MAGIC, "%p: magic failed\n", hi);
-	DEBUG_ASSERT(mi->from_connections == NULL, "%p: connections not null\n", mi);
-	DEBUG_ASSERT(mi->to_connections == NULL, "%p: connections not null\n", mi);
 	DEBUG_ASSERT(!(mi->flags & ECM_DB_MAPPING_FLAGS_INSERTED), "%p: inserted\n", mi);
 	DEBUG_ASSERT((hi->flags & ECM_DB_HOST_FLAGS_INSERTED), "%p: not inserted\n", hi);
-	DEBUG_ASSERT(!mi->from && !mi->to && !mi->tcp_from && !mi->tcp_to && !mi->udp_from && !mi->udp_to, "%p: count errors\n", mi);
+	DEBUG_ASSERT(!mi->tcp_from && !mi->tcp_to && !mi->udp_from && !mi->udp_to, "%p: protocol count errors\n", mi);
+#ifdef ECM_DB_XREF_ENABLE
+	DEBUG_ASSERT(mi->from_connections == NULL, "%p: connections not null\n", mi);
+	DEBUG_ASSERT(mi->to_connections == NULL, "%p: connections not null\n", mi);
+	DEBUG_ASSERT(!mi->from && !mi->to && !mi->nat_from && !mi->nat_to, "%p: connection count errors\n", mi);
+#endif
 	spin_unlock_bh(&ecm_db_lock);
 
 	mi->arg = arg;
@@ -6303,6 +6383,7 @@ void ecm_db_mapping_add(struct ecm_db_mapping_instance *mi, struct ecm_db_host_i
 	ecm_db_mapping_table_lengths[hash_index]++;
 	DEBUG_ASSERT(ecm_db_mapping_table_lengths[hash_index] > 0, "%p: invalid table len %d\n", hi, ecm_db_mapping_table_lengths[hash_index]);
 
+#ifdef ECM_DB_XREF_ENABLE
 	/*
 	 * Insert mapping into the host mapping list
 	 */
@@ -6313,6 +6394,7 @@ void ecm_db_mapping_add(struct ecm_db_mapping_instance *mi, struct ecm_db_host_i
 	}
 	hi->mappings = mi;
 	hi->mapping_count++;
+#endif
 	spin_unlock_bh(&ecm_db_lock);
 
 	/*
@@ -6347,8 +6429,10 @@ void ecm_db_host_add(struct ecm_db_host_instance *hi, ip_addr_t address, bool on
 
 	spin_lock_bh(&ecm_db_lock);
 	DEBUG_CHECK_MAGIC(hi, ECM_DB_HOST_INSTANCE_MAGIC, "%p: magic failed\n", hi);
-	DEBUG_ASSERT((hi->mappings == NULL) && (hi->mapping_count == 0), "%p: mappings not null\n", hi);
 	DEBUG_ASSERT(!(hi->flags & ECM_DB_HOST_FLAGS_INSERTED), "%p: inserted\n", hi);
+#ifdef ECM_DB_XREF_ENABLE
+	DEBUG_ASSERT((hi->mappings == NULL) && (hi->mapping_count == 0), "%p: mappings not null\n", hi);
+#endif
 	spin_unlock_bh(&ecm_db_lock);
 
 	hi->arg = arg;
@@ -6426,12 +6510,14 @@ void ecm_db_node_add(struct ecm_db_node_instance *ni, struct ecm_db_iface_instan
 	DEBUG_CHECK_MAGIC(ni, ECM_DB_NODE_INSTANCE_MAGIC, "%p: magic failed\n", ni);
 	DEBUG_CHECK_MAGIC(ii, ECM_DB_IFACE_INSTANCE_MAGIC, "%p: magic failed\n", ii);
 	DEBUG_ASSERT(address, "%p: address null\n", ni);
+	DEBUG_ASSERT((ni->iface == NULL), "%p: iface not null\n", ni);
+	DEBUG_ASSERT(!(ni->flags & ECM_DB_NODE_FLAGS_INSERTED), "%p: inserted\n", ni);
+#ifdef ECM_DB_XREF_ENABLE
 	DEBUG_ASSERT((ni->from_connections == NULL) && (ni->from_connections_count == 0), "%p: from_connections not null\n", ni);
 	DEBUG_ASSERT((ni->to_connections == NULL) && (ni->to_connections_count == 0), "%p: to_connections not null\n", ni);
 	DEBUG_ASSERT((ni->from_nat_connections == NULL) && (ni->from_nat_connections_count == 0), "%p: from_nat_connections not null\n", ni);
 	DEBUG_ASSERT((ni->to_nat_connections == NULL) && (ni->to_nat_connections_count == 0), "%p: to_nat_connections not null\n", ni);
-	DEBUG_ASSERT((ni->iface == NULL), "%p: iface not null\n", ni);
-	DEBUG_ASSERT(!(ni->flags & ECM_DB_NODE_FLAGS_INSERTED), "%p: inserted\n", ni);
+#endif
 	spin_unlock_bh(&ecm_db_lock);
 
 	memcpy(ni->address, address, ETH_ALEN);
@@ -6478,6 +6564,7 @@ void ecm_db_node_add(struct ecm_db_node_instance *ni, struct ecm_db_iface_instan
 	 */
 	ni->time_added = ecm_db_time;
 
+#ifdef ECM_DB_XREF_ENABLE
 	/*
 	 * Insert node into the iface nodes list
 	 */
@@ -6488,6 +6575,7 @@ void ecm_db_node_add(struct ecm_db_node_instance *ni, struct ecm_db_iface_instan
 	}
 	ii->nodes = ni;
 	ii->node_count++;
+#endif
 	spin_unlock_bh(&ecm_db_lock);
 
 	/*
@@ -6519,7 +6607,9 @@ EXPORT_SYMBOL(ecm_db_node_add);
 static int ecm_db_iface_xml_state_get_open(struct ecm_db_iface_instance *ii, char *buf, int buf_sz)
 {
 	int count;
+#ifdef ECM_DB_XREF_ENABLE
 	int node_count;
+#endif
 	uint32_t time_added;
 	int32_t interface_identifier;
 	int32_t nss_interface_identifier;
@@ -6545,7 +6635,9 @@ static int ecm_db_iface_xml_state_get_open(struct ecm_db_iface_instance *ii, cha
 	 * <iface blah="" ... >
 	 * Extract general information from the iface for inclusion into the message
 	 */
+#ifdef ECM_DB_XREF_ENABLE
 	node_count = ecm_db_iface_node_count_get(ii);
+#endif
 	time_added = ii->time_added;
 	type = ii->type;
 	spin_lock_bh(&ecm_db_lock);
@@ -6569,7 +6661,9 @@ static int ecm_db_iface_xml_state_get_open(struct ecm_db_iface_instance *ii, cha
 		"<iface"
 		" type=\"%d\""
 		" name=\"%s\""
+#ifdef ECM_DB_XREF_ENABLE
 		" nodes=\"%d\""
+#endif
 		" time_added=\"%u\""
 		" mtu=\"%d\""
 		" interface_identifier=\"%d\""
@@ -6587,7 +6681,9 @@ static int ecm_db_iface_xml_state_get_open(struct ecm_db_iface_instance *ii, cha
 		">\n"
 		, type
 		, name
+#ifdef ECM_DB_XREF_ENABLE
 		, node_count
+#endif
 		, time_added
 		, mtu
 		, interface_identifier
@@ -6603,6 +6699,7 @@ static int ecm_db_iface_xml_state_get_open(struct ecm_db_iface_instance *ii, cha
 		, to_packet_total_dropped
 #endif
 		);
+
 
 	if ((count <= 0) || (count >= buf_sz)) {
 		return -1;
@@ -7519,7 +7616,9 @@ EXPORT_SYMBOL(ecm_db_mapping_xml_state_get);
 int ecm_db_host_xml_state_get(struct ecm_db_host_instance *hi, char *buf, int buf_sz)
 {
 	char address[50];
+#ifdef ECM_DB_XREF_ENABLE
 	int mapping_count;
+#endif
 	uint32_t time_added;
 	bool on_link;
 #ifdef ECM_DB_ADVANCED_STATS_ENABLE
@@ -7539,7 +7638,9 @@ int ecm_db_host_xml_state_get(struct ecm_db_host_instance *hi, char *buf, int bu
 	 * Create a small xml stats element for our host.
 	 * Extract information from the host for inclusion into the message
 	 */
+#ifdef ECM_DB_XREF_ENABLE
 	mapping_count = ecm_db_host_mapping_count_get(hi);
+#endif
 	ecm_ip_addr_to_string(address, hi->address);
 	time_added = hi->time_added;
 	on_link = hi->on_link;
@@ -7557,7 +7658,9 @@ int ecm_db_host_xml_state_get(struct ecm_db_host_instance *hi, char *buf, int bu
 	return snprintf(buf, buf_sz,
 		"<host"
 		" address=\"%s\""
+#ifdef ECM_DB_XREF_ENABLE
 		" mappings=\"%d\""
+#endif
 		" time_added=\"%u\""
 		" on_link=\"%d\""
 #ifdef ECM_DB_ADVANCED_STATS_ENABLE
@@ -7572,7 +7675,9 @@ int ecm_db_host_xml_state_get(struct ecm_db_host_instance *hi, char *buf, int bu
 #endif
 		"/>\n"
 		, address
+#ifdef ECM_DB_XREF_ENABLE
 		, mapping_count
+#endif
 		, time_added
 		, on_link
 #ifdef ECM_DB_ADVANCED_STATS_ENABLE
@@ -7596,10 +7701,12 @@ EXPORT_SYMBOL(ecm_db_host_xml_state_get);
 int ecm_db_node_xml_state_get(struct ecm_db_node_instance *ni, char *buf, int buf_sz)
 {
 	char address[25];
+#ifdef ECM_DB_XREF_ENABLE
 	int from_connections_count;
 	int to_connections_count;
 	int from_nat_connections_count;
 	int to_nat_connections_count;
+#endif
 	uint32_t time_added;
 #ifdef ECM_DB_ADVANCED_STATS_ENABLE
 	uint64_t from_data_total;
@@ -7620,12 +7727,14 @@ int ecm_db_node_xml_state_get(struct ecm_db_node_instance *ni, char *buf, int bu
 	 *
 	 * Extract information from the node for inclusion into the message
 	 */
+#ifdef ECM_DB_XREF_ENABLE
 	spin_lock_bh(&ecm_db_lock);
 	from_connections_count = ni->from_connections_count;
 	to_connections_count = ni->to_connections_count;
 	from_nat_connections_count = ni->from_nat_connections_count;
 	to_nat_connections_count = ni->to_nat_connections_count;
 	spin_unlock_bh(&ecm_db_lock);
+#endif
 	time_added = ni->time_added;
 	sprintf(address, "%pM", ni->address);
 
@@ -7643,10 +7752,12 @@ int ecm_db_node_xml_state_get(struct ecm_db_node_instance *ni, char *buf, int bu
 	return snprintf(buf, buf_sz,
 		"<node"
 		" address=\"%s\""
+#ifdef ECM_DB_XREF_ENABLE
 		" from_connections_count=\"%d\""
 		" to_connections_count=\"%d\""
 		" from_nat_connections_count=\"%d\""
 		" to_nat_connections_count=\"%d\""
+#endif
 		" time_added=\"%u\""
 #ifdef ECM_DB_ADVANCED_STATS_ENABLE
 		" from_data_total=\"%llu\""
@@ -7660,10 +7771,12 @@ int ecm_db_node_xml_state_get(struct ecm_db_node_instance *ni, char *buf, int bu
 #endif
 		"/>\n"
 		, address
+#ifdef ECM_DB_XREF_ENABLE
 		, from_connections_count
 		, to_connections_count
 		, from_nat_connections_count
 		, to_nat_connections_count
+#endif
 		, time_added
 #ifdef ECM_DB_ADVANCED_STATS_ENABLE
 		, from_data_total
@@ -7919,7 +8032,9 @@ void ecm_db_iface_add_ethernet(struct ecm_db_iface_instance *ii, uint8_t *addres
 	spin_lock_bh(&ecm_db_lock);
 	DEBUG_CHECK_MAGIC(ii, ECM_DB_IFACE_INSTANCE_MAGIC, "%p: magic failed\n", ii);
 	DEBUG_ASSERT(address, "%p: address null\n", ii);
+#ifdef ECM_DB_XREF_ENABLE
 	DEBUG_ASSERT((ii->nodes == NULL) && (ii->node_count == 0), "%p: nodes not null\n", ii);
+#endif
 	DEBUG_ASSERT(!(ii->flags & ECM_DB_IFACE_FLAGS_INSERTED), "%p: inserted\n", ii);
 	DEBUG_ASSERT(name, "%p: no name given\n", ii);
 	spin_unlock_bh(&ecm_db_lock);
@@ -8018,7 +8133,9 @@ void ecm_db_iface_add_lag(struct ecm_db_iface_instance *ii, uint8_t *address, ch
 	spin_lock_bh(&ecm_db_lock);
 	DEBUG_CHECK_MAGIC(ii, ECM_DB_IFACE_INSTANCE_MAGIC, "%p: magic failed\n", ii);
 	DEBUG_ASSERT(address, "%p: address null\n", ii);
+#ifdef ECM_DB_XREF_ENABLE
 	DEBUG_ASSERT((ii->nodes == NULL) && (ii->node_count == 0), "%p: nodes not null\n", ii);
+#endif
 	DEBUG_ASSERT(!(ii->flags & ECM_DB_IFACE_FLAGS_INSERTED), "%p: inserted\n", ii);
 	DEBUG_ASSERT(name, "%p: no name given\n", ii);
 	spin_unlock_bh(&ecm_db_lock);
@@ -8117,7 +8234,9 @@ void ecm_db_iface_add_bridge(struct ecm_db_iface_instance *ii, uint8_t *address,
 	spin_lock_bh(&ecm_db_lock);
 	DEBUG_CHECK_MAGIC(ii, ECM_DB_IFACE_INSTANCE_MAGIC, "%p: magic failed\n", ii);
 	DEBUG_ASSERT(address, "%p: address null\n", ii);
+#ifdef ECM_DB_XREF_ENABLE
 	DEBUG_ASSERT((ii->nodes == NULL) && (ii->node_count == 0), "%p: nodes not null\n", ii);
+#endif
 	DEBUG_ASSERT(!(ii->flags & ECM_DB_IFACE_FLAGS_INSERTED), "%p: inserted\n", ii);
 	DEBUG_ASSERT(name, "%p: no name given\n", ii);
 	spin_unlock_bh(&ecm_db_lock);
@@ -8216,7 +8335,9 @@ void ecm_db_iface_add_vlan(struct ecm_db_iface_instance *ii, uint8_t *address, u
 	spin_lock_bh(&ecm_db_lock);
 	DEBUG_CHECK_MAGIC(ii, ECM_DB_IFACE_INSTANCE_MAGIC, "%p: magic failed\n", ii);
 	DEBUG_ASSERT(address, "%p: address null\n", ii);
+#ifdef ECM_DB_XREF_ENABLE
 	DEBUG_ASSERT((ii->nodes == NULL) && (ii->node_count == 0), "%p: nodes not null\n", ii);
+#endif
 	DEBUG_ASSERT(!(ii->flags & ECM_DB_IFACE_FLAGS_INSERTED), "%p: inserted\n", ii);
 	DEBUG_ASSERT(name, "%p: no name given\n", ii);
 	spin_unlock_bh(&ecm_db_lock);
@@ -8318,7 +8439,9 @@ void ecm_db_iface_add_pppoe(struct ecm_db_iface_instance *ii, uint16_t pppoe_ses
 
 	spin_lock_bh(&ecm_db_lock);
 	DEBUG_CHECK_MAGIC(ii, ECM_DB_IFACE_INSTANCE_MAGIC, "%p: magic failed\n", ii);
+#ifdef ECM_DB_XREF_ENABLE
 	DEBUG_ASSERT((ii->nodes == NULL) && (ii->node_count == 0), "%p: nodes not null\n", ii);
+#endif
 	DEBUG_ASSERT(!(ii->flags & ECM_DB_IFACE_FLAGS_INSERTED), "%p: inserted\n", ii);
 	DEBUG_ASSERT(name, "%p: no name given\n", ii);
 	spin_unlock_bh(&ecm_db_lock);
@@ -8417,7 +8540,9 @@ void ecm_db_iface_add_unknown(struct ecm_db_iface_instance *ii, uint32_t os_spec
 
 	spin_lock_bh(&ecm_db_lock);
 	DEBUG_CHECK_MAGIC(ii, ECM_DB_IFACE_INSTANCE_MAGIC, "%p: magic failed\n", ii);
+#ifdef ECM_DB_XREF_ENABLE
 	DEBUG_ASSERT((ii->nodes == NULL) && (ii->node_count == 0), "%p: nodes not null\n", ii);
+#endif
 	DEBUG_ASSERT(!(ii->flags & ECM_DB_IFACE_FLAGS_INSERTED), "%p: inserted\n", ii);
 	DEBUG_ASSERT(name, "%p: no name given\n", ii);
 	spin_unlock_bh(&ecm_db_lock);
@@ -8514,7 +8639,9 @@ void ecm_db_iface_add_loopback(struct ecm_db_iface_instance *ii, uint32_t os_spe
 
 	spin_lock_bh(&ecm_db_lock);
 	DEBUG_CHECK_MAGIC(ii, ECM_DB_IFACE_INSTANCE_MAGIC, "%p: magic failed\n", ii);
+#ifdef ECM_DB_XREF_ENABLE
 	DEBUG_ASSERT((ii->nodes == NULL) && (ii->node_count == 0), "%p: nodes not null\n", ii);
+#endif
 	DEBUG_ASSERT(!(ii->flags & ECM_DB_IFACE_FLAGS_INSERTED), "%p: inserted\n", ii);
 	DEBUG_ASSERT(name, "%p: no name given\n", ii);
 	spin_unlock_bh(&ecm_db_lock);
@@ -8621,7 +8748,9 @@ void ecm_db_iface_add_sit(struct ecm_db_iface_instance *ii, struct ecm_db_interf
 
 	spin_lock_bh(&ecm_db_lock);
 	DEBUG_CHECK_MAGIC(ii, ECM_DB_IFACE_INSTANCE_MAGIC, "%p: magic failed\n", ii);
+#ifdef ECM_DB_XREF_ENABLE
 	DEBUG_ASSERT((ii->nodes == NULL) && (ii->node_count == 0), "%p: nodes not null\n", ii);
+#endif
 	DEBUG_ASSERT(!(ii->flags & ECM_DB_IFACE_FLAGS_INSERTED), "%p: inserted\n", ii);
 	DEBUG_ASSERT(name, "%p: no name given\n", ii);
 	spin_unlock_bh(&ecm_db_lock);
@@ -8719,7 +8848,9 @@ void ecm_db_iface_add_tunipip6(struct ecm_db_iface_instance *ii, struct ecm_db_i
 
 	spin_lock_bh(&ecm_db_lock);
 	DEBUG_CHECK_MAGIC(ii, ECM_DB_IFACE_INSTANCE_MAGIC, "%p: magic failed\n", ii);
+#ifdef ECM_DB_XREF_ENABLE
 	DEBUG_ASSERT((ii->nodes == NULL) && (ii->node_count == 0), "%p: nodes not null\n", ii);
+#endif
 	DEBUG_ASSERT(!(ii->flags & ECM_DB_IFACE_FLAGS_INSERTED), "%p: inserted\n", ii);
 	DEBUG_ASSERT(name, "%p: no name given\n", ii);
 	spin_unlock_bh(&ecm_db_lock);
@@ -8820,7 +8951,9 @@ void ecm_db_iface_add_ipsec_tunnel(struct ecm_db_iface_instance *ii, uint32_t os
 
 	spin_lock_bh(&ecm_db_lock);
 	DEBUG_CHECK_MAGIC(ii, ECM_DB_IFACE_INSTANCE_MAGIC, "%p: magic failed\n", ii);
+#ifdef ECM_DB_XREF_ENABLE
 	DEBUG_ASSERT((ii->nodes == NULL) && (ii->node_count == 0), "%p: nodes not null\n", ii);
+#endif
 	DEBUG_ASSERT(!(ii->flags & ECM_DB_IFACE_FLAGS_INSERTED), "%p: inserted\n", ii);
 	DEBUG_ASSERT(name, "%p: no name given\n", ii);
 	spin_unlock_bh(&ecm_db_lock);

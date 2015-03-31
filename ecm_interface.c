@@ -2264,10 +2264,18 @@ void ecm_interface_regenerate_connection(struct ecm_db_connection_instance *ci)
  */
 static void ecm_interface_regenerate_connections(struct ecm_db_iface_instance *ii)
 {
+#ifdef ECM_DB_XREF_ENABLE
 	struct ecm_db_connection_instance *ci;
+#endif
 
 	DEBUG_TRACE("Regenerate connections using interface: %p\n", ii);
 
+#ifndef ECM_DB_XREF_ENABLE
+	/*
+	 * An interface has changed, re-generate the connections to ensure all state is updated.
+	 */
+	ecm_db_classifier_generation_change();
+#else
 	/*
 	 * Iterate the connections of this interface and cause each one to be re-generated.
 	 * GGG TODO NOTE: If this proves slow (need metrics here) we could just regenerate the "lot" with one very simple call.
@@ -2321,6 +2329,7 @@ static void ecm_interface_regenerate_connections(struct ecm_db_iface_instance *i
 		ecm_db_connection_deref(ci);
 		ci = cin;
 	}
+#endif
 
 	DEBUG_TRACE("%p: Regenerate COMPLETE\n", ii);
 }
