@@ -1328,7 +1328,11 @@ static ssize_t ecm_classifier_nl_rule_set_enabled(struct device *dev,
 		/*
 		 * Change in state to become disabled.
 		 */
+#ifdef ECM_DB_CTA_TRACK_ENABLE
 		ecm_db_connection_regenerate_by_assignment_type(ECM_CLASSIFIER_TYPE_NL);
+#else
+		ecm_db_classifier_generation_change();
+#endif
 	}
 	return count;
 }

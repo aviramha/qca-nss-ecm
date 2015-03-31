@@ -68,8 +68,10 @@ void ecm_db_connection_classifier_generation_change(struct ecm_db_connection_ins
 bool ecm_db_connection_classifier_generation_changed(struct ecm_db_connection_instance *ci);
 bool ecm_db_connection_classifier_peek_generation_changed(struct ecm_db_connection_instance *ci);
 
+#ifdef ECM_DB_CTA_TRACK_ENABLE
 void ecm_db_connection_regenerate_by_assignment_type(ecm_classifier_type_t ca_type);
 void ecm_db_connection_make_defunct_by_assignment_type(ecm_classifier_type_t ca_type);
+#endif
 
 ecm_db_direction_t ecm_db_connection_direction_get(struct ecm_db_connection_instance *ci);
 
@@ -225,9 +227,11 @@ void ecm_db_connection_classifier_unassign(struct ecm_db_connection_instance *ci
 void ecm_db_connection_assignments_release(int assignment_count, struct ecm_classifier_instance *assignments[]);
 struct ecm_classifier_instance *ecm_db_connection_assigned_classifier_find_and_ref(struct ecm_db_connection_instance *ci, ecm_classifier_type_t type);
 
+#ifdef ECM_DB_CTA_TRACK_ENABLE
 struct ecm_db_connection_instance *ecm_db_connection_by_classifier_type_assignment_get_and_ref_first(ecm_classifier_type_t ca_type);
 struct ecm_db_connection_instance *ecm_db_connection_by_classifier_type_assignment_get_and_ref_next(struct ecm_db_connection_instance *ci, ecm_classifier_type_t ca_type);
 void ecm_db_connection_by_classifier_type_assignment_deref(struct ecm_db_connection_instance *ci, ecm_classifier_type_t ca_type);
+#endif
 
 struct ecm_db_listener_instance *ecm_db_listener_alloc(void);
 struct ecm_db_connection_instance *ecm_db_connection_alloc(void);
