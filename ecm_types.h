@@ -321,6 +321,7 @@ static inline void ecm_ip_addr_to_string(char *str, ip_addr_t a)
 #ifdef ECM_IPV6_ENABLE
 	if (!ECM_IP_ADDR_IS_V4(a)) {
 		sprintf(str, ECM_IP_ADDR_OCTAL_FMT, ECM_IP_ADDR_TO_OCTAL(a));
+		return;
 	}
 #endif
 
