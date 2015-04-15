@@ -2077,14 +2077,22 @@ static void ecm_front_end_ipv6_connection_tcp_front_end_accelerate(struct ecm_fr
 	ecm_db_connection_ref(feci->ci);
 
 	/*
+	 * We are about to issue the command, record the time of transmission
+	 */
+	spin_lock_bh(&feci->lock);
+	feci->stats.cmd_time_begun = jiffies;
+	spin_unlock_bh(&feci->lock);
+
+	/*
 	 * Call the rule create function
 	 */
 	nss_tx_status = nss_ipv6_tx(ecm_front_end_ipv6_nss_ipv6_mgr, &nim);
 	if (nss_tx_status == NSS_TX_SUCCESS) {
+		/*
+		 * Reset the driver_fail count - transmission was okay here.
+		 */
 		spin_lock_bh(&feci->lock);
-		DEBUG_ASSERT(feci->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING, "%p: Accel mode unexpected: %d\n", feci, feci->accel_mode);
-		feci->stats.driver_fail = 0;		/* Reset */
-		feci->stats.cmd_time_begun = jiffies;	/* Capture time we issued the command */
+		feci->stats.driver_fail = 0;
 		spin_unlock_bh(&feci->lock);
 		return;
 	}
@@ -2334,13 +2342,22 @@ static void ecm_front_end_ipv6_connection_tcp_front_end_decelerate(struct ecm_fr
 	ecm_db_connection_ref(feci->ci);
 
 	/*
+	 * We are about to issue the command, record the time of transmission
+	 */
+	spin_lock_bh(&feci->lock);
+	feci->stats.cmd_time_begun = jiffies;
+	spin_unlock_bh(&feci->lock);
+
+	/*
 	 * Destroy the NSS connection cache entry.
 	 */
 	nss_tx_status = nss_ipv6_tx(ecm_front_end_ipv6_nss_ipv6_mgr, &nim);
 	if (nss_tx_status == NSS_TX_SUCCESS) {
+		/*
+		 * Reset the driver_fail count - transmission was okay here.
+		 */
 		spin_lock_bh(&feci->lock);
-		feci->stats.driver_fail = 0;			/* Reset */
-		feci->stats.cmd_time_begun = jiffies;		/* Capture time we issued the command */
+		feci->stats.driver_fail = 0;
 		spin_unlock_bh(&feci->lock);
 		return;
 	}
@@ -3466,14 +3483,22 @@ static void ecm_front_end_ipv6_connection_udp_front_end_accelerate(struct ecm_fr
 	ecm_db_connection_ref(feci->ci);
 
 	/*
+	 * We are about to issue the command, record the time of transmission
+	 */
+	spin_lock_bh(&feci->lock);
+	feci->stats.cmd_time_begun = jiffies;
+	spin_unlock_bh(&feci->lock);
+
+	/*
 	 * Call the rule create function
 	 */
 	nss_tx_status = nss_ipv6_tx(ecm_front_end_ipv6_nss_ipv6_mgr, &nim);
 	if (nss_tx_status == NSS_TX_SUCCESS) {
+		/*
+		 * Reset the driver_fail count - transmission was okay here.
+		 */
 		spin_lock_bh(&feci->lock);
-		DEBUG_ASSERT(feci->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING, "%p: Accel mode unexpected: %d\n", fecui, feci->accel_mode);
-		feci->stats.driver_fail = 0;			/* Reset */
-		feci->stats.cmd_time_begun = jiffies;		/* Capture time we issued the command */
+		feci->stats.driver_fail = 0;
 		spin_unlock_bh(&feci->lock);
 		return;
 	}
@@ -3726,13 +3751,22 @@ static void ecm_front_end_ipv6_connection_udp_front_end_decelerate(struct ecm_fr
 	ecm_db_connection_ref(feci->ci);
 
 	/*
+	 * We are about to issue the command, record the time of transmission
+	 */
+	spin_lock_bh(&feci->lock);
+	feci->stats.cmd_time_begun = jiffies;
+	spin_unlock_bh(&feci->lock);
+
+	/*
 	 * Destroy the NSS connection cache entry.
 	 */
 	nss_tx_status = nss_ipv6_tx(ecm_front_end_ipv6_nss_ipv6_mgr, &nim);
 	if (nss_tx_status == NSS_TX_SUCCESS) {
+		/*
+		 * Reset the driver_fail count - transmission was okay here.
+		 */
 		spin_lock_bh(&feci->lock);
-		feci->stats.driver_fail = 0;			/* Reset */
-		feci->stats.cmd_time_begun = jiffies;		/* Capture time we issued the command */
+		feci->stats.driver_fail = 0;
 		spin_unlock_bh(&feci->lock);
 		return;
 	}
@@ -4873,14 +4907,22 @@ static void ecm_front_end_ipv6_connection_non_ported_front_end_accelerate(struct
 	ecm_db_connection_ref(feci->ci);
 
 	/*
+	 * We are about to issue the command, record the time of transmission
+	 */
+	spin_lock_bh(&feci->lock);
+	feci->stats.cmd_time_begun = jiffies;
+	spin_unlock_bh(&feci->lock);
+
+	/*
 	 * Call the rule create function
 	 */
 	nss_tx_status = nss_ipv6_tx(ecm_front_end_ipv6_nss_ipv6_mgr, &nim);
 	if (nss_tx_status == NSS_TX_SUCCESS) {
+		/*
+		 * Reset the driver_fail count - transmission was okay here.
+		 */
 		spin_lock_bh(&feci->lock);
-		DEBUG_ASSERT(feci->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING, "%p: Accel mode unexpected: %d\n", fecnpi, feci->accel_mode);
-		feci->stats.driver_fail = 0;		/* Reset */
-		feci->stats.cmd_time_begun = jiffies;		/* Capture time we issued the command */
+		feci->stats.driver_fail = 0;
 		spin_unlock_bh(&feci->lock);
 		return;
 	}
@@ -5141,13 +5183,22 @@ static void ecm_front_end_ipv6_connection_non_ported_front_end_decelerate(struct
 	ecm_db_connection_ref(feci->ci);
 
 	/*
+	 * We are about to issue the command, record the time of transmission
+	 */
+	spin_lock_bh(&feci->lock);
+	feci->stats.cmd_time_begun = jiffies;
+	spin_unlock_bh(&feci->lock);
+
+	/*
 	 * Destroy the NSS connection cache entry.
 	 */
 	nss_tx_status = nss_ipv6_tx(ecm_front_end_ipv6_nss_ipv6_mgr, &nim);
 	if (nss_tx_status == NSS_TX_SUCCESS) {
+		/*
+		 * Reset the driver_fail count - transmission was okay here.
+		 */
 		spin_lock_bh(&feci->lock);
-		feci->stats.driver_fail = 0;			/* Reset */
-		feci->stats.cmd_time_begun = jiffies;		/* Capture time we issued the command */
+		feci->stats.driver_fail = 0;
 		spin_unlock_bh(&feci->lock);
 		return;
 	}
