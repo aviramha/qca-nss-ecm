@@ -39,6 +39,7 @@
 #include <linux/in6.h>
 #include <linux/udp.h>
 #include <linux/tcp.h>
+#include <linux/ppp_defs.h>
 
 #include <linux/inetdevice.h>
 #include <linux/if_arp.h>
@@ -92,6 +93,7 @@
 #include "ecm_classifier_dscp.h"
 #endif
 #include "ecm_interface.h"
+#include "ecm_front_end_common.h"
 
 /*
  * Magic numbers
@@ -1433,7 +1435,7 @@ static void ecm_front_end_ipv6_connection_tcp_callback(void *app_data, struct ns
  */
 static void ecm_front_end_ipv6_connection_tcp_front_end_accelerate(struct ecm_front_end_connection_instance *feci,
 									struct ecm_classifier_process_response *pr,
-									struct nf_conn *ct)
+									struct nf_conn *ct, bool is_l2_encap)
 {
 	struct ecm_front_end_ipv6_connection_tcp_instance *fecti = (struct ecm_front_end_ipv6_connection_tcp_instance *)feci;
 	int32_t from_ifaces_first;
@@ -1885,6 +1887,9 @@ static void ecm_front_end_ipv6_connection_tcp_front_end_accelerate(struct ecm_fr
 		nircm->rule_flags |= NSS_IPV6_RULE_CREATE_FLAG_ROUTED;
 	} else {
 		nircm->rule_flags |= NSS_IPV6_RULE_CREATE_FLAG_BRIDGE_FLOW;
+		if (is_l2_encap) {
+			nircm->rule_flags |= NSS_IPV6_RULE_CREATE_FLAG_L2_ENCAP;
+		}
 	}
 
 	/*
@@ -2886,7 +2891,7 @@ static void ecm_front_end_ipv6_connection_udp_callback(void *app_data, struct ns
  * can all use and reduce the amount of code!
  */
 static void ecm_front_end_ipv6_connection_udp_front_end_accelerate(struct ecm_front_end_connection_instance *feci,
-									struct ecm_classifier_process_response *pr)
+									struct ecm_classifier_process_response *pr, bool is_l2_encap)
 {
 	struct ecm_front_end_ipv6_connection_udp_instance *fecui = (struct ecm_front_end_ipv6_connection_udp_instance *)feci;
 	int32_t from_ifaces_first;
@@ -3339,6 +3344,9 @@ static void ecm_front_end_ipv6_connection_udp_front_end_accelerate(struct ecm_fr
 		nircm->rule_flags |= NSS_IPV6_RULE_CREATE_FLAG_ROUTED;
 	} else {
 		nircm->rule_flags |= NSS_IPV6_RULE_CREATE_FLAG_BRIDGE_FLOW;
+		if (is_l2_encap) {
+			nircm->rule_flags |= NSS_IPV6_RULE_CREATE_FLAG_L2_ENCAP;
+		}
 	}
 
 	/*
@@ -4300,7 +4308,7 @@ static void ecm_front_end_ipv6_connection_non_ported_callback(void *app_data, st
  * can all use and reduce the amount of code!
  */
 static void ecm_front_end_ipv6_connection_non_ported_front_end_accelerate(struct ecm_front_end_connection_instance *feci,
-									struct ecm_classifier_process_response *pr)
+									struct ecm_classifier_process_response *pr, bool is_l2_encap)
 {
 	struct ecm_front_end_ipv6_connection_non_ported_instance *fecnpi = (struct ecm_front_end_ipv6_connection_non_ported_instance *)feci;
 	int protocol;
@@ -4765,6 +4773,9 @@ static void ecm_front_end_ipv6_connection_non_ported_front_end_accelerate(struct
 		nircm->rule_flags |= NSS_IPV6_RULE_CREATE_FLAG_ROUTED;
 	} else {
 		nircm->rule_flags |= NSS_IPV6_RULE_CREATE_FLAG_BRIDGE_FLOW;
+		if (is_l2_encap) {
+			nircm->rule_flags |= NSS_IPV6_RULE_CREATE_FLAG_L2_ENCAP;
+		}
 	}
 
 	/*
@@ -5807,7 +5818,7 @@ static unsigned int ecm_front_end_ipv6_tcp_process(struct net_device *out_dev,
 							struct net_device *in_dev,
 							uint8_t *src_node_addr,
 							uint8_t *dest_node_addr,
-							bool can_accel,  bool is_routed, struct sk_buff *skb,
+							bool can_accel,  bool is_routed, bool is_l2_encap, struct sk_buff *skb,
 							struct ecm_tracker_ip_header *iph,
 							struct nf_conn *ct, ecm_tracker_sender_type_t sender, ecm_db_direction_t ecm_dir,
 							struct nf_conntrack_tuple *orig_tuple, struct nf_conntrack_tuple *reply_tuple,
@@ -6315,7 +6326,7 @@ static unsigned int ecm_front_end_ipv6_tcp_process(struct net_device *out_dev,
 		struct ecm_front_end_connection_instance *feci;
 		DEBUG_TRACE("%p: accel\n", ci);
 		feci = ecm_db_connection_front_end_get_and_ref(ci);
-		ecm_front_end_ipv6_connection_tcp_front_end_accelerate(feci, &prevalent_pr, ct);
+		ecm_front_end_ipv6_connection_tcp_front_end_accelerate(feci, &prevalent_pr, ct, is_l2_encap);
 		feci->deref(feci);
 	}
 	ecm_db_connection_deref(ci);
@@ -6331,7 +6342,7 @@ static unsigned int ecm_front_end_ipv6_udp_process(struct net_device *out_dev,
 							struct net_device *in_dev,
 							uint8_t *src_node_addr,
 							uint8_t *dest_node_addr,
-							bool can_accel, bool is_routed, struct sk_buff *skb,
+							bool can_accel, bool is_routed, bool is_l2_encap, struct sk_buff *skb,
 							struct ecm_tracker_ip_header *iph,
 							struct nf_conn *ct, ecm_tracker_sender_type_t sender, ecm_db_direction_t ecm_dir,
 							struct nf_conntrack_tuple *orig_tuple, struct nf_conntrack_tuple *reply_tuple,
@@ -6842,7 +6853,7 @@ static unsigned int ecm_front_end_ipv6_udp_process(struct net_device *out_dev,
 		struct ecm_front_end_connection_instance *feci;
 		DEBUG_TRACE("%p: accel\n", ci);
 		feci = ecm_db_connection_front_end_get_and_ref(ci);
-		ecm_front_end_ipv6_connection_udp_front_end_accelerate(feci, &prevalent_pr);
+		ecm_front_end_ipv6_connection_udp_front_end_accelerate(feci, &prevalent_pr, is_l2_encap);
 		feci->deref(feci);
 	}
 	ecm_db_connection_deref(ci);
@@ -6858,7 +6869,7 @@ static unsigned int ecm_front_end_ipv6_non_ported_process(struct net_device *out
 							struct net_device *in_dev,
 							uint8_t *src_node_addr,
 							uint8_t *dest_node_addr,
-							bool can_accel, bool is_routed, struct sk_buff *skb,
+							bool can_accel, bool is_routed, bool is_l2_encap, struct sk_buff *skb,
 							struct ecm_tracker_ip_header *ip_hdr,
 							struct nf_conn *ct, ecm_tracker_sender_type_t sender, ecm_db_direction_t ecm_dir,
 							struct nf_conntrack_tuple *orig_tuple, struct nf_conntrack_tuple *reply_tuple,
@@ -7325,7 +7336,7 @@ static unsigned int ecm_front_end_ipv6_non_ported_process(struct net_device *out
 		struct ecm_front_end_connection_instance *feci;
 		DEBUG_TRACE("%p: accel\n", ci);
 		feci = ecm_db_connection_front_end_get_and_ref(ci);
-		ecm_front_end_ipv6_connection_non_ported_front_end_accelerate(feci, &prevalent_pr);
+		ecm_front_end_ipv6_connection_non_ported_front_end_accelerate(feci, &prevalent_pr, is_l2_encap);
 		feci->deref(feci);
 	}
 	ecm_db_connection_deref(ci);
@@ -7339,7 +7350,8 @@ static unsigned int ecm_front_end_ipv6_non_ported_process(struct net_device *out
  */
 static unsigned int ecm_front_end_ipv6_ip_process(struct net_device *out_dev, struct net_device *in_dev,
 							uint8_t *src_node_addr, uint8_t *dest_node_addr,
-							bool can_accel, bool is_routed, struct sk_buff *skb)
+							bool can_accel, bool is_routed, bool is_l2_encap,
+							struct sk_buff *skb)
 {
 	struct ecm_tracker_ip_header ip_hdr;
         struct nf_conn *ct;
@@ -7484,7 +7496,7 @@ static unsigned int ecm_front_end_ipv6_ip_process(struct net_device *out_dev, st
 		return ecm_front_end_ipv6_tcp_process(out_dev, in_dev,
 				src_node_addr,
 				dest_node_addr,
-				can_accel, is_routed, skb,
+				can_accel, is_routed, is_l2_encap, skb,
 				&ip_hdr,
 				ct, sender, ecm_dir,
 				&orig_tuple, &reply_tuple,
@@ -7493,7 +7505,7 @@ static unsigned int ecm_front_end_ipv6_ip_process(struct net_device *out_dev, st
 		return ecm_front_end_ipv6_udp_process(out_dev, in_dev,
 				src_node_addr,
 				dest_node_addr,
-				can_accel, is_routed, skb,
+				can_accel, is_routed, is_l2_encap, skb,
 				&ip_hdr,
 				ct, sender, ecm_dir,
 				&orig_tuple, &reply_tuple,
@@ -7502,7 +7514,7 @@ static unsigned int ecm_front_end_ipv6_ip_process(struct net_device *out_dev, st
 	return ecm_front_end_ipv6_non_ported_process(out_dev, in_dev,
 				src_node_addr,
 				dest_node_addr,
-				can_accel, is_routed, skb,
+				can_accel, is_routed, is_l2_encap, skb,
 				&ip_hdr,
 				ct, sender, ecm_dir,
 				&orig_tuple, &reply_tuple,
@@ -7578,10 +7590,46 @@ static unsigned int ecm_front_end_ipv6_post_routing_hook(const struct nf_hook_op
 	}
 
 	DEBUG_TRACE("Post routing process skb %p, out: %p, in: %p\n", skb, out, in);
-	result = ecm_front_end_ipv6_ip_process((struct net_device *)out, in, NULL, NULL, can_accel, true, skb);
+	result = ecm_front_end_ipv6_ip_process((struct net_device *)out, in, NULL, NULL, can_accel, true, false, skb);
 	dev_put(in);
 	return result;
 }
+
+/*
+ * ecm_front_end_ipv6_pppoe_bridge_process()
+ *	Called for PPPoE session packets that are going
+ *	out to one of the bridge physical interfaces.
+ */
+static unsigned int ecm_front_end_ipv6_pppoe_bridge_process(struct net_device *out,
+						     struct net_device *in,
+						     struct ethhdr *skb_eth_hdr,
+						     bool can_accel,
+						     struct sk_buff *skb)
+{
+	unsigned int result = NF_ACCEPT;
+	struct pppoe_hdr *ph = pppoe_hdr(skb);
+	uint16_t ppp_proto = *(uint16_t *)ph->tag;
+	uint32_t encap_header_len = 0;
+
+	ppp_proto = ntohs(ppp_proto);
+	if (ppp_proto != PPP_IPV6) {
+		return NF_ACCEPT;
+	}
+
+	encap_header_len = ecm_front_end_l2_encap_header_len(skb);
+	ecm_front_end_pull_l2_encap_header(skb, encap_header_len);
+	skb->protocol = htons(ETH_P_IPV6);
+
+	result = ecm_front_end_ipv6_ip_process(out, in, skb_eth_hdr->h_source,
+					       skb_eth_hdr->h_dest, can_accel,
+					       false, true, skb);
+
+	 ecm_front_end_push_l2_encap_header(skb, encap_header_len);
+	skb->protocol = htons(ETH_P_PPP_SES);
+
+	return result;
+}
+
 
 /*
  * ecm_front_end_ipv6_bridge_post_routing_hook()
@@ -7655,8 +7703,8 @@ static unsigned int ecm_front_end_ipv6_bridge_post_routing_hook(const struct nf_
 		return NF_ACCEPT;
 	}
 	eth_type = ntohs(skb_eth_hdr->h_proto);
-	if (unlikely(eth_type != 0x86DD)) {
-		DEBUG_TRACE("%p: Not IP\n", skb);
+	if (unlikely((eth_type != 0x86DD) && (eth_type != ETH_P_PPP_SES))) {
+		DEBUG_TRACE("%p: Not IP/PPPoE session\n", skb);
 		return NF_ACCEPT;
 	}
 
@@ -7733,8 +7781,17 @@ static unsigned int ecm_front_end_ipv6_bridge_post_routing_hook(const struct nf_
 
 	DEBUG_TRACE("Bridge process skb: %p, bridge: %p (%s), In: %p (%s), Out: %p (%s)\n",
 			skb, bridge, bridge->name, in, in->name, out, out->name);
+
+	if (unlikely(eth_type != 0x86DD)) {
+		result = ecm_front_end_ipv6_pppoe_bridge_process((struct net_device *)out, in, skb_eth_hdr, can_accel, skb);
+		dev_put(in);
+		dev_put(bridge);
+		return result;
+	}
+
 	result = ecm_front_end_ipv6_ip_process((struct net_device *)out, in,
-							skb_eth_hdr->h_source, skb_eth_hdr->h_dest, can_accel, false, skb);
+							skb_eth_hdr->h_source, skb_eth_hdr->h_dest, can_accel, false, false, skb);
+
 	dev_put(in);
 	dev_put(bridge);
 	return result;

@@ -323,7 +323,7 @@ static void ecm_nss_ported_ipv4_connection_callback(void *app_data, struct nss_i
  * can all use and reduce the amount of code!
  */
 static void ecm_nss_ported_ipv4_connection_accelerate(struct ecm_front_end_connection_instance *feci,
-									struct ecm_classifier_process_response *pr,
+									struct ecm_classifier_process_response *pr, bool is_l2_encap,
 									struct nf_conn *ct)
 {
 	struct ecm_nss_ported_ipv4_connection_instance *npci = (struct ecm_nss_ported_ipv4_connection_instance *)feci;
@@ -776,6 +776,9 @@ static void ecm_nss_ported_ipv4_connection_accelerate(struct ecm_front_end_conne
 		nircm->rule_flags |= NSS_IPV4_RULE_CREATE_FLAG_ROUTED;
 	} else {
 		nircm->rule_flags |= NSS_IPV4_RULE_CREATE_FLAG_BRIDGE_FLOW;
+		if (is_l2_encap) {
+			nircm->rule_flags |= NSS_IPV4_RULE_CREATE_FLAG_L2_ENCAP;
+		}
 	}
 
 	/*
@@ -1031,7 +1034,7 @@ static void ecm_nss_ported_ipv4_connection_accelerate(struct ecm_front_end_conne
 			nircm->tcp_rule.return_end,
 			nircm->tcp_rule.return_max_end);
 	}
-		
+
 	/*
 	 * Ref the connection before issuing an NSS rule
 	 * This ensures that when the NSS responds to the command - which may even be immediately -
@@ -1651,7 +1654,7 @@ static struct ecm_nss_ported_ipv4_connection_instance *ecm_nss_ported_ipv4_conne
 		DEBUG_CLEAR_MAGIC(npci);
 		kfree(npci);
 		return NULL;
-	}		
+	}
 
 	return npci;
 }
@@ -1664,11 +1667,11 @@ unsigned int ecm_nss_ported_ipv4_process(struct net_device *out_dev, struct net_
 							struct net_device *in_dev, struct net_device *in_dev_nat,
 							uint8_t *src_node_addr, uint8_t *src_node_addr_nat,
 							uint8_t *dest_node_addr, uint8_t *dest_node_addr_nat,
-							bool can_accel, bool is_routed, struct sk_buff *skb,
+							bool can_accel, bool is_routed, bool is_l2_encap, struct sk_buff *skb,
 							struct ecm_tracker_ip_header *iph,
 							struct nf_conn *ct, ecm_tracker_sender_type_t sender, ecm_db_direction_t ecm_dir,
 							struct nf_conntrack_tuple *orig_tuple, struct nf_conntrack_tuple *reply_tuple,
-							ip_addr_t ip_src_addr, ip_addr_t ip_dest_addr, 
+							ip_addr_t ip_src_addr, ip_addr_t ip_dest_addr,
 							ip_addr_t ip_src_addr_nat, ip_addr_t ip_dest_addr_nat)
 {
 	struct tcphdr *tcp_hdr;
@@ -2381,7 +2384,7 @@ unsigned int ecm_nss_ported_ipv4_process(struct net_device *out_dev, struct net_
 		struct ecm_front_end_connection_instance *feci;
 		DEBUG_TRACE("%p: accel\n", ci);
 		feci = ecm_db_connection_front_end_get_and_ref(ci);
-		ecm_nss_ported_ipv4_connection_accelerate(feci, &prevalent_pr, ct);
+		ecm_nss_ported_ipv4_connection_accelerate(feci, &prevalent_pr, is_l2_encap, ct);
 		feci->deref(feci);
 	}
 	ecm_db_connection_deref(ci);
