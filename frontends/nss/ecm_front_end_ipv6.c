@@ -7319,14 +7319,11 @@ static unsigned int ecm_front_end_ipv6_ip_process(struct net_device *out_dev, st
         ct = nf_ct_get(skb, &ctinfo);
 	if (unlikely(!ct)) {
 		DEBUG_TRACE("%p: no ct\n", skb);
-		/*
-		 * TODO: ECM_IP_ADDR_COPY() can be used to copy an array with size of four 4-bytes integers.
-		 */
-		ECM_IP_ADDR_COPY(orig_tuple.src.u3.in6.in6_u.u6_addr32, ip_hdr.h.v6_hdr.saddr.in6_u.u6_addr32);
-		ECM_IP_ADDR_COPY(orig_tuple.dst.u3.in6.in6_u.u6_addr32, ip_hdr.h.v6_hdr.daddr.in6_u.u6_addr32);
+		ECM_IP_ADDR_TO_NIN6_ADDR(orig_tuple.src.u3.in6, ip_hdr.src_addr);
+		ECM_IP_ADDR_TO_NIN6_ADDR(orig_tuple.dst.u3.in6, ip_hdr.dest_addr);
 		orig_tuple.dst.protonum = ip_hdr.protocol;
-		ECM_IP_ADDR_COPY(reply_tuple.src.u3.in6.in6_u.u6_addr32, orig_tuple.dst.u3.in6.in6_u.u6_addr32);
-		ECM_IP_ADDR_COPY(reply_tuple.dst.u3.in6.in6_u.u6_addr32, orig_tuple.src.u3.in6.in6_u.u6_addr32);
+		ECM_IP_ADDR_TO_NIN6_ADDR(reply_tuple.src.u3.in6, ip_hdr.dest_addr);
+		ECM_IP_ADDR_TO_NIN6_ADDR(reply_tuple.dst.u3.in6, ip_hdr.src_addr);
 		sender = ECM_TRACKER_SENDER_TYPE_SRC;
 	} else {
 		if (unlikely(ct == &nf_conntrack_untracked)) {

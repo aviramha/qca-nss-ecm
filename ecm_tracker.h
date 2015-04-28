@@ -126,8 +126,9 @@ struct ecm_tracker_ip_protocol_header {
 struct ecm_tracker_ip_header {
 	/*
 	 * h is a union of IP version headers.
-	 * This only works as far as the version field goes, but that's enough to know what we are dealing with.
-	 * These are also used as buffers where skn_header_pointer() needs them to perform a skb_copy_bits() operation.
+	 * These are ONLY used as buffers where skb_header_pointer() needs them to perform a skb_copy_bits() operation.
+	 * WARNING: You should NOT rely on the content of these structures because skb_header_pointer() may not have used them!
+	 * Use the actual fields below instead.
 	 */
 	union {
 		struct iphdr v4_hdr;
@@ -136,7 +137,7 @@ struct ecm_tracker_ip_header {
 #endif
 	} h;
 
-	struct sk_buff *skb;		/* COPY of POINTER to the skb this header relates to.  This ecm_ip_header is ONLY VALID for as long as the skb it relates to remains UNTOUCHED */
+	struct sk_buff *skb;		/* COPY of POINTER to the skb this header relates to.  This ecm_tracker_ip_header is ONLY VALID for as long as the skb it relates to remains UNTOUCHED */
 	bool is_v4;			/* True when v4, else v6 */
 	ip_addr_t src_addr;		/* ECM ip address equivalent */
 	ip_addr_t dest_addr;		/* ECM ip address equivalent */
