@@ -844,8 +844,8 @@ static unsigned int ecm_nss_ipv4_ip_process(struct net_device *out_dev, struct n
         ct = nf_ct_get(skb, &ctinfo);
 	if (unlikely(!ct)) {
 		DEBUG_TRACE("%p: no ct\n", skb);
-		orig_tuple.src.u3.ip = ip_hdr.h.v4_hdr.saddr;
-		orig_tuple.dst.u3.ip = ip_hdr.h.v4_hdr.daddr;
+		ECM_IP_ADDR_TO_NIN4_ADDR(orig_tuple.src.u3.ip, ip_hdr.src_addr);
+		ECM_IP_ADDR_TO_NIN4_ADDR(orig_tuple.dst.u3.ip, ip_hdr.dest_addr);
 		orig_tuple.dst.protonum = ip_hdr.protocol;
 		reply_tuple.src.u3.ip = orig_tuple.dst.u3.ip;
 		reply_tuple.dst.u3.ip = orig_tuple.src.u3.ip;
