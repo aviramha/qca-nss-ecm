@@ -81,6 +81,10 @@
 
 #include <nss_api_if.h>
 
+#ifdef ECM_MULTICAST_ENABLE
+#include <mc_ecm.h>
+#endif
+
 #include "ecm_types.h"
 #include "ecm_db_types.h"
 #include "ecm_state.h"
@@ -473,6 +477,35 @@ bool ecm_interface_mac_addr_get(ip_addr_t addr, uint8_t *mac_addr, bool *on_link
 #endif
 }
 EXPORT_SYMBOL(ecm_interface_mac_addr_get);
+
+#ifdef ECM_MULTICAST_ENABLE
+/*
+ * ecm_interface_multicast_check_for_br_dev()
+ * 	Find a bridge dev is present or not in an
+ * 	array of Ifindexs
+ */
+bool ecm_interface_multicast_check_for_br_dev(uint32_t dest_if[], uint8_t max_if)
+{
+	struct net_device *br_dev;
+	int i;
+
+	for (i = 0; i < max_if; i++) {
+		br_dev = dev_get_by_index(&init_net, dest_if[i]);
+		if (!br_dev) {
+			DEBUG_ASSERT(NULL, "expected only valid netdev here\n");
+			continue;
+		}
+
+		if (ecm_front_end_is_bridge_device(br_dev)) {
+			dev_put(br_dev);
+			return true;
+		}
+		dev_put(br_dev);
+	}
+	return false;
+}
+EXPORT_SYMBOL(ecm_interface_multicast_check_for_br_dev);
+#endif
 
 /*
  * ecm_interface_addr_find_route_by_addr_ipv4()
@@ -1481,6 +1514,661 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct net_device 
 }
 EXPORT_SYMBOL(ecm_interface_establish_and_ref);
 
+#ifdef ECM_MULTICAST_ENABLE
+/*
+ * ecm_interface_multicast_heirarchy_construct_single()
+ * 	Create and return an interface heirarchy for a single interface for a multicast connection
+ *
+ * 	src_addr	IP source address
+ * 	dest_addr	IP Destination address/Group Address
+ * 	interface	Pointer to a single multicast interface heirarchy
+ *	given_dest_dev	Netdev pointer for destination interface
+ *	br_slave_dev	Netdev pointer to a bridge slave device. It could be NULL in case of pure
+ *			routed flow without any bridge interface in destination dev list.
+ */
+static uint32_t ecm_interface_multicast_heirarchy_construct_single(ip_addr_t src_addr, ip_addr_t dest_addr,
+							    struct ecm_db_iface_instance *interface, struct net_device *given_dest_dev,
+							    struct net_device *br_slave_dev)
+{
+	struct ecm_db_iface_instance *to_list_single[ECM_DB_IFACE_HEIRARCHY_MAX];
+	struct ecm_db_iface_instance **ifaces;
+	struct ecm_db_iface_instance *ii_temp;
+	struct net_device *dest_dev;
+	int32_t current_interface_index;
+	int32_t interfaces_cnt = 0;
+        int32_t dest_dev_type;
+
+	dest_dev = given_dest_dev;
+	dev_hold(dest_dev);
+	dest_dev_type = dest_dev->type;
+	current_interface_index = ECM_DB_IFACE_HEIRARCHY_MAX;
+
+	while (current_interface_index > 0) {
+		struct ecm_db_iface_instance *ii;
+		struct net_device *next_dev;
+
+		/*
+		 * Get the ecm db interface instance for the device at hand
+		 */
+		ii = ecm_interface_establish_and_ref(dest_dev);
+		interfaces_cnt++;
+
+		/*
+		 * If the interface could not be established then we abort
+		 */
+		if (!ii) {
+			DEBUG_WARN("Failed to establish interface: %p, name: %s\n", dest_dev, dest_dev->name);
+			dev_put(dest_dev);
+
+			/*
+			 * Release the interfaces heirarchy we constructed to this point.
+			 */
+			ecm_db_multicast_copy_if_heirarchy(to_list_single, interface);
+			ecm_db_connection_interfaces_deref(to_list_single, current_interface_index);
+			return ECM_DB_IFACE_HEIRARCHY_MAX;
+		}
+
+		/*
+		 * Record the interface instance into the *ifaces
+		 */
+		current_interface_index--;
+		ii_temp = ecm_db_multicast_if_instance_get_at_index(interface, current_interface_index);
+		ifaces = (struct ecm_db_iface_instance **)ii_temp;
+		*ifaces = ii;
+
+		/*
+		 * Now we have to figure out what the next device will be (in the transmission path)
+		 */
+		do {
+#ifdef ECM_INTERFACE_PPP_SUPPORT
+			int channel_count;
+			struct ppp_channel *ppp_chan[1];
+			int channel_protocol;
+			struct pppoe_opt addressing;
+#endif
+			DEBUG_TRACE("Net device: %p is type: %d, name: %s\n", dest_dev, dest_dev_type, dest_dev->name);
+			next_dev = NULL;
+
+			if (dest_dev_type == ARPHRD_ETHER) {
+				/*
+				 * Ethernet - but what sub type?
+				 */
+
+				/*
+				 * VLAN?
+				 */
+				if (is_vlan_dev(dest_dev)) {
+					/*
+					 * VLAN master
+					 * No locking needed here, ASSUMPTION is that real_dev is held for as long as we have dev.
+					 */
+					next_dev = vlan_dev_real_dev(dest_dev);
+					dev_hold(next_dev);
+					DEBUG_TRACE("Net device: %p is VLAN, slave dev: %p (%s)\n",
+							dest_dev, next_dev, next_dev->name);
+					break;
+				}
+
+				/*
+				 * BRIDGE?
+				 */
+				if (ecm_front_end_is_bridge_device(dest_dev)) {
+					if (!ecm_front_end_is_bridge_port(br_slave_dev)) {
+						DEBUG_ASSERT(NULL, "%p: expected only bridge slave here\n", interface);
+
+						/*
+						 * Release the interfaces heirarchy we constructed to this point.
+						 */
+						ecm_db_multicast_copy_if_heirarchy(to_list_single, interface);
+						ecm_db_connection_interfaces_deref(to_list_single, current_interface_index);
+						dev_put(dest_dev);
+						return ECM_DB_IFACE_HEIRARCHY_MAX;
+					}
+
+					next_dev = br_slave_dev;
+					if (!next_dev) {
+						DEBUG_WARN("Unable to obtain output port \n");
+
+						/*
+						 * Release the interfaces heirarchy we constructed to this point.
+						 */
+						ecm_db_multicast_copy_if_heirarchy(to_list_single, interface);
+						ecm_db_connection_interfaces_deref(to_list_single, current_interface_index);
+						dev_put(dest_dev);
+						return ECM_DB_IFACE_HEIRARCHY_MAX;
+					}
+					DEBUG_TRACE("Net device: %p is BRIDGE, next_dev: %p (%s)\n", dest_dev, next_dev, next_dev->name);
+					dev_hold(next_dev);
+					break;
+				}
+
+ #ifdef ECM_INTERFACE_BOND_ENABLE
+				/*
+				 * LAG?
+				 */
+				if (ecm_front_end_is_lag_master(dest_dev)) {
+					/*
+					 * Link aggregation
+					 * Figure out which slave device of the link aggregation will be used to reach the destination.
+					 */
+					uint32_t src_addr_32 = 0;
+					uint32_t dest_addr_32 = 0;
+					uint8_t src_mac_addr[ETH_ALEN];
+					uint8_t dest_mac_addr[ETH_ALEN];
+
+					memset(src_mac_addr, 0, ETH_ALEN);
+					memset(dest_mac_addr, 0, ETH_ALEN);
+
+					ECM_IP_ADDR_TO_NIN4_ADDR(src_addr_32, src_addr);
+					ECM_IP_ADDR_TO_NIN4_ADDR(dest_addr_32, dest_addr);
+
+					/*
+					 * Use appropriate source MAC address for routed packets
+					 */
+					if (dest_dev->master) {
+						memcpy(src_mac_addr, dest_dev->master->dev_addr, ETH_ALEN);
+					} else {
+						memcpy(src_mac_addr, dest_dev->dev_addr, ETH_ALEN);
+					}
+
+					/*
+					 * Create Destination MAC address using IP multicast destination address
+					 */
+					ecm_translate_multicast_mac(dest_addr, dest_mac_addr);
+
+					next_dev = bond_get_tx_dev(NULL, src_mac_addr, dest_mac_addr,
+								   &src_addr_32, &dest_addr_32,
+								   htons((uint16_t)ETH_P_IP), dest_dev);
+					if (!(next_dev && netif_carrier_ok(next_dev))) {
+						DEBUG_WARN("Unable to obtain LAG output slave device\n");
+						dev_put(dest_dev);
+
+						/*
+						 * Release the interfaces heirarchy we constructed to this point.
+						 */
+						ecm_db_multicast_copy_if_heirarchy(to_list_single, interface);
+						ecm_db_connection_interfaces_deref(to_list_single, current_interface_index);
+						return ECM_DB_IFACE_HEIRARCHY_MAX;
+					}
+
+					dev_hold(next_dev);
+					DEBUG_TRACE("Net device: %p is LAG, slave dev: %p (%s)\n", dest_dev, next_dev, next_dev->name);
+					break;
+				}
+#endif
+
+				/*
+				 * ETHERNET!
+				 * Just plain ethernet it seems.
+				 */
+				DEBUG_TRACE("Net device: %p is ETHERNET\n", dest_dev);
+				break;
+			}
+
+			/*
+			 * LOOPBACK?
+			 */
+			if (dest_dev_type == ARPHRD_LOOPBACK) {
+				DEBUG_TRACE("Net device: %p is LOOPBACK type: %d\n", dest_dev, dest_dev_type);
+				break;
+			}
+
+			/*
+			 * IPSEC?
+			 */
+			if (dest_dev_type == ECM_ARPHRD_IPSEC_TUNNEL_TYPE) {
+				DEBUG_TRACE("Net device: %p is IPSec tunnel type: %d\n", dest_dev, dest_dev_type);
+				/*
+				 * TODO Figure out the next device the tunnel is using...
+				 */
+				break;
+			}
+
+			/*
+			 * SIT (6-in-4)?
+			 */
+			if (dest_dev_type == ARPHRD_SIT) {
+				DEBUG_TRACE("Net device: %p is SIT (6-in-4) type: %d\n", dest_dev, dest_dev_type);
+				/*
+				 * TODO Figure out the next device the tunnel is using...
+				 */
+				break;
+			}
+
+			/*
+			 * IPIP6 Tunnel?
+			 */
+			if (dest_dev_type == ARPHRD_TUNNEL6) {
+				DEBUG_TRACE("Net device: %p is TUNIPIP6 type: %d\n", dest_dev, dest_dev_type);
+				/*
+				 * TODO Figure out the next device the tunnel is using...
+				 */
+				break;
+			}
+
+			/*
+			 * If this is NOT PPP then it is unknown to the ecm and we cannot figure out it's next device.
+			 */
+			if (dest_dev_type != ARPHRD_PPP) {
+				DEBUG_TRACE("Net device: %p is UNKNOWN type: %d\n", dest_dev, dest_dev_type);
+				break;
+			}
+
+#ifndef ECM_INTERFACE_PPP_SUPPORT
+			DEBUG_TRACE("Net device: %p is UNKNOWN (PPP Unsupported) type: %d\n", dest_dev, dest_dev_type);
+#else
+			/*
+			 * PPP - but what is the channel type?
+			 * First: If this is multi-link then we do not support it
+			 */
+			if (ppp_is_multilink(dest_dev) > 0) {
+				DEBUG_TRACE("Net device: %p is MULTILINK PPP - Unknown to the ECM\n", dest_dev);
+				break;
+			}
+
+			DEBUG_TRACE("Net device: %p is PPP\n", dest_dev);
+
+			/*
+			 * Get the PPP channel and then enquire what kind of channel it is
+			 * NOTE: Not multilink so only one channel to get.
+			 */
+			channel_count = ppp_hold_channels(dest_dev, ppp_chan, 1);
+			if (channel_count != 1) {
+				DEBUG_TRACE("Net device: %p PPP has %d channels - Unknown to the ECM\n",
+						dest_dev, channel_count);
+				break;
+			}
+
+			/*
+			 * Get channel protocol type
+			 * NOTE: Not all PPP channels support channel specific methods.
+			 */
+			channel_protocol = ppp_channel_get_protocol(ppp_chan[0]);
+			if (channel_protocol != PX_PROTO_OE) {
+				DEBUG_TRACE("Net device: %p PPP channel protocol: %d - Unknown to the ECM\n",
+						dest_dev, channel_protocol);
+
+				/*
+				 * Release the channel
+				 */
+				ppp_release_channels(ppp_chan, 1);
+
+				break;
+			}
+
+			/*
+			 * PPPoE channel
+			 */
+			DEBUG_TRACE("Net device: %p PPP channel is PPPoE\n", dest_dev);
+
+			/*
+			 * Get PPPoE session information and the underlying device it is using.
+			 */
+			pppoe_channel_addressing_get(ppp_chan[0], &addressing);
+
+			/*
+			 * Copy the dev hold into this, we will release the hold later
+			 */
+			next_dev = addressing.dev;
+
+
+			/*
+			 * Release the channel.  Note that next_dev is still (correctly) held.
+			 */
+			ppp_release_channels(ppp_chan, 1);
+#endif
+		} while (false);
+
+		/*
+		 * No longer need dest_dev as it may become next_dev
+		 */
+		dev_put(dest_dev);
+
+		/*
+		 * Check out the next_dev, if any
+		 */
+		if (!next_dev) {
+			int32_t i __attribute__((unused));
+			DEBUG_INFO("Completed interface heirarchy construct with first interface @: %d\n", current_interface_index);
+#if DEBUG_LEVEL > 1
+			ecm_db_multicast_copy_if_heirarchy(to_list_single, interface);
+			for (i = current_interface_index; i < ECM_DB_IFACE_HEIRARCHY_MAX; ++i) {
+				DEBUG_TRACE("\tInterface @ %d: %p, type: %d, name: %s\n", \
+						i, to_list_single[i], ecm_db_connection_iface_type_get(to_list_single[i]), \
+						ecm_db_interface_type_to_string(ecm_db_connection_iface_type_get(to_list_single[i])));
+			}
+#endif
+			return current_interface_index;
+		}
+
+		/*
+		 * dest_dev becomes next_dev
+		 */
+		dest_dev = next_dev;
+		dest_dev_type = dest_dev->type;
+	}
+
+	dev_put(dest_dev);
+
+	ecm_db_multicast_copy_if_heirarchy(to_list_single, interface);
+	ecm_db_connection_interfaces_deref(to_list_single, current_interface_index);
+	return ECM_DB_IFACE_HEIRARCHY_MAX;
+}
+
+/*
+ * ecm_interface_multicast_heirarchy_construct_routed()
+ * 	Create destination interface heirarchy for a routed multicast connectiona
+ *
+ *	interfaces	Pointer to the 2-D array of multicast interface heirarchies
+ *	in_dev		Pointer to the source netdev
+ *	packet_src_addr	Source IP of the multicast flow
+ *	packet_dest_addr Group(dest) IP of the multicast flow
+ *	max_dst		Maximum number of netdev joined the multicast group
+ *	dst_if_index_base An array of if index joined the multicast group
+ *	interface_first_base An array of the index of the first interface in the list
+ */
+int32_t ecm_interface_multicast_heirarchy_construct_routed(struct ecm_db_iface_instance *interfaces, struct net_device *in_dev,
+			ip_addr_t packet_src_addr, ip_addr_t packet_dest_addr, uint8_t max_if, uint32_t *dst_if_index_base, uint32_t *interface_first_base)
+{
+	struct ecm_db_iface_instance *to_list_single[ECM_DB_IFACE_HEIRARCHY_MAX];
+	struct ecm_db_iface_instance *ifaces;
+	struct net_device *dest_dev = NULL;
+	struct net_device *br_dev_src = NULL;
+	uint32_t *dst_if_index;
+	uint32_t *interface_first;
+	uint32_t br_if;
+	uint32_t valid_if;
+        uint32_t if_num;
+	int32_t dest_dev_type;
+	int if_index;
+	int ii_cnt;
+	int total_ii_count = 0;
+	bool src_dev_is_bridge = false;
+
+	DEBUG_TRACE("Construct interface heirarchy for dest_addr: " ECM_IP_ADDR_DOT_FMT " src_addr: " ECM_IP_ADDR_DOT_FMT "total destination ifs %d\n",
+			ECM_IP_ADDR_TO_DOT(packet_dest_addr), ECM_IP_ADDR_TO_DOT(packet_src_addr), max_if);
+
+	/*
+	 * Check if the source net_dev is a bridge slave.
+	 */
+	if (in_dev) {
+		if (ecm_front_end_is_bridge_port(in_dev)) {
+			src_dev_is_bridge = true;
+			br_dev_src = in_dev->master;
+
+			/*
+	 		 * The source net_dev found as bridge slave. In case of routed interface
+			 * heirarchy MFC is not aware of any other bridge slave has joined the same
+			 * multicast group as a destination interface. Therfore we assume there
+			 * are bridge slaves present in multicast destination interface list
+			 * and increase the max_if by one.
+			 */
+			max_if++;
+		}
+	}
+
+	ii_cnt = 0;
+	br_if = if_num = 0;
+
+	/*
+	 * This loop is for creating the destination interface hierarchy list.
+	 * We take the destination interface array we got from MFC (in form of ifindex array)
+	 * as input for this.
+	 */
+	for (if_index = 0, valid_if = 0; if_index < max_if; if_index++) {
+		dst_if_index = ecm_db_multicast_if_first_get_at_index(dst_if_index_base, if_index);
+
+		if (*dst_if_index == ECM_INTERFACE_LOOPBACK_DEV_INDEX) {
+			continue;
+		}
+
+		dest_dev = dev_get_by_index(&init_net, *dst_if_index);
+		if (!dest_dev) {
+			if (!src_dev_is_bridge) {
+				int i;
+
+				/*
+				 * If already constructed any interface heirarchies before hitting
+				 * this error condition then Deref all interface heirarchies.
+				 */
+				if (valid_if > 0) {
+					for (i = 0; i < valid_if; i++) {
+						ifaces = ecm_db_multicast_if_heirarchy_get(interfaces, i);
+						ecm_db_multicast_copy_if_heirarchy(to_list_single, ifaces);
+						ecm_db_connection_interfaces_deref(to_list_single, interface_first_base[i]);
+					}
+				}
+
+				/*
+				 * If valid netdev not found, Return 0
+				 */
+				return 0;
+			}
+			dest_dev = br_dev_src;
+			dev_hold(dest_dev);
+		}
+
+		dest_dev_type = dest_dev->type;
+
+		if (ecm_front_end_is_bridge_device(dest_dev)) {
+			struct net_device *mc_br_slave_dev = NULL;
+			uint32_t mc_max_dst = ECM_DB_MULTICAST_IF_MAX;
+			uint32_t mc_dst_if_index[ECM_DB_MULTICAST_IF_MAX];
+
+			if (ECM_IP_ADDR_IS_V4(packet_src_addr)) {
+				if_num = mc_bridge_ipv4_get_if(dest_dev, htonl((packet_src_addr[0])), htonl(packet_dest_addr[0]), mc_max_dst, mc_dst_if_index);
+			} else {
+				struct in6_addr origin6;
+				struct in6_addr group6;
+				ECM_IP_ADDR_TO_NIN6_ADDR(origin6, packet_src_addr);
+				ECM_IP_ADDR_TO_NIN6_ADDR(group6, packet_dest_addr);
+				if_num = mc_bridge_ipv6_get_if(dest_dev, &origin6, &group6, mc_max_dst, mc_dst_if_index);
+			}
+
+			for (br_if = 0; br_if < if_num; br_if++) {
+				mc_br_slave_dev = dev_get_by_index(&init_net, mc_dst_if_index[br_if]);
+				if (!mc_br_slave_dev) {
+					continue;
+				}
+
+				if ((valid_if + br_if) > ECM_DB_MULTICAST_IF_MAX) {
+					int i;
+
+					/*
+					 * If already constructed any interface heirarchies before hitting
+					 * this error condition then Deref all interface heirarchies.
+					 */
+					for (i = 0; i < (valid_if + br_if); i++) {
+						ifaces = ecm_db_multicast_if_heirarchy_get(interfaces, i);
+						ecm_db_multicast_copy_if_heirarchy(to_list_single, ifaces);
+						ecm_db_connection_interfaces_deref(to_list_single, interface_first_base[i]);
+					}
+
+					dev_put(dest_dev);
+					dev_put(mc_br_slave_dev);
+					return 0;
+				}
+
+				ifaces = ecm_db_multicast_if_heirarchy_get(interfaces, valid_if + br_if);
+				/*
+				 * Construct a single interface heirarchy of a multicast dev.
+				 */
+				ii_cnt = ecm_interface_multicast_heirarchy_construct_single(packet_src_addr, packet_dest_addr, ifaces, dest_dev, mc_br_slave_dev);
+				if (ii_cnt == ECM_DB_IFACE_HEIRARCHY_MAX) {
+
+					/*
+					 * If already constructed any interface heirarchies before hitting
+					 * this error condition then Deref all interface heirarchies.
+					 */
+					if ((valid_if + br_if) > 0) {
+						int i;
+						for (i = 0; i < (valid_if + br_if); i++) {
+							ifaces = ecm_db_multicast_if_heirarchy_get(interfaces, i);
+							ecm_db_multicast_copy_if_heirarchy(to_list_single, ifaces);
+							ecm_db_connection_interfaces_deref(to_list_single, interface_first_base[i]);
+						}
+					}
+
+					dev_put(dest_dev);
+					dev_put(mc_br_slave_dev);
+					return 0;
+				}
+
+				interface_first = ecm_db_multicast_if_first_get_at_index(interface_first_base, (valid_if + br_if));
+				*interface_first = ii_cnt;
+				total_ii_count += ii_cnt;
+				dev_put(mc_br_slave_dev);
+			}
+
+			valid_if += br_if;
+
+		} else {
+
+			DEBUG_ASSERT(valid_if < ECM_DB_MULTICAST_IF_MAX, "Bad array index size %d\n", valid_if);
+			ifaces = ecm_db_multicast_if_heirarchy_get(interfaces, valid_if);
+			/*
+			 * Construct a single interface heirarchy of a multicast dev.
+			 */
+			ii_cnt = ecm_interface_multicast_heirarchy_construct_single(packet_src_addr, packet_dest_addr, ifaces, dest_dev, NULL);
+			if (ii_cnt == ECM_DB_IFACE_HEIRARCHY_MAX) {
+
+				/*
+				 * If already constructed any interface heirarchies before hitting
+				 * this error condition then Deref all interface heirarchies.
+				 */
+				if (valid_if > 0) {
+					int i;
+					for (i = 0; i < valid_if; i++) {
+						ifaces = ecm_db_multicast_if_heirarchy_get(interfaces, i);
+						ecm_db_multicast_copy_if_heirarchy(to_list_single, ifaces);
+						ecm_db_connection_interfaces_deref(to_list_single, interface_first_base[i]);
+					}
+				}
+
+				dev_put(dest_dev);
+				return 0;
+			}
+
+			interface_first = ecm_db_multicast_if_first_get_at_index(interface_first_base, valid_if);
+			*interface_first = ii_cnt;
+			total_ii_count += ii_cnt;
+			valid_if++;
+		}
+
+		dev_put(dest_dev);
+	}
+	return total_ii_count;
+}
+EXPORT_SYMBOL(ecm_interface_multicast_heirarchy_construct_routed);
+
+/*
+ * ecm_interface_multicast_heirarchy_construct_bridged()
+ * 	This function called when the Hyfi bridge snooper has IGMP/IMLD updates, this function
+ * 	creates destination interface heirarchy for a bridged multicast connection.
+ *
+ *	interfaces	Pointer to the 2-D array of multicast interface heirarchies
+ *	dest_dev	Pointer to the destination dev, here dest_dev is always a bridge type
+ *	packet_src_addr	Source IP of the multicast flow
+ *	packet_dest_addr Group(dest) IP of the multicast flow
+ *	mc_max_dst	Maximum number of bridge slaves joined the multicast group
+ *	mc_dst_if_index_base An array of if index joined the multicast group
+ *	interface_first_base An array of the index of the first interface in the list
+ */
+int32_t ecm_interface_multicast_heirarchy_construct_bridged(struct ecm_db_iface_instance *interfaces, struct net_device *dest_dev,
+						     ip_addr_t packet_src_addr, ip_addr_t packet_dest_addr, uint8_t mc_max_dst, int *mc_dst_if_index_base, uint32_t *interface_first_base)
+{
+	struct ecm_db_iface_instance *to_list_single[ECM_DB_IFACE_HEIRARCHY_MAX];
+	struct ecm_db_iface_instance *ifaces;
+	struct net_device *mc_br_slave_dev = NULL;
+	uint32_t *interface_first;
+	int *mc_dst_if_index;
+	int valid_if;
+	int ii_cnt = 0;
+        int br_if;
+        int total_ii_cnt = 0;
+
+	/*
+	 * Go through the newly joined interface index one by one and
+	 * create an interface heirarchy for each valid interface.
+	 */
+	for (br_if = 0, valid_if = 0; br_if < mc_max_dst; br_if++) {
+		mc_dst_if_index = (int *)ecm_db_multicast_if_num_get_at_index(mc_dst_if_index_base, br_if);
+		mc_br_slave_dev = dev_get_by_index(&init_net, *mc_dst_if_index);
+		if (!mc_br_slave_dev) {
+
+			/*
+			 * If already constructed any interface heirarchies before hitting
+			 * this error condition then Deref all interface heirarchies.
+			 */
+			if (valid_if > 0) {
+				int i;
+				for (i = 0; i < valid_if; i++) {
+					ifaces = ecm_db_multicast_if_heirarchy_get(interfaces, i);
+					ecm_db_multicast_copy_if_heirarchy(to_list_single, ifaces);
+					ecm_db_connection_interfaces_deref(to_list_single, interface_first_base[i]);
+				}
+			}
+
+			/*
+			 * If valid netdev not found, Return 0
+			 */
+			return 0;
+		}
+
+		if (valid_if > ECM_DB_MULTICAST_IF_MAX) {
+			int i;
+
+			/*
+			 * If already constructed any interface heirarchies before hitting
+			 * this error condition then Deref all interface heirarchies.
+			 */
+			for (i = 0; i < valid_if; i++) {
+				ifaces = ecm_db_multicast_if_heirarchy_get(interfaces, i);
+				ecm_db_multicast_copy_if_heirarchy(to_list_single, ifaces);
+				ecm_db_connection_interfaces_deref(to_list_single, interface_first_base[i]);
+			}
+
+			dev_put(mc_br_slave_dev);
+			return 0;
+		}
+
+		ifaces = ecm_db_multicast_if_heirarchy_get(interfaces, valid_if);
+
+		/*
+		 * Construct a single interface heirarchy of a multicast dev.
+		 */
+		ii_cnt = ecm_interface_multicast_heirarchy_construct_single(packet_src_addr, packet_dest_addr, ifaces, dest_dev, mc_br_slave_dev);
+		if (ii_cnt == ECM_DB_IFACE_HEIRARCHY_MAX) {
+
+			/*
+			 * If already constructed any interface heirarchies before hitting
+			 * this error condition then Deref all interface heirarchies.
+			 */
+			if (valid_if > 0) {
+			int i;
+				for (i = 0; i < valid_if; i++) {
+					ifaces = ecm_db_multicast_if_heirarchy_get(interfaces, i);
+					ecm_db_multicast_copy_if_heirarchy(to_list_single, ifaces);
+					ecm_db_connection_interfaces_deref(to_list_single, interface_first_base[i]);
+				}
+			}
+
+			dev_put(mc_br_slave_dev);
+			return 0;
+		}
+
+		interface_first = ecm_db_multicast_if_first_get_at_index(interface_first_base, valid_if);
+		*interface_first = ii_cnt;
+		total_ii_cnt += ii_cnt;
+		valid_if++;
+		dev_put(mc_br_slave_dev);
+	}
+
+	return ii_cnt;
+}
+EXPORT_SYMBOL(ecm_interface_multicast_heirarchy_construct_bridged);
+#endif
+
 /*
  * ecm_interface_heirarchy_construct()
  *	Construct an interface heirarchy.
@@ -2216,6 +2904,143 @@ void ecm_interface_stats_update(struct ecm_db_connection_instance *ci,
 }
 EXPORT_SYMBOL(ecm_interface_stats_update);
 
+#ifdef ECM_MULTICAST_ENABLE
+/*
+ * ecm_interface_multicast_list_stats_update()
+ *	Given a destination interface list for a multicast connection, walk the interfaces and update
+ *	the stats for certain types.
+ *
+ *	TODO: For next merge change this function to use this for both unicast list_stats_update and
+ *	      multicast list_stats_update. This would save repetition of same code again.
+ */
+static void ecm_interface_multicast_list_stats_update(int iface_list_first, struct ecm_db_iface_instance *iface_list, uint32_t tx_packets,
+					       uint32_t tx_bytes, uint32_t rx_packets, uint32_t rx_bytes)
+{
+	struct ecm_db_iface_instance **ifaces;
+	struct ecm_db_iface_instance *ii_temp;
+	int list_index;
+
+	for (list_index = iface_list_first; (list_index < ECM_DB_IFACE_HEIRARCHY_MAX); list_index++) {
+		struct ecm_db_iface_instance *ii;
+		struct net_device *dev;
+		char *ii_name;
+		ecm_db_iface_type_t ii_type;
+
+		ii_temp = ecm_db_multicast_if_instance_get_at_index(iface_list, list_index);
+		ifaces = (struct ecm_db_iface_instance **)ii_temp;
+		ii = *ifaces;
+		ii_type = ecm_db_connection_iface_type_get(ii);
+		ii_name = ecm_db_interface_type_to_string(ii_type);
+		DEBUG_TRACE("list_index: %d, ii: %p, type: %d (%s)\n", list_index, ii, ii_type, ii_name);
+
+		/*
+		 * Locate real device in system
+		 */
+		dev = dev_get_by_index(&init_net, ecm_db_iface_interface_identifier_get(ii));
+		if (!dev) {
+			DEBUG_WARN("Could not locate interface\n");
+			continue;
+		}
+		DEBUG_TRACE("found dev: %p (%s)\n", dev, dev->name);
+
+		switch (ii_type) {
+			struct rtnl_link_stats64 stats;
+
+#ifdef ECM_INTERFACE_VLAN_ENABLE
+			case ECM_DB_IFACE_TYPE_VLAN:
+				DEBUG_INFO("VLAN\n");
+				stats.rx_packets = rx_packets;
+				stats.rx_bytes = rx_bytes;
+				stats.tx_packets = tx_packets;
+				stats.tx_bytes = tx_bytes;
+				__vlan_dev_update_accel_stats(dev, &stats);
+				break;
+#endif
+			case ECM_DB_IFACE_TYPE_BRIDGE:
+				DEBUG_INFO("BRIDGE\n");
+				stats.rx_packets = rx_packets;
+				stats.rx_bytes = rx_bytes;
+				stats.tx_packets = tx_packets;
+				stats.tx_bytes = tx_bytes;
+				br_dev_update_stats(dev, &stats);
+				break;
+#ifdef ECM_INTERFACE_PPP_ENABLE
+			case ECM_DB_IFACE_TYPE_PPPOE:
+				DEBUG_INFO("PPPOE\n");
+				ppp_update_stats(dev, rx_packets, rx_bytes, tx_packets, tx_bytes);
+				break;
+#endif
+			default:
+				/*
+				 * TODO: Extend it accordingly
+				 */
+				break;
+		}
+
+		dev_put(dev);
+	}
+}
+
+/*
+ * ecm_interface_multicast_stats_update()
+ *	Using the interface lists for the given connection, update the interface statistics for each.
+ *
+ * 'from interface' here is the connection 'from' side.  Likewise with 'to interface'.
+ * TX is wrt what the interface has transmitted.  RX is what the interface has received.
+ */
+void ecm_interface_multicast_stats_update(struct ecm_db_connection_instance *ci, uint32_t from_tx_packets, uint32_t from_tx_bytes,
+				   uint32_t from_rx_packets, uint32_t from_rx_bytes, uint32_t to_tx_packets, uint32_t to_tx_bytes,
+				   uint32_t to_rx_packets, uint32_t to_rx_bytes)
+{
+	struct ecm_db_iface_instance *from_ifaces[ECM_DB_IFACE_HEIRARCHY_MAX];
+	struct ecm_db_iface_instance *to_ifaces;
+	struct ecm_db_iface_instance *ii_temp;
+	int from_ifaces_first;
+	int *to_ifaces_first;
+	int if_index;
+	int ret;
+	uint8_t mac_addr[ETH_ALEN];
+
+	/*
+	 * Iterate the 'from' side interfaces and update statistics and state for the real HLOS interfaces
+	 * from_tx_packets / bytes: the amount transmitted by the 'from' interface
+	 * from_rx_packets / bytes: the amount received by the 'from' interface
+	 */
+	DEBUG_INFO("%p: Update from interface stats\n", ci);
+	from_ifaces_first = ecm_db_connection_from_interfaces_get_and_ref(ci, from_ifaces);
+	ecm_db_connection_from_node_address_get(ci, mac_addr);
+	ecm_interface_list_stats_update(from_ifaces_first, from_ifaces, mac_addr, from_tx_packets, from_tx_bytes, from_rx_packets, from_rx_bytes);
+	ecm_db_connection_interfaces_deref(from_ifaces, from_ifaces_first);
+
+	/*
+	 * Iterate the 'to' side interfaces and update statistics and state for the real HLOS interfaces
+	 * to_tx_packets / bytes: the amount transmitted by the 'to' interface
+	 * to_rx_packets / bytes: the amount received by the 'to' interface
+	 */
+	DEBUG_INFO("%p: Update to interface stats\n", ci);
+
+	/*
+	 * This function allocates the memory for temporary destination interface heirarchies.
+	 * This memory needs to be free at the end.
+	 */
+	ret = ecm_db_multicast_connection_to_interfaces_get_and_ref_all(ci, &to_ifaces, &to_ifaces_first);
+	if (ret == 0) {
+		DEBUG_WARN("%p: Get and ref to all multicast detination interface heirarchies failed\n", ci);
+		return;
+	}
+
+	for (if_index = 0; if_index < ECM_DB_MULTICAST_IF_MAX; if_index++) {
+		if (to_ifaces_first[if_index] < ECM_DB_IFACE_HEIRARCHY_MAX) {
+			ii_temp = ecm_db_multicast_if_heirarchy_get(to_ifaces, if_index);
+			ecm_interface_multicast_list_stats_update(to_ifaces_first[if_index], ii_temp, to_tx_packets, to_tx_bytes, to_rx_packets, to_rx_bytes);
+		}
+	}
+
+	ecm_db_multicast_connection_to_interfaces_deref_all(to_ifaces, to_ifaces_first);
+}
+EXPORT_SYMBOL(ecm_interface_multicast_stats_update);
+#endif
+
 /*
  * ecm_interface_regenerate_connection()
  *	Re-generate a specific connection
@@ -2478,6 +3303,287 @@ static struct notifier_block ecm_interface_node_br_fdb_update_nb = {
 	.notifier_call = ecm_interface_node_br_fdb_notify_event,
 };
 #endif
+
+#ifdef ECM_MULTICAST_ENABLE
+/*
+ * ecm_interface_multicast_find_outdated_iface_instances()
+ *
+ *	Called in the case of Routing/Bridging Multicast update events.
+ *
+ *	This function takes a list of ifindex for the connection which was received
+ *	from MFC or bridge snooper, compares it against the existing list of interfaces
+ *	in the DB connection, and extracts the list of those interfaces that have left
+ *	the multicast group.
+ *
+ * 	ci		A DB connection instance.
+ * 	mc_updates	Part of return Information. The function will mark the index of those
+ * 			interfaces in the DB connection 'to_mcast_interfaces' array that have
+ * 			left the group, in the mc_updates->if_leave_idx array. The caller uses this
+ * 			information to delete those outdated interface heirarchies from the
+ * 			connection.
+ * 	is_bridged	True if the function called due to bridge multicast snooper update event.
+ * 	dst_dev		Holds the netdevice ifindex number of the new list of interfaces as reported
+ * 			by the update from MFC or Bridge snooper.
+ *	max_to_dev	Size of the array 'dst_dev'
+ *
+ *	Return true if outdated interfaces found
+ */
+static bool ecm_interface_multicast_find_outdated_iface_instances(struct ecm_db_connection_instance *ci, struct ecm_multicast_if_update *mc_updates,
+						   uint32_t flags, bool is_br_snooper, uint32_t *mc_dst_if_index, uint32_t max_to_dev)
+{
+	struct ecm_db_iface_instance *mc_ifaces;
+	struct ecm_db_iface_instance *ii_temp;
+	struct ecm_db_iface_instance *ii_single;
+	struct ecm_db_iface_instance **ifaces;
+	struct ecm_db_iface_instance *to_iface;
+	int32_t *to_iface_first;
+	int32_t *mc_ifaces_first;
+	uint32_t *dst_if_index;
+	ecm_db_iface_type_t ii_type;
+	int32_t heirarchy_index;
+	int32_t if_index;
+	int32_t if_cnt = 0;
+	int found = 0;
+	int ii;
+	int ret;
+	int32_t ifaces_identifier;
+
+	ret = ecm_db_multicast_connection_to_interfaces_get_and_ref_all(ci, &mc_ifaces, &mc_ifaces_first);
+	if (ret == 0) {
+		DEBUG_WARN("%p: multicast interfaces ref fail!\n", ci);
+		return false;
+	}
+
+	/*
+	 * Loop through the current interface list in the DB
+	 * connection 'to_mcast_interfaces' array
+	 */
+	for (heirarchy_index = 0; heirarchy_index < ECM_DB_MULTICAST_IF_MAX; heirarchy_index++) {
+		found = 0;
+		to_iface_first = ecm_db_multicast_if_first_get_at_index(mc_ifaces_first, heirarchy_index);
+
+		/*
+		 * Invalid interface entry, skip
+		 */
+		if (*to_iface_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
+			continue;
+		}
+
+		ii_temp = ecm_db_multicast_if_heirarchy_get(mc_ifaces, heirarchy_index);
+		ii_single = ecm_db_multicast_if_instance_get_at_index(ii_temp, ECM_DB_IFACE_HEIRARCHY_MAX - 1);
+		ifaces = (struct ecm_db_iface_instance **)ii_single;
+		to_iface = *ifaces;
+		ii_type = ecm_db_connection_iface_type_get(to_iface);
+
+		/*
+		 * If the update was received from bridge snooper, do not consider entries in the
+		 * interface list that are not part of a bridge.
+		 */
+		if (is_br_snooper && (ii_type != ECM_DB_IFACE_TYPE_BRIDGE)) {
+			continue;
+		}
+
+		/*
+		 * If the update was received from MFC, do not consider entries in the
+		 * interface list that are part of a bridge. The bridge entries will be
+		 * taken care by the Bridge Snooper Callback
+		 */
+		if (ii_type == ECM_DB_IFACE_TYPE_BRIDGE) {
+			if (!is_br_snooper && !(flags & ECM_DB_MULTICAST_CONNECTION_BRIDGE_DEV_SET_FLAG)) {
+				continue;
+			}
+		}
+
+		/*
+		 * Try to find a match in the newly received interface list, for any of
+		 * the interface instance in the heirarchy. If found, it means that this
+		 * interface has not left the group. If not found, it means that this
+		 * interface has left the group.
+		 */
+		for (ii = ECM_DB_IFACE_HEIRARCHY_MAX - 1; ii >= *to_iface_first; ii--) {
+			ii_single = ecm_db_multicast_if_instance_get_at_index(ii_temp, ii);
+			ifaces = (struct ecm_db_iface_instance **)ii_single;
+			to_iface = *ifaces;
+
+			ii_type = ecm_db_connection_iface_type_get(to_iface);
+			ifaces_identifier = ecm_db_iface_interface_identifier_get(to_iface);
+			for (if_index = 0; if_index < max_to_dev; if_index++) {
+				dst_if_index = ecm_db_multicast_if_num_get_at_index(mc_dst_if_index, if_index);
+				if (*dst_if_index == ifaces_identifier) {
+					found = 1;
+					break;
+				}
+			}
+			if (found) {
+				break;
+			}
+		}
+
+		/*
+		 * We did not find a match for the interface in the present list. So mark
+		 * if as one that has left the group.
+		 */
+		if (!found) {
+			if_cnt++;
+			mc_updates->if_leave_idx[heirarchy_index] = 1;
+		}
+	}
+
+	ecm_db_multicast_connection_to_interfaces_deref_all(mc_ifaces, mc_ifaces_first);
+	mc_updates->if_leave_cnt = if_cnt;
+	return (if_cnt > 0);
+}
+
+/*
+ * ecm_interface_multicast_find_new_iface_instances()
+ *
+ *	Called in the case of Routing/Bridging Multicast update events.
+ *
+ *	This function takes a list of ifindex for the connection which was received
+ *	from MFC or bridge snooper, compares it against the existing list of interfaces
+ *	in the DB connection, and extracts the list of the new joinees for the multicast
+ *	group.
+ *
+ * 	ci		A DB connection instance.
+ * 	mc_updates	Part of return Information. The function will mark the index of those
+ * 			interfaces in the 'dst_dev' array that have joined the group, in the
+ * 			mc_updates->if_join_idx array. The caller uses this information to add the new
+ * 			interface heirarchies into the connection.
+ * 	dst_dev		Holds the netdevice ifindex number of the new list of interfaces as reported
+ * 			by the update from MFC or Bridge snooper.
+ *	max_to_dev	Size of the array 'dst_dev'
+ *
+ *	Return true if new joinees found
+ */
+static bool ecm_interface_multicast_find_new_iface_instances(struct ecm_db_connection_instance *ci,
+					struct ecm_multicast_if_update *mc_updates, uint32_t *mc_dst_if_index, uint32_t max_to_dev)
+{
+	struct ecm_db_iface_instance *mc_ifaces;
+	struct ecm_db_iface_instance *ii_temp;
+	struct ecm_db_iface_instance *ii_single;
+	struct ecm_db_iface_instance **ifaces;
+	int32_t *mc_ifaces_first;
+	int32_t *to_list_first;
+	int32_t heirarchy_index;
+	int32_t if_index;
+	int32_t if_cnt = 0;
+	int found = 0;
+	int ii;
+	int ret;
+	uint32_t *dst_if_index;
+	int32_t ifaces_identifier;
+	struct ecm_db_iface_instance *to_list;
+
+	ret = ecm_db_multicast_connection_to_interfaces_get_and_ref_all(ci, &mc_ifaces, &mc_ifaces_first);
+	if (ret == 0) {
+		DEBUG_WARN("%p: multicast interfaces ref fail!\n", ci);
+		return false;
+	}
+
+	/*
+	 * Loop through the new interface list 'dst_dev'
+	 */
+	for (if_index = 0; if_index < max_to_dev; if_index++) {
+		found = 0;
+		dst_if_index = ecm_db_multicast_if_num_get_at_index(mc_dst_if_index, if_index);
+		if (*dst_if_index == 0) {
+			continue;
+		}
+
+		for (heirarchy_index = 0; heirarchy_index < ECM_DB_MULTICAST_IF_MAX ; heirarchy_index++) {
+			to_list_first = ecm_db_multicast_if_first_get_at_index(mc_ifaces_first, heirarchy_index);
+
+			/*
+			 * Invalid interface entry, skip
+			 */
+			if (*to_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
+				continue;
+			}
+
+			ii_temp = ecm_db_multicast_if_heirarchy_get(mc_ifaces, heirarchy_index);
+
+			/*
+			 * Try to find a match for this ifindex (dst_dev[if_index]), in any of the
+			 * interface instance in the heirarchy. If not found, it means that this
+			 * ifindex has joined the group. If found, it means that this ifindex was
+			 * already part of the list of destination interfaces.
+			 */
+			for (ii = ECM_DB_IFACE_HEIRARCHY_MAX - 1; ii >= *to_list_first; ii--) {
+				ii_single = ecm_db_multicast_if_instance_get_at_index(ii_temp, ii);
+				ifaces = (struct ecm_db_iface_instance **)ii_single;
+				to_list = *ifaces;
+				ifaces_identifier = ecm_db_iface_interface_identifier_get(to_list);
+				if (*dst_if_index == ifaces_identifier) {
+					found =  1;
+					break;
+				}
+			}
+
+			if (found) {
+				break;
+			}
+		}
+
+		/*
+		 * We did not find a match for the interface in the present list. So mark
+		 * it as one that has joined the group.
+		 */
+		if (!found) {
+
+			/*
+			 * Store the if index of the new joinee
+			 */
+			mc_updates->join_dev[if_cnt] = *dst_if_index;
+
+			/*
+			 * Identify a new vacant slot in the 'to_mcast_interfaces' to place
+			 * the new interface
+			 */
+			for (heirarchy_index = 0; heirarchy_index < ECM_DB_MULTICAST_IF_MAX ; heirarchy_index++) {
+				to_list_first = ecm_db_multicast_if_first_get_at_index(mc_ifaces_first, heirarchy_index);
+				if (*to_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
+					mc_updates->if_join_idx[heirarchy_index] = 1;
+					break;
+				}
+			}
+
+			if_cnt++;
+		}
+	}
+
+	ecm_db_multicast_connection_to_interfaces_deref_all(mc_ifaces, mc_ifaces_first);
+	mc_updates->if_join_cnt = if_cnt;
+
+	return (if_cnt > 0);
+}
+
+/*
+ * ecm_interface_multicast_find_updates_to_iface_list()
+ * 	Process IGMP/MLD updates either from MFC or bridge snooper. Identity the interfaces
+ * 	that have left the group and new interfaces that have joined the group.
+ *
+ * The function returns true if there was any update necessary to the current destination
+ * interface list
+ */
+bool ecm_interface_multicast_find_updates_to_iface_list(struct ecm_db_connection_instance *ci, struct ecm_multicast_if_update *mc_updates,
+						uint32_t flags, bool is_br_snooper, uint32_t *mc_dst_if_index, uint32_t max_to_dev)
+{
+	bool join;
+	bool leave;
+	/*
+	 * Find destination interfaces that have left the group
+	 */
+	leave = ecm_interface_multicast_find_outdated_iface_instances(ci, mc_updates, flags, is_br_snooper, mc_dst_if_index, max_to_dev);
+	/*
+	 * Find new destination interfaces that have joined the group
+	 */
+	join = ecm_interface_multicast_find_new_iface_instances(ci, mc_updates, mc_dst_if_index, max_to_dev);
+
+	return (leave || join);
+}
+EXPORT_SYMBOL(ecm_interface_multicast_find_updates_to_iface_list);
+#endif
+
 /*
  * ecm_interface_init()
  */
