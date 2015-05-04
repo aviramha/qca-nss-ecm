@@ -36,6 +36,7 @@
 #include <linux/udp.h>
 #include <linux/tcp.h>
 #include <linux/ppp_defs.h>
+#include <linux/mroute.h>
 
 #include <linux/inetdevice.h>
 #include <linux/if_arp.h>
@@ -95,6 +96,9 @@
 #include "ecm_interface.h"
 #include "ecm_nss_ipv4.h"
 #include "ecm_nss_ported_ipv4.h"
+#ifdef ECM_MULTICAST_ENABLE
+#include "ecm_nss_multicast_ipv4.h"
+#endif
 #ifdef ECM_NON_PORTED_SUPPORT_ENABLE
 #include "ecm_nss_non_ported_ipv4.h"
 #endif
@@ -910,6 +914,24 @@ static unsigned int ecm_nss_ipv4_ip_process(struct net_device *out_dev, struct n
 		}
 	}
 
+#ifdef ECM_MULTICAST_ENABLE
+	/*
+	 * Check for a multicast Destination address here.
+	 */
+	ECM_NIN4_ADDR_TO_IP_ADDR(ip_dest_addr, orig_tuple.dst.u3.ip);
+	if (ecm_ip_addr_is_multicast(ip_dest_addr)) {
+		DEBUG_TRACE("Multicast, Processing: %p\n", skb);
+		return ecm_nss_multicast_ipv4_connection_process(out_dev,
+				in_dev,
+				src_node_addr,
+				dest_node_addr,
+				can_accel, is_routed, skb,
+				&ip_hdr,
+				ct, sender,
+				&orig_tuple, &reply_tuple);
+	}
+#endif
+
 	/*
 	 * Work out if this packet involves NAT or not.
 	 * If it does involve NAT then work out if this is an ingressing or egressing packet.
@@ -1270,10 +1292,12 @@ static unsigned int ecm_nss_ipv4_post_routing_hook(const struct nf_hook_ops *ops
 		return NF_ACCEPT;
 	}
 
+#ifndef ECM_MULTICAST_ENABLE
 	if (skb->pkt_type == PACKET_MULTICAST) {
 		DEBUG_TRACE("Multicast, ignoring: %p\n", skb);
 		return NF_ACCEPT;
 	}
+#endif
 
 #ifdef ECM_INTERFACE_PPP_ENABLE
 	/*
@@ -1386,10 +1410,12 @@ static unsigned int ecm_nss_ipv4_bridge_post_routing_hook(const struct nf_hook_o
 		return NF_ACCEPT;
 	}
 
+#ifndef ECM_MULTICAST_ENABLE
 	if (skb->pkt_type == PACKET_MULTICAST) {
 		DEBUG_TRACE("Multicast, ignoring: %p\n", skb);
 		return NF_ACCEPT;
 	}
+#endif
 
 #ifdef ECM_INTERFACE_PPP_ENABLE
 	/*
@@ -1574,7 +1600,20 @@ static void ecm_nss_ipv4_net_dev_callback(void *app_data, struct nss_ipv4_msg *n
 
 	ECM_HIN4_ADDR_TO_IP_ADDR(flow_ip, sync->flow_ip);
 	ECM_HIN4_ADDR_TO_IP_ADDR(return_ip_xlate, sync->return_ip_xlate);
+	ECM_HIN4_ADDR_TO_IP_ADDR(return_ip, sync->return_ip);
+
+#ifdef ECM_MULTICAST_ENABLE
+	/*
+	 * Check for multicast flow
+	 */
+	if (ecm_ip_addr_is_multicast(return_ip)) {
+		ci = ecm_db_connection_find_and_ref(flow_ip, return_ip, sync->protocol, (int)sync->flow_ident, (int)sync->return_ident);
+	} else {
+		ci = ecm_db_connection_find_and_ref(flow_ip, return_ip_xlate, sync->protocol, (int)sync->flow_ident, (int)sync->return_ident_xlate);
+	}
+#else
 	ci = ecm_db_connection_find_and_ref(flow_ip, return_ip_xlate, sync->protocol, (int)sync->flow_ident, (int)sync->return_ident_xlate);
+#endif
 	if (!ci) {
 		DEBUG_TRACE("%p: NSS Sync: no connection\n", sync);
 		goto sync_conntrack;
@@ -1597,7 +1636,54 @@ static void ecm_nss_ipv4_net_dev_callback(void *app_data, struct nss_ipv4_msg *n
 	if (sync->flow_tx_packet_count || sync->return_tx_packet_count) {
 		DEBUG_TRACE("%p: flow_rx_packet_count: %u, flow_rx_byte_count: %u, return_rx_packet_count: %u, return_rx_byte_count: %u\n",
 				ci, sync->flow_rx_packet_count, sync->flow_rx_byte_count, sync->return_rx_packet_count, sync->return_rx_byte_count);
+#ifdef ECM_MULTICAST_ENABLE
+		if (ecm_ip_addr_is_multicast(return_ip)) {
+			/*
+			 * The amount of data *sent* by the ECM multicast connection 'from' side is the amount the NSS has *received* in the 'flow' direction.
+			 */
+			ecm_db_multicast_connection_data_totals_update(ci, true, sync->flow_rx_byte_count, sync->flow_rx_packet_count);
+			ecm_db_multicast_connection_data_totals_update(ci, false, sync->return_rx_byte_count, sync->return_rx_packet_count);
+			ecm_db_multicast_connection_interface_heirarchy_stats_update(ci, sync->flow_rx_byte_count, sync->flow_rx_packet_count);
 
+			/*
+			 * As packets have been accelerated we have seen some action.
+			 */
+			feci->action_seen(feci);
+
+			/*
+			 * Update interface statistics
+			 */
+			ecm_interface_multicast_stats_update(ci, sync->flow_tx_packet_count, sync->flow_tx_byte_count, sync->flow_rx_packet_count, sync->flow_rx_byte_count,
+										sync->return_tx_packet_count, sync->return_tx_byte_count, sync->return_rx_packet_count, sync->return_rx_byte_count);
+			/*
+			 * Update IP multicast routing cache stats
+			 */
+			ipmr_mfc_stats_update(&init_net, htonl(flow_ip[0]), htonl(return_ip[0]), sync->flow_rx_packet_count,
+										 sync->flow_rx_byte_count, sync->flow_rx_packet_count, sync->flow_rx_byte_count);
+		} else {
+			/*
+			 * The amount of data *sent* by the ECM connection 'from' side is the amount the NSS has *received* in the 'flow' direction.
+			 */
+			ecm_db_connection_data_totals_update(ci, true, sync->flow_rx_byte_count, sync->flow_rx_packet_count);
+
+			/*
+			 * The amount of data *sent* by the ECM connection 'to' side is the amount the NSS has *received* in the 'return' direction.
+			 */
+			ecm_db_connection_data_totals_update(ci, false, sync->return_rx_byte_count, sync->return_rx_packet_count);
+
+			/*
+			 * As packets have been accelerated we have seen some action.
+			 */
+			feci->action_seen(feci);
+
+			/*
+			 * Update interface statistics
+			 */
+			ecm_interface_stats_update(ci, sync->flow_tx_packet_count, sync->flow_tx_byte_count, sync->flow_rx_packet_count, sync->flow_rx_byte_count,
+							sync->return_tx_packet_count, sync->return_tx_byte_count, sync->return_rx_packet_count, sync->return_rx_byte_count);
+		}
+
+#else
 		/*
 		 * The amount of data *sent* by the ECM connection 'from' side is the amount the NSS has *received* in the 'flow' direction.
 		 */
@@ -1618,6 +1704,7 @@ static void ecm_nss_ipv4_net_dev_callback(void *app_data, struct nss_ipv4_msg *n
 		 */
 		ecm_interface_stats_update(ci, sync->flow_tx_packet_count, sync->flow_tx_byte_count, sync->flow_rx_packet_count, sync->flow_rx_byte_count,
 						sync->return_tx_packet_count, sync->return_tx_byte_count, sync->return_rx_packet_count, sync->return_rx_byte_count);
+#endif
 	}
 
 	/*
@@ -1668,10 +1755,24 @@ static void ecm_nss_ipv4_net_dev_callback(void *app_data, struct nss_ipv4_msg *n
 			neigh_release(neigh);
 		}
 
+#ifdef ECM_MULTICAST_ENABLE
 		/*
 		 * Update the neighbour entry for destination IP address
 		 */
-		ECM_HIN4_ADDR_TO_IP_ADDR(return_ip, sync->return_ip);
+		if (!ecm_ip_addr_is_multicast(return_ip)) {
+			neigh = ecm_nss_ipv4_neigh_get(return_ip);
+			if (!neigh) {
+				DEBUG_WARN("Neighbour entry for %pI4h not found\n", &sync->return_ip);
+			} else {
+				DEBUG_TRACE("Neighbour entry for %pI4h update: %p\n", &sync->return_ip, neigh);
+				neigh_update(neigh, NULL, neigh->nud_state, NEIGH_UPDATE_F_WEAK_OVERRIDE);
+				neigh_release(neigh);
+			}
+		}
+#else
+		/*
+		 * Update the neighbour entry for destination IP address
+		 */
 		neigh = ecm_nss_ipv4_neigh_get(return_ip);
 		if (!neigh) {
 			DEBUG_WARN("Neighbour entry for %pI4h not found\n", &sync->return_ip);
@@ -1680,6 +1781,7 @@ static void ecm_nss_ipv4_net_dev_callback(void *app_data, struct nss_ipv4_msg *n
 			neigh_update(neigh, NULL, neigh->nud_state, NEIGH_UPDATE_F_WEAK_OVERRIDE);
 			neigh_release(neigh);
 		}
+#endif
 	}
 
 	/*
@@ -2230,6 +2332,13 @@ int ecm_nss_ipv4_init(struct dentry *dentry)
 	}
 #endif
 
+#ifdef ECM_MULTICAST_ENABLE
+	if (!ecm_nss_multicast_ipv4_debugfs_init(ecm_nss_ipv4_dentry)) {
+		DEBUG_ERROR("Failed to create ecm multicast files in debugfs\n");
+		goto task_cleanup;
+	}
+#endif
+
 	/*
 	 * Register netfilter hooks
 	 */
@@ -2238,6 +2347,10 @@ int ecm_nss_ipv4_init(struct dentry *dentry)
 		DEBUG_ERROR("Can't register netfilter hooks.\n");
 		goto task_cleanup;
 	}
+
+#ifdef ECM_MULTICAST_ENABLE
+	ecm_nss_multicast_ipv4_init();
+#endif
 
 	/*
 	 * Register this module with the Linux NSS Network driver
@@ -2281,5 +2394,9 @@ void ecm_nss_ipv4_exit(void)
 	if (ecm_nss_ipv4_dentry) {
 		debugfs_remove_recursive(ecm_nss_ipv4_dentry);
 	}
+
+#ifdef ECM_MULTICAST_ENABLE
+	ecm_nss_multicast_ipv4_exit();
+#endif
 }
 EXPORT_SYMBOL(ecm_nss_ipv4_exit);

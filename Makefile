@@ -72,6 +72,7 @@ ccflags-$(ECM_INTERFACE_TUNIPIP6_ENABLE) += -DECM_INTERFACE_TUNIPIP6_ENABLE
 ifneq ($(findstring 3.4, $(KERNELVERSION)),)
 ECM_MULTICAST_ENABLE=y
 endif
+ecm-$(ECM_MULTICAST_ENABLE) += frontends/nss/ecm_nss_multicast_ipv4.o
 ccflags-$(ECM_MULTICAST_ENABLE) += -DECM_MULTICAST_ENABLE
 
 # #############################################################################
