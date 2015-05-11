@@ -21,10 +21,8 @@
 #include <linux/module.h>
 #include <linux/skbuff.h>
 #include <linux/icmp.h>
-#include <linux/sysctl.h>
 #include <linux/kthread.h>
-#include <linux/device.h>
-#include <linux/fs.h>
+#include <linux/debugfs.h>
 #include <linux/pkt_sched.h>
 #include <linux/string.h>
 #include <net/route.h>
@@ -122,14 +120,14 @@ static bool ecm_classifier_hyfi_enabled = true;		/* Operational behaviour */
 static bool ecm_classifier_hyfi_terminate_pending = false;		/* True when the user wants us to terminate */
 
 /*
- * System device linkage
+ * Debugfs dentry object.
  */
-static struct device ecm_classifier_hyfi_dev;		/* System device linkage */
+static struct dentry *ecm_classifier_hyfi_dentry;
 
 /*
  * Locking of the classifier structures
  */
-static spinlock_t ecm_classifier_hyfi_lock;			/* Protect SMP access. */
+static DEFINE_SPINLOCK(ecm_classifier_hyfi_lock);			/* Protect SMP access. */
 
 /*
  * List of our classifier instances
@@ -665,9 +663,9 @@ static void ecm_classifier_hyfi_connection_removed(void *arg, struct ecm_db_conn
  * ecm_classifier_hyfi_set_set_command()
  *	Set hyfi command to accel/decel connection.
  */
-static ssize_t ecm_classifier_hyfi_set_command(struct device *dev,
-							  struct device_attribute *attr,
-							  const char *buf, size_t count)
+static ssize_t ecm_classifier_hyfi_set_command(struct file *file,
+						const char __user *user_buf,
+						size_t sz, loff_t *ppos)
 {
 #define ECM_CLASSIFIER_HYFI_SET_IP_COMMAND_FIELDS 2
 	char *cmd_buf;
@@ -685,7 +683,7 @@ static ssize_t ecm_classifier_hyfi_set_command(struct device *dev,
 	spin_lock_bh(&ecm_classifier_hyfi_lock);
 	if (!ecm_classifier_hyfi_enabled) {
 		spin_unlock_bh(&ecm_classifier_hyfi_lock);
-		return 0;
+		return -EINVAL;
 	}
 	spin_unlock_bh(&ecm_classifier_hyfi_lock);
 
@@ -696,11 +694,12 @@ static ssize_t ecm_classifier_hyfi_set_command(struct device *dev,
 	 * CMD:
 	 *	s = Decelerate based on <SERIAL> number given.
 	 */
-	cmd_buf = (char *)kzalloc(count + 1, GFP_ATOMIC);
+	cmd_buf = (char *)kzalloc(sz + 1, GFP_ATOMIC);
 	if (!cmd_buf) {
-		return 0;
+		return -ENOMEM;
 	}
-	memcpy(cmd_buf, buf, count);
+
+	sz = simple_write_to_buffer(cmd_buf, sz, ppos, user_buf, sz);
 
 	/*
 	 * Split the buffer into its fields
@@ -720,18 +719,18 @@ static ssize_t ecm_classifier_hyfi_set_command(struct device *dev,
 	if (field_count != ECM_CLASSIFIER_HYFI_SET_IP_COMMAND_FIELDS) {
 		DEBUG_WARN("invalid field count %d\n", field_count);
 		kfree(cmd_buf);
-		return 0;
+		return -EINVAL;
 	}
 
 	if (!sscanf(fields[0], "%c", &cmd)) {
 		DEBUG_WARN("invalid cmd\n");
 		kfree(cmd_buf);
-		return 0;
+		return -EINVAL;
 	}
 	if (!sscanf(fields[1], "%u", &serial)) {
 		DEBUG_WARN("invalid serial\n");
 		kfree(cmd_buf);
-		return 0;
+		return -EINVAL;
 	}
 
 	kfree(cmd_buf);
@@ -746,12 +745,12 @@ static ssize_t ecm_classifier_hyfi_set_command(struct device *dev,
 		break;
 	default:
 		DEBUG_WARN("invalid cmd %c\n", cmd);
-		return 0;
+		return -EINVAL;
 	}
 
 	if (!ci) {
 		DEBUG_WARN("database connection not found\n");
-		return 0;
+		return -ENOMEM;
 	}
 	DEBUG_TRACE("Connection found: %p\n", ci);
 
@@ -772,137 +771,39 @@ static ssize_t ecm_classifier_hyfi_set_command(struct device *dev,
 	}
 	ecm_db_connection_deref(ci);
 
-	return count;
+	return sz;
 }
 
 /*
- * ecm_classifier_hyfi_rule_get_enabled()
+ * File operations for hyfi classifier command.
  */
-static ssize_t ecm_classifier_hyfi_rule_get_enabled(struct device *dev,
-				  struct device_attribute *attr,
-				  char *buf)
-{
-	ssize_t count;
-	int num;
-
-	/*
-	 * Operate under our locks
-	 */
-	DEBUG_TRACE("get enabled\n");
-	spin_lock_bh(&ecm_classifier_hyfi_lock);
-	num = ecm_classifier_hyfi_enabled;
-	spin_unlock_bh(&ecm_classifier_hyfi_lock);
-
-	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", num);
-	return count;
-}
-
-/*
- * ecm_classifier_hyfi_rule_set_enabled()
- */
-static ssize_t ecm_classifier_hyfi_rule_set_enabled(struct device *dev,
-				  struct device_attribute *attr,
-				  const char *buf, size_t count)
-{
-	char num_buf[12];
-	int num;
-
-	/*
-	 * Get the number from buf into a properly z-termed number buffer
-	 */
-	if (count > 11) return 0;
-	memcpy(num_buf, buf, count);
-	num_buf[count] = '\0';
-	sscanf(num_buf, "%d", &num);
-	DEBUG_TRACE("ecm_classifier_hyfi_enabled = %d\n", num);
-
-	/*
-	 * Operate under our locks
-	 */
-	spin_lock_bh(&ecm_classifier_hyfi_lock);
-	ecm_classifier_hyfi_enabled = num;
-	spin_unlock_bh(&ecm_classifier_hyfi_lock);
-
-	return count;
-}
-
-/*
- * System device attributes for the hyfi classifier itself.
- */
-static DEVICE_ATTR(enabled, 0644, ecm_classifier_hyfi_rule_get_enabled, ecm_classifier_hyfi_rule_set_enabled);
-static DEVICE_ATTR(cmd, 0200, NULL, ecm_classifier_hyfi_set_command);
-
-/*
- * System device attribute array.
- */
-static struct device_attribute *ecm_classifier_hyfi_attrs[] = {
-	&dev_attr_enabled,
-	&dev_attr_cmd,
+static struct file_operations ecm_classifier_hyfi_cmd_fops = {
+	.write = ecm_classifier_hyfi_set_command,
 };
-
-/*
- * System device node of the ECM hyfi classifier
- * Sysdevice control points can be found at /sys/devices/system/ecm_classifier_hyfi/ecm_classifier_hyfiX/
- */
-static struct bus_type ecm_classifier_hyfi_subsys = {
-	.name = "ecm_classifier_hyfi",
-	.dev_name = "ecm_classifier_hyfi",
-};
-
-/*
- * ecm_classifier_hyfi_dev_release()
- *	This is a dummy release function for device.
- */
-static void ecm_classifier_hyfi_dev_release(struct device *dev)
-{
-
-}
 
 /*
  * ecm_classifier_hyfi_rules_init()
  */
-int ecm_classifier_hyfi_rules_init(void)
+int ecm_classifier_hyfi_rules_init(struct dentry *dentry)
 {
-	int result;
-	int i;
 	DEBUG_INFO("HyFi classifier Module init\n");
 
-	/*
-	 * Initialise our global lock
-	 */
-	spin_lock_init(&ecm_classifier_hyfi_lock);
-
-	/*
-	 * Register the Sub system
-	 */
-	result = subsys_system_register(&ecm_classifier_hyfi_subsys, NULL);
-	if (result) {
-		DEBUG_ERROR("Failed to register sub system %d\n", result);
-		return result;
+	ecm_classifier_hyfi_dentry = debugfs_create_dir("ecm_classifier_hyfi", dentry);
+	if (!ecm_classifier_hyfi_dentry) {
+		DEBUG_ERROR("Failed to create ecm hyfi classifier directory in debugfs\n");
+		goto classifier_task_cleanup;
 	}
 
-	/*
-	 * Register System device control
-	 */
-	memset(&ecm_classifier_hyfi_dev, 0, sizeof(ecm_classifier_hyfi_dev));
-	ecm_classifier_hyfi_dev.id = 0;
-	ecm_classifier_hyfi_dev.bus = &ecm_classifier_hyfi_subsys;
-	ecm_classifier_hyfi_dev.release = &ecm_classifier_hyfi_dev_release;
-	result = device_register(&ecm_classifier_hyfi_dev);
-	if (result) {
-		DEBUG_ERROR("Failed to register System device %d\n", result);
-		goto classifier_task_cleanup_1;
+	if (!debugfs_create_bool("enabled", S_IRUGO | S_IWUSR, ecm_classifier_hyfi_dentry,
+					(u32 *)&ecm_classifier_hyfi_enabled)) {
+		DEBUG_ERROR("Failed to create ecm hyfi classifier enabled file in debugfs\n");
+		goto classifier_task_cleanup;
 	}
 
-	/*
-	 * Create files, one for each parameter supported by this module
-	 */
-	for (i = 0; i < ARRAY_SIZE(ecm_classifier_hyfi_attrs); i++) {
-		result = device_create_file(&ecm_classifier_hyfi_dev, ecm_classifier_hyfi_attrs[i]);
-		if (result) {
-			DEBUG_ERROR("Failed to register system device file %d\n", result);
-			goto classifier_task_cleanup_2;
-		}
+	if (!debugfs_create_file("cmd", S_IWUSR, ecm_classifier_hyfi_dentry,
+					NULL, &ecm_classifier_hyfi_cmd_fops)) {
+		DEBUG_ERROR("Failed to create ecm hyfi classifier cmd file in debugfs\n");
+		goto classifier_task_cleanup;
 	}
 
 	/*
@@ -911,7 +812,7 @@ int ecm_classifier_hyfi_rules_init(void)
 	ecm_classifier_hyfi_li = ecm_db_listener_alloc();
 	if (!ecm_classifier_hyfi_li) {
 		DEBUG_ERROR("Failed to allocate listener\n");
-		goto classifier_task_cleanup_2;
+		goto classifier_task_cleanup;
 	}
 
 	/*
@@ -934,15 +835,10 @@ int ecm_classifier_hyfi_rules_init(void)
 
 	return 0;
 
-classifier_task_cleanup_2:
-	while (--i >= 0) {
-		device_remove_file(&ecm_classifier_hyfi_dev, ecm_classifier_hyfi_attrs[i]);
-	}
-	device_unregister(&ecm_classifier_hyfi_dev);
-classifier_task_cleanup_1:
-	bus_unregister(&ecm_classifier_hyfi_subsys);
+classifier_task_cleanup:
 
-	return result;
+	debugfs_remove_recursive(ecm_classifier_hyfi_dentry);
+	return -1;
 }
 EXPORT_SYMBOL(ecm_classifier_hyfi_rules_init);
 
@@ -951,7 +847,6 @@ EXPORT_SYMBOL(ecm_classifier_hyfi_rules_init);
  */
 void ecm_classifier_hyfi_rules_exit(void)
 {
-	int i;
 	DEBUG_INFO("HyFi classifier Module exit\n");
 
 	spin_lock_bh(&ecm_classifier_hyfi_lock);
@@ -969,11 +864,11 @@ void ecm_classifier_hyfi_rules_exit(void)
 		ecm_classifier_hyfi_li = NULL;
 	}
 
-	for (i = 0; i < ARRAY_SIZE(ecm_classifier_hyfi_attrs); i++) {
-		device_remove_file(&ecm_classifier_hyfi_dev, ecm_classifier_hyfi_attrs[i]);
+	/*
+	 * Remove the debugfs files recursively.
+	 */
+	if (ecm_classifier_hyfi_dentry) {
+		debugfs_remove_recursive(ecm_classifier_hyfi_dentry);
 	}
-
-	device_unregister(&ecm_classifier_hyfi_dev);
-	bus_unregister(&ecm_classifier_hyfi_subsys);
 }
 EXPORT_SYMBOL(ecm_classifier_hyfi_rules_exit);

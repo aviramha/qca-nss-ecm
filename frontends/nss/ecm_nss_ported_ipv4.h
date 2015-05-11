@@ -24,10 +24,5 @@ extern unsigned int ecm_nss_ported_ipv4_process(struct net_device *out_dev, stru
 							struct nf_conntrack_tuple *orig_tuple, struct nf_conntrack_tuple *reply_tuple,
 							ip_addr_t ip_src_addr, ip_addr_t ip_dest_addr, ip_addr_t ip_src_addr_nat, 
 							ip_addr_t ip_dest_addr_nat);
+extern bool ecm_nss_ported_ipv4_debugfs_init(struct dentry *dentry);
 
-extern ssize_t ecm_nss_ported_ipv4_get_tcp_accelerated_count(struct device *dev,
-				  struct device_attribute *attr,
-				  char *buf);
-extern ssize_t ecm_nss_ported_ipv4_get_udp_accelerated_count(struct device *dev,
-				  struct device_attribute *attr,
-				  char *buf);

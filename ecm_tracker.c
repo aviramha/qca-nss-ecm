@@ -69,7 +69,7 @@ int ecm_tracker_data_limit = ECM_TRACKER_GLOBAL_DATA_LIMIT_DEFAULT;
 int ecm_tracker_data_buffer_limit = ECM_TRACKER_GLOBAL_DATA_BUFFER_LIMIT_DEFAULT;
 							/* Tracked limit for data across all instances */
 #endif
-spinlock_t ecm_tracker_lock;				/* Global lock for the tracker globals */
+static DEFINE_SPINLOCK(ecm_tracker_lock);				/* Global lock for the tracker globals */
 
 struct ecm_tracker_ip_protocols;
 
@@ -1144,23 +1144,3 @@ const char *ecm_tracker_connection_state_to_string(enum ecm_tracker_connection_s
 	return ecm_tracker_connection_state_strings[s];
 }
 EXPORT_SYMBOL(ecm_tracker_connection_state_to_string);
-
-/*
- * ecm_tracker_init()
- */
-int ecm_tracker_init(void)
-{
-	DEBUG_INFO("Tracker Module init\n");
-	spin_lock_init(&ecm_tracker_lock);
-	return 0;
-}
-EXPORT_SYMBOL(ecm_tracker_init);
-
-/*
- * ecm_tracker_exit()
- */
-void ecm_tracker_exit(void)
-{
-	DEBUG_INFO("Tracker Module exit\n");
-}
-EXPORT_SYMBOL(ecm_tracker_exit);

@@ -21,10 +21,8 @@
 #include <linux/module.h>
 #include <linux/skbuff.h>
 #include <linux/icmp.h>
-#include <linux/sysctl.h>
+#include <linux/debugfs.h>
 #include <linux/kthread.h>
-#include <linux/device.h>
-#include <linux/fs.h>
 #include <linux/pkt_sched.h>
 #include <linux/string.h>
 #include <net/route.h>
@@ -107,14 +105,14 @@ static bool ecm_classifier_dscp_enabled = true;			/* Operational behaviour */
 static bool ecm_classifier_dscp_terminate_pending = false;	/* True when the user wants us to terminate */
 
 /*
- * System device linkage
+ * Debugfs dentry object.
  */
-static struct device ecm_classifier_dscp_dev;		/* System device linkage */
+static struct dentry *ecm_classifier_dscp_dentry;
 
 /*
  * Locking of the classifier structures
  */
-static spinlock_t ecm_classifier_dscp_lock;			/* Protect SMP access. */
+static DEFINE_SPINLOCK(ecm_classifier_dscp_lock);			/* Protect SMP access. */
 
 /*
  * List of our classifier instances
@@ -650,128 +648,26 @@ struct ecm_classifier_dscp_instance *ecm_classifier_dscp_instance_alloc(struct e
 EXPORT_SYMBOL(ecm_classifier_dscp_instance_alloc);
 
 /*
- * ecm_classifier_dscp_get_enabled()
- */
-static ssize_t ecm_classifier_dscp_get_enabled(struct device *dev,
-				  struct device_attribute *attr,
-				  char *buf)
-{
-	ssize_t count;
-	int num;
-
-	/*
-	 * Operate under our locks
-	 */
-	DEBUG_TRACE("get enabled\n");
-	spin_lock_bh(&ecm_classifier_dscp_lock);
-	num = ecm_classifier_dscp_enabled;
-	spin_unlock_bh(&ecm_classifier_dscp_lock);
-
-	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", num);
-	return count;
-}
-
-/*
- * ecm_classifier_dscp_set_enabled()
- */
-static ssize_t ecm_classifier_dscp_set_enabled(struct device *dev,
-				  struct device_attribute *attr,
-				  const char *buf, size_t count)
-{
-	char num_buf[12];
-	int num;
-
-	/*
-	 * Get the number from buf into a properly z-termed number buffer
-	 */
-	if (count > 11) return 0;
-	memcpy(num_buf, buf, count);
-	num_buf[count] = '\0';
-	sscanf(num_buf, "%d", &num);
-	DEBUG_TRACE("ecm_classifier_dscp_enabled = %d\n", num);
-
-	/*
-	 * Operate under our locks
-	 */
-	spin_lock_bh(&ecm_classifier_dscp_lock);
-	ecm_classifier_dscp_enabled = num;
-	spin_unlock_bh(&ecm_classifier_dscp_lock);
-
-	return count;
-}
-
-/*
- * System device attributes for the dscp classifier itself.
- */
-static DEVICE_ATTR(enabled, 0644, ecm_classifier_dscp_get_enabled, ecm_classifier_dscp_set_enabled);
-
-/*
- * Sub system node of the ECM dscp classifier
- * Sys device control points can be found at /sys/devices/system/ecm_classifier_dscp/ecm_classifier_dscpX/
- */
-static struct bus_type ecm_classifier_dscp_subsys = {
-	.name = "ecm_classifier_dscp",
-	.dev_name = "ecm_classifier_dscp",
-};
-
-/*
- * ecm_classifier_dscp_dev_release()
- *	This is a dummy release function for device.
- */
-static void ecm_classifier_dscp_dev_release(struct device *dev)
-{
-
-}
-
-/*
  * ecm_classifier_dscp_init()
  */
-int ecm_classifier_dscp_init(void)
+int ecm_classifier_dscp_init(struct dentry *dentry)
 {
-	int result;
 	DEBUG_INFO("DSCP classifier Module init\n");
 
-	/*
-	 * Initialise our global lock
-	 */
-	spin_lock_init(&ecm_classifier_dscp_lock);
-
-	/*
-	 * Register the sub system
-	 */
-	result = subsys_system_register(&ecm_classifier_dscp_subsys, NULL);
-	if (result) {
-		DEBUG_WARN("Failed to register sub system\n");
-		return result;
+	ecm_classifier_dscp_dentry = debugfs_create_dir("ecm_classifier_dscp", dentry);
+	if (!ecm_classifier_dscp_dentry) {
+		DEBUG_ERROR("Failed to create ecm dscp directory in debugfs\n");
+		return -1;
 	}
 
-	/*
-	 * Register SYSFS device control
-	 */
-	memset(&ecm_classifier_dscp_dev, 0, sizeof(ecm_classifier_dscp_dev));
-	ecm_classifier_dscp_dev.id = 0;
-	ecm_classifier_dscp_dev.bus = &ecm_classifier_dscp_subsys;
-	ecm_classifier_dscp_dev.release = &ecm_classifier_dscp_dev_release;
-	result = device_register(&ecm_classifier_dscp_dev);
-	if (result) {
-		DEBUG_WARN("Failed to register system device\n");
-		goto classifier_task_cleanup_1;
-	}
-
-	result = device_create_file(&ecm_classifier_dscp_dev, &dev_attr_enabled);
-	if (result) {
-		DEBUG_ERROR("Failed to register enabled system device file\n");
-		goto classifier_task_cleanup_2;
+	if (!debugfs_create_bool("enabled", S_IRUGO | S_IWUSR, ecm_classifier_dscp_dentry,
+					(u32 *)&ecm_classifier_dscp_enabled)) {
+		DEBUG_ERROR("Failed to create dscp enabled file in debugfs\n");
+		debugfs_remove_recursive(ecm_classifier_dscp_dentry);
+		return -1;
 	}
 
 	return 0;
-
-classifier_task_cleanup_2:
-	device_unregister(&ecm_classifier_dscp_dev);
-classifier_task_cleanup_1:
-	bus_unregister(&ecm_classifier_dscp_subsys);
-
-	return result;
 }
 EXPORT_SYMBOL(ecm_classifier_dscp_init);
 
@@ -786,8 +682,11 @@ void ecm_classifier_dscp_exit(void)
 	ecm_classifier_dscp_terminate_pending = true;
 	spin_unlock_bh(&ecm_classifier_dscp_lock);
 
-	device_remove_file(&ecm_classifier_dscp_dev, &dev_attr_enabled);
-	device_unregister(&ecm_classifier_dscp_dev);
-	bus_unregister(&ecm_classifier_dscp_subsys);
+	/*
+	 * Remove the debugfs files recursively.
+	 */
+	if (ecm_classifier_dscp_dentry) {
+		debugfs_remove_recursive(ecm_classifier_dscp_dentry);
+	}
 }
 EXPORT_SYMBOL(ecm_classifier_dscp_exit);

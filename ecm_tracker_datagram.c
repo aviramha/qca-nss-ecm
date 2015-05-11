@@ -103,7 +103,7 @@ struct ecm_tracker_datagram_internal_instance {
 };
 
 int ecm_tracker_datagram_count = 0;		/* Counts the number of DATAGRAM data trackers right now */
-spinlock_t ecm_tracker_datagram_lock;		/* Global lock for the tracker globals */
+static DEFINE_SPINLOCK(ecm_tracker_datagram_lock);		/* Global lock for the tracker globals */
 
 /*
  * ecm_trracker_datagram_connection_state_matrix[][]
@@ -767,23 +767,3 @@ struct ecm_tracker_datagram_instance *ecm_tracker_datagram_alloc(void)
 	return (struct ecm_tracker_datagram_instance *)dtii;
 }
 EXPORT_SYMBOL(ecm_tracker_datagram_alloc);
-
-/*
- * ecm_tracker_datagram_module_init()
- */
-int ecm_tracker_datagram_module_init(void)
-{
-	DEBUG_INFO("Datagram Tracker Module init\n");
-	spin_lock_init(&ecm_tracker_datagram_lock);
-	return 0;
-}
-EXPORT_SYMBOL(ecm_tracker_datagram_module_init);
-
-/*
- * ecm_tracker_datagram_module_exit()
- */
-void ecm_tracker_datagram_module_exit(void)
-{
-	DEBUG_INFO("Datagram Tracker Module exit\n");
-}
-EXPORT_SYMBOL(ecm_tracker_datagram_module_exit);

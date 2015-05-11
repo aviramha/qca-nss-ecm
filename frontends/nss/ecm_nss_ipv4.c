@@ -21,10 +21,8 @@
 #include <linux/module.h>
 #include <linux/skbuff.h>
 #include <linux/icmp.h>
-#include <linux/sysctl.h>
 #include <linux/kthread.h>
-#include <linux/device.h>
-#include <linux/fs.h>
+#include <linux/debugfs.h>
 #include <linux/pkt_sched.h>
 #include <linux/string.h>
 #include <net/route.h>
@@ -118,7 +116,7 @@ uint32_t ecm_nss_ipv4_accel_limit_mode = ECM_FRONT_END_ACCEL_LIMIT_MODE_UNLIMITE
  * Locking of the classifier - concurrency control for file global parameters.
  * NOTE: It is safe to take this lock WHILE HOLDING a feci->lock.  The reverse is NOT SAFE.
  */
-spinlock_t ecm_nss_ipv4_lock;			/* Protect against SMP access between netfilter, events and private threaded function. */
+DEFINE_SPINLOCK(ecm_nss_ipv4_lock);			/* Protect against SMP access between netfilter, events and private threaded function. */
 
 /*
  * Management thread control
@@ -136,9 +134,9 @@ static unsigned long ecm_nss_ipv4_decel_cmd_time_avg_samples = 0;	/* Sum of time
 static unsigned long ecm_nss_ipv4_decel_cmd_time_avg_set = 1;	/* How many samples in the set */
 
 /*
- * System device linkage
+ * Debugfs dentry object.
  */
-static struct device ecm_nss_ipv4_dev;		/* System device linkage */
+static struct dentry *ecm_nss_ipv4_dentry;
 
 /*
  * General operational control
@@ -1930,345 +1928,64 @@ int ecm_nss_ipv4_conntrack_event(unsigned long events, struct nf_conn *ct)
 }
 EXPORT_SYMBOL(ecm_nss_ipv4_conntrack_event);
 
-/*
- * ecm_nss_ipv4_get_stop()
- */
-static ssize_t ecm_nss_ipv4_get_stop(struct device *dev,
-				  struct device_attribute *attr,
-				  char *buf)
-{
-	ssize_t count;
-	int num;
-
-	/*
-	 * Operate under our locks
-	 */
-	spin_lock_bh(&ecm_nss_ipv4_lock);
-	num = ecm_nss_ipv4_stopped;
-	spin_unlock_bh(&ecm_nss_ipv4_lock);
-
-	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", num);
-	return count;
-}
-
 void ecm_nss_ipv4_stop(int num)
 {
-	/*
-	 * Operate under our locks and stop further processing of packets
-	 */
-	spin_lock_bh(&ecm_nss_ipv4_lock);
 	ecm_nss_ipv4_stopped = num;
-	spin_unlock_bh(&ecm_nss_ipv4_lock);
-
 }
 EXPORT_SYMBOL(ecm_nss_ipv4_stop);
 
 /*
- * ecm_nss_ipv4_set_stop()
- */
-static ssize_t ecm_nss_ipv4_set_stop(struct device *dev,
-				  struct device_attribute *attr,
-				  const char *buf, size_t count)
-{
-	char num_buf[12];
-	int num;
-
-	/*
-	 * Get the number from buf into a properly z-termed number buffer
-	 */
-	if (count > 11) {
-		return 0;
-	}
-	memcpy(num_buf, buf, count);
-	num_buf[count] = '\0';
-	sscanf(num_buf, "%d", &num);
-	DEBUG_TRACE("ecm_nss_ipv4_stop = %d\n", num);
-
-	ecm_nss_ipv4_stop(num);
-
-	return count;
-}
-
-/*
- * ecm_nss_ipv4_get_accelerated_count()
- */
-static ssize_t ecm_nss_ipv4_get_accelerated_count(struct device *dev,
-				  struct device_attribute *attr,
-				  char *buf)
-{
-	ssize_t count;
-	int num;
-
-	/*
-	 * Operate under our locks
-	 */
-	spin_lock_bh(&ecm_nss_ipv4_lock);
-	num = ecm_nss_ipv4_accelerated_count;
-	spin_unlock_bh(&ecm_nss_ipv4_lock);
-
-	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", num);
-	return count;
-}
-
-/*
- * ecm_nss_ipv4_get_pending_accel_count()
- */
-static ssize_t ecm_nss_ipv4_get_pending_accel_count(struct device *dev,
-				  struct device_attribute *attr,
-				  char *buf)
-{
-	ssize_t count;
-	int num;
-
-	/*
-	 * Operate under our locks
-	 */
-	spin_lock_bh(&ecm_nss_ipv4_lock);
-	num = ecm_nss_ipv4_pending_accel_count;
-	spin_unlock_bh(&ecm_nss_ipv4_lock);
-
-	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", num);
-	return count;
-}
-
-/*
- * ecm_nss_ipv4_get_pending_decel_count()
- */
-static ssize_t ecm_nss_ipv4_get_pending_decel_count(struct device *dev,
-				  struct device_attribute *attr,
-				  char *buf)
-{
-	ssize_t count;
-	int num;
-
-	/*
-	 * Operate under our locks
-	 */
-	spin_lock_bh(&ecm_nss_ipv4_lock);
-	num = ecm_nss_ipv4_pending_decel_count;
-	spin_unlock_bh(&ecm_nss_ipv4_lock);
-
-	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", num);
-	return count;
-}
-
-/*
- * ecm_nss_ipv4_get_no_action_limit_default()
- */
-static ssize_t ecm_nss_ipv4_get_no_action_limit_default(struct device *dev,
-				  struct device_attribute *attr,
-				  char *buf)
-{
-	ssize_t count;
-	int num;
-
-	/*
-	 * Operate under our locks
-	 */
-	spin_lock_bh(&ecm_nss_ipv4_lock);
-	num = ecm_nss_ipv4_no_action_limit_default;
-	spin_unlock_bh(&ecm_nss_ipv4_lock);
-
-	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", num);
-	return count;
-}
-
-/*
- * ecm_nss_ipv4_set_no_action_limit_default()
- */
-static ssize_t ecm_nss_ipv4_set_no_action_limit_default(struct device *dev,
-				  struct device_attribute *attr,
-				  const char *buf, size_t count)
-{
-	char num_buf[12];
-	int num;
-
-	/*
-	 * Get the number from buf into a properly z-termed number buffer
-	 */
-	if (count > 11) {
-		return 0;
-	}
-	memcpy(num_buf, buf, count);
-	num_buf[count] = '\0';
-	sscanf(num_buf, "%d", &num);
-	DEBUG_TRACE("ecm_nss_ipv4_no_action_limit_default = %d\n", num);
-
-	spin_lock_bh(&ecm_nss_ipv4_lock);
-	ecm_nss_ipv4_no_action_limit_default = num;
-	spin_unlock_bh(&ecm_nss_ipv4_lock);
-
-	return count;
-}
-
-/*
- * ecm_nss_ipv4_get_driver_fail_limit_default()
- */
-static ssize_t ecm_nss_ipv4_get_driver_fail_limit_default(struct device *dev,
-				  struct device_attribute *attr,
-				  char *buf)
-{
-	ssize_t count;
-	int num;
-
-	/*
-	 * Operate under our locks
-	 */
-	spin_lock_bh(&ecm_nss_ipv4_lock);
-	num = ecm_nss_ipv4_driver_fail_limit_default;
-	spin_unlock_bh(&ecm_nss_ipv4_lock);
-
-	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", num);
-	return count;
-}
-
-/*
- * ecm_nss_ipv4_set_driver_fail_limit_default()
- */
-static ssize_t ecm_nss_ipv4_set_driver_fail_limit_default(struct device *dev,
-				  struct device_attribute *attr,
-				  const char *buf, size_t count)
-{
-	char num_buf[12];
-	int num;
-
-	/*
-	 * Get the number from buf into a properly z-termed number buffer
-	 */
-	if (count > 11) {
-		return 0;
-	}
-	memcpy(num_buf, buf, count);
-	num_buf[count] = '\0';
-	sscanf(num_buf, "%d", &num);
-	DEBUG_TRACE("ecm_nss_ipv4_driver_fail_limit_default = %d\n", num);
-
-	spin_lock_bh(&ecm_nss_ipv4_lock);
-	ecm_nss_ipv4_driver_fail_limit_default = num;
-	spin_unlock_bh(&ecm_nss_ipv4_lock);
-
-	return count;
-}
-
-/*
- * ecm_nss_ipv4_get_nack_limit_default()
- */
-static ssize_t ecm_nss_ipv4_get_nack_limit_default(struct device *dev,
-				  struct device_attribute *attr,
-				  char *buf)
-{
-	ssize_t count;
-	int num;
-
-	/*
-	 * Operate under our locks
-	 */
-	spin_lock_bh(&ecm_nss_ipv4_lock);
-	num = ecm_nss_ipv4_nack_limit_default;
-	spin_unlock_bh(&ecm_nss_ipv4_lock);
-
-	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", num);
-	return count;
-}
-
-/*
- * ecm_nss_ipv4_set_nack_limit_default()
- */
-static ssize_t ecm_nss_ipv4_set_nack_limit_default(struct device *dev,
-				  struct device_attribute *attr,
-				  const char *buf, size_t count)
-{
-	char num_buf[12];
-	int num;
-
-	/*
-	 * Get the number from buf into a properly z-termed number buffer
-	 */
-	if (count > 11) {
-		return 0;
-	}
-	memcpy(num_buf, buf, count);
-	num_buf[count] = '\0';
-	sscanf(num_buf, "%d", &num);
-	DEBUG_TRACE("ecm_nss_ipv4_nack_limit_default = %d\n", num);
-
-	spin_lock_bh(&ecm_nss_ipv4_lock);
-	ecm_nss_ipv4_nack_limit_default = num;
-	spin_unlock_bh(&ecm_nss_ipv4_lock);
-
-	return count;
-}
-
-/*
  * ecm_nss_ipv4_get_accel_limit_mode()
  */
-static ssize_t ecm_nss_ipv4_get_accel_limit_mode(struct device *dev,
-				  struct device_attribute *attr,
-				  char *buf)
+static int ecm_nss_ipv4_get_accel_limit_mode(void *data, u64 *val)
 {
-	ssize_t count;
-	int num;
+	*val = ecm_nss_ipv4_accel_limit_mode;
 
-	/*
-	 * Operate under our locks
-	 */
-	spin_lock_bh(&ecm_nss_ipv4_lock);
-	num = ecm_nss_ipv4_accel_limit_mode;
-	spin_unlock_bh(&ecm_nss_ipv4_lock);
-
-	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", num);
-	return count;
+	return 0;
 }
-
 
 /*
  * ecm_nss_ipv4_set_accel_limit_mode()
  */
-static ssize_t ecm_nss_ipv4_set_accel_limit_mode(struct device *dev,
-				  struct device_attribute *attr,
-				  const char *buf, size_t count)
+static int ecm_nss_ipv4_set_accel_limit_mode(void *data, u64 val)
 {
-	char num_buf[12];
-	int bits;
-
-	/*
-	 * Get the number from buf into a properly z-termed number buffer
-	 */
-	if (count > 11) {
-		return 0;
-	}
-	memcpy(num_buf, buf, count);
-	num_buf[count] = '\0';
-	sscanf(num_buf, "%d", &bits);
-	DEBUG_TRACE("ecm_nss_ipv4_accel_limit_mode = %x\n", bits);
+	DEBUG_TRACE("ecm_nss_ipv4_accel_limit_mode = %x\n", (int)val);
 
 	/*
 	 * Check that only valid bits are set.
 	 * It's fine for no bits to be set as that suggests no modes are wanted.
 	 */
-	if (bits && (bits ^ (ECM_FRONT_END_ACCEL_LIMIT_MODE_FIXED | ECM_FRONT_END_ACCEL_LIMIT_MODE_UNLIMITED))) {
-		DEBUG_WARN("ecm_nss_ipv4_accel_limit_mode = %x bad\n", bits);
-		return 0;
+	if (val && (val ^ (ECM_FRONT_END_ACCEL_LIMIT_MODE_FIXED | ECM_FRONT_END_ACCEL_LIMIT_MODE_UNLIMITED))) {
+		DEBUG_WARN("ecm_nss_ipv4_accel_limit_mode = %x bad\n", (int)val);
+		return -EINVAL;
 	}
 
-	spin_lock_bh(&ecm_nss_ipv4_lock);
-	ecm_nss_ipv4_accel_limit_mode = bits;
-	spin_unlock_bh(&ecm_nss_ipv4_lock);
+	ecm_nss_ipv4_accel_limit_mode = (int)val;
 
-	return count;
+	return 0;
 }
 
 /*
- * ecm_nss_ipv4_get_accel_average_millis()
+ * Debugfs attribute for accel limit mode.
  */
-static ssize_t ecm_nss_ipv4_get_accel_average_millis(struct device *dev,
-				  struct device_attribute *attr,
-				  char *buf)
+DEFINE_SIMPLE_ATTRIBUTE(ecm_nss_ipv4_accel_limit_mode_fops, ecm_nss_ipv4_get_accel_limit_mode, ecm_nss_ipv4_set_accel_limit_mode, "%llu\n");
+/*
+ * ecm_nss_ipv4_get_accel_cmd_avg_millis()
+ */
+static ssize_t ecm_nss_ipv4_get_accel_cmd_avg_millis(struct file *file,
+								char __user *user_buf,
+								size_t sz, loff_t *ppos)
 {
-	ssize_t count;
 	unsigned long set;
 	unsigned long samples;
 	unsigned long avg;
+	char *buf;
+	int ret;
+
+	buf = kmalloc(PAGE_SIZE, GFP_KERNEL);
+	if (!buf) {
+		return -ENOMEM;
+	}
 
 	/*
 	 * Operate under our locks.
@@ -2288,21 +2005,41 @@ static ssize_t ecm_nss_ipv4_get_accel_average_millis(struct device *dev,
 	avg *= 1000;
 	avg /= HZ;
 
-	count = snprintf(buf, (ssize_t)PAGE_SIZE, "avg=%lu\tsamples=%lu\tset_size=%lu\n", avg, samples, set);
-	return count;
+	ret = snprintf(buf, (ssize_t)PAGE_SIZE, "avg=%lu\tsamples=%lu\tset_size=%lu\n", avg, samples, set);
+	if (ret < 0) {
+		kfree(buf);
+		return -EFAULT;
+	}
+
+	ret = simple_read_from_buffer(user_buf, sz, ppos, buf, ret);
+	kfree(buf);
+	return ret;
 }
+
+/*
+ * File operations for accel command average time.
+ */
+static struct file_operations ecm_nss_ipv4_accel_cmd_avg_millis_fops = {
+	.read = ecm_nss_ipv4_get_accel_cmd_avg_millis,
+};
 
 /*
  * ecm_nss_ipv4_get_decel_average_millis()
  */
-static ssize_t ecm_nss_ipv4_get_decel_average_millis(struct device *dev,
-				  struct device_attribute *attr,
-				  char *buf)
+static ssize_t ecm_nss_ipv4_get_decel_cmd_avg_millis(struct file *file,
+								char __user *user_buf,
+								size_t sz, loff_t *ppos)
 {
-	ssize_t count;
 	unsigned long set;
 	unsigned long samples;
 	unsigned long avg;
+	char *buf;
+	int ret;
+
+	buf = kmalloc(PAGE_SIZE, GFP_KERNEL);
+	if (!buf) {
+		return -ENOMEM;
+	}
 
 	/*
 	 * Operate under our locks.
@@ -2322,114 +2059,110 @@ static ssize_t ecm_nss_ipv4_get_decel_average_millis(struct device *dev,
 	avg *= 1000;
 	avg /= HZ;
 
-	count = snprintf(buf, (ssize_t)PAGE_SIZE, "avg=%lu\tsamples=%lu\tset_size=%lu\n", avg, samples, set);
-	return count;
+	ret = snprintf(buf, (ssize_t)PAGE_SIZE, "avg=%lu\tsamples=%lu\tset_size=%lu\n", avg, samples, set);
+	if (ret < 0) {
+		kfree(buf);
+		return -EFAULT;
+	}
+
+	ret = simple_read_from_buffer(user_buf, sz, ppos, buf, ret);
+	kfree(buf);
+	return ret;
 }
 
 /*
- * System device attributes
+ * File operations for decel command average time.
  */
-static DEVICE_ATTR(stop, 0644, ecm_nss_ipv4_get_stop, ecm_nss_ipv4_set_stop);
-static DEVICE_ATTR(no_action_limit_default, 0644, ecm_nss_ipv4_get_no_action_limit_default, ecm_nss_ipv4_set_no_action_limit_default);
-static DEVICE_ATTR(driver_fail_limit_default, 0644, ecm_nss_ipv4_get_driver_fail_limit_default, ecm_nss_ipv4_set_driver_fail_limit_default);
-static DEVICE_ATTR(nack_limit_default, 0644, ecm_nss_ipv4_get_nack_limit_default, ecm_nss_ipv4_set_nack_limit_default);
-static DEVICE_ATTR(udp_accelerated_count, 0444, ecm_nss_ported_ipv4_get_udp_accelerated_count, NULL);
-static DEVICE_ATTR(tcp_accelerated_count, 0444, ecm_nss_ported_ipv4_get_tcp_accelerated_count, NULL);
-#ifdef ECM_NON_PORTED_SUPPORT_ENABLE
-static DEVICE_ATTR(non_ported_accelerated_count, 0444, ecm_nss_non_ported_ipv4_get_accelerated_count, NULL);
-#endif
-static DEVICE_ATTR(accelerated_count, 0444, ecm_nss_ipv4_get_accelerated_count, NULL);
-static DEVICE_ATTR(pending_accel_count, 0444, ecm_nss_ipv4_get_pending_accel_count, NULL);
-static DEVICE_ATTR(pending_decel_count, 0444, ecm_nss_ipv4_get_pending_decel_count, NULL);
-static DEVICE_ATTR(accel_limit_mode, 0644, ecm_nss_ipv4_get_accel_limit_mode, ecm_nss_ipv4_set_accel_limit_mode);
-static DEVICE_ATTR(accel_cmd_avg_millis, 0444, ecm_nss_ipv4_get_accel_average_millis, NULL);
-static DEVICE_ATTR(decel_cmd_avg_millis, 0444, ecm_nss_ipv4_get_decel_average_millis, NULL);
-
-/*
- * System device attribute array.
- */
-static struct device_attribute *ecm_nss_ipv4_attrs[] = {
-	&dev_attr_stop,
-	&dev_attr_no_action_limit_default,
-	&dev_attr_driver_fail_limit_default,
-	&dev_attr_nack_limit_default,
-	&dev_attr_udp_accelerated_count,
-	&dev_attr_tcp_accelerated_count,
-#ifdef ECM_NON_PORTED_SUPPORT_ENABLE
-	&dev_attr_non_ported_accelerated_count,
-#endif
-	&dev_attr_accelerated_count,
-	&dev_attr_pending_accel_count,
-	&dev_attr_pending_decel_count,
-	&dev_attr_accel_limit_mode,
-	&dev_attr_accel_cmd_avg_millis,
-	&dev_attr_decel_cmd_avg_millis
+static struct file_operations ecm_nss_ipv4_decel_cmd_avg_millis_fops = {
+	.read = ecm_nss_ipv4_get_decel_cmd_avg_millis,
 };
-
-/*
- * Sub System node of the front end
- * Sysdevice control points can be found at /sys/devices/system/ecm_nss_ipv4/ecm_nss_ipv4X/
- */
-static struct bus_type ecm_nss_ipv4_subsys = {
-	.name = "ecm_nss_ipv4",
-	.dev_name = "ecm_nss_ipv4",
-};
-
-/*
- * ecm_nss_ipv4_dev_release()
- *	This is a dummy release function for device.
- */
-static void ecm_nss_ipv4_dev_release(struct device *dev)
-{
-
-}
 
 /*
  * ecm_nss_ipv4_init()
  */
-int ecm_nss_ipv4_init(void)
+int ecm_nss_ipv4_init(struct dentry *dentry)
 {
-	int result;
-	int i;
+	int result = -1;
+
 	DEBUG_INFO("ECM NSS IPv4 init\n");
 
-	/*
-	 * Initialise our global lock
-	 */
-	spin_lock_init(&ecm_nss_ipv4_lock);
-
-	/*
-	 * Register the Sub system
-	 */
-	result = subsys_system_register(&ecm_nss_ipv4_subsys, NULL);
-	if (result) {
-		DEBUG_ERROR("Failed to register sub system %d\n", result);
+	ecm_nss_ipv4_dentry = debugfs_create_dir("ecm_nss_ipv4", dentry);
+	if (!ecm_nss_ipv4_dentry) {
+		DEBUG_ERROR("Failed to create ecm nss ipv4 directory in debugfs\n");
 		return result;
 	}
 
-	/*
-	 * Register System device control
-	 */
-	memset(&ecm_nss_ipv4_dev, 0, sizeof(ecm_nss_ipv4_dev));
-	ecm_nss_ipv4_dev.id = 0;
-	ecm_nss_ipv4_dev.bus = &ecm_nss_ipv4_subsys;
-	ecm_nss_ipv4_dev.release = ecm_nss_ipv4_dev_release;
-	result = device_register(&ecm_nss_ipv4_dev);
-	if (result) {
-		DEBUG_ERROR("Failed to register System device %d\n", result);
-		goto task_cleanup_1;
+	if (!debugfs_create_u32("stop", S_IRUGO | S_IWUSR, ecm_nss_ipv4_dentry,
+					(u32 *)&ecm_nss_ipv4_stopped)) {
+		DEBUG_ERROR("Failed to create ecm nss ipv4 stop file in debugfs\n");
+		goto task_cleanup;
 	}
 
-	/*
-	 * Create files, one for each parameter supported by this module
-	 */
-	for (i = 0; i < ARRAY_SIZE(ecm_nss_ipv4_attrs); i++) {
-		result = device_create_file(&ecm_nss_ipv4_dev, ecm_nss_ipv4_attrs[i]);
-		if (result) {
-			DEBUG_ERROR("Failed to register stop file %d\n", result);
-			goto task_cleanup_2;
-		}
+	if (!debugfs_create_u32("no_action_limit_default", S_IRUGO | S_IWUSR, ecm_nss_ipv4_dentry,
+					(u32 *)&ecm_nss_ipv4_no_action_limit_default)) {
+		DEBUG_ERROR("Failed to create ecm nss ipv4 no_action_limit_default file in debugfs\n");
+		goto task_cleanup;
 	}
+
+	if (!debugfs_create_u32("driver_fail_limit_default", S_IRUGO | S_IWUSR, ecm_nss_ipv4_dentry,
+					(u32 *)&ecm_nss_ipv4_driver_fail_limit_default)) {
+		DEBUG_ERROR("Failed to create ecm nss ipv4 driver_fail_limit_default file in debugfs\n");
+		goto task_cleanup;
+	}
+
+	if (!debugfs_create_u32("nack_limit_default", S_IRUGO | S_IWUSR, ecm_nss_ipv4_dentry,
+					(u32 *)&ecm_nss_ipv4_nack_limit_default)) {
+		DEBUG_ERROR("Failed to create ecm nss ipv4 nack_limit_default file in debugfs\n");
+		goto task_cleanup;
+	}
+
+	if (!debugfs_create_u32("accelerated_count", S_IRUGO, ecm_nss_ipv4_dentry,
+					(u32 *)&ecm_nss_ipv4_accelerated_count)) {
+		DEBUG_ERROR("Failed to create ecm nss ipv4 accelerated_count file in debugfs\n");
+		goto task_cleanup;
+	}
+
+	if (!debugfs_create_u32("pending_accel_count", S_IRUGO, ecm_nss_ipv4_dentry,
+					(u32 *)&ecm_nss_ipv4_pending_accel_count)) {
+		DEBUG_ERROR("Failed to create ecm nss ipv4 pending_accel_count file in debugfs\n");
+		goto task_cleanup;
+	}
+
+	if (!debugfs_create_u32("pending_decel_count", S_IRUGO, ecm_nss_ipv4_dentry,
+					(u32 *)&ecm_nss_ipv4_pending_decel_count)) {
+		DEBUG_ERROR("Failed to create ecm nss ipv4 pending_decel_count file in debugfs\n");
+		goto task_cleanup;
+	}
+
+	if (!debugfs_create_file("accel_limit_mode", S_IRUGO | S_IWUSR, ecm_nss_ipv4_dentry,
+					NULL, &ecm_nss_ipv4_accel_limit_mode_fops)) {
+		DEBUG_ERROR("Failed to create ecm nss ipv4 accel_limit_mode file in debugfs\n");
+		goto task_cleanup;
+	}
+
+	if (!debugfs_create_file("accel_cmd_avg_millis", S_IRUGO, ecm_nss_ipv4_dentry,
+					NULL, &ecm_nss_ipv4_accel_cmd_avg_millis_fops)) {
+		DEBUG_ERROR("Failed to create ecm nss ipv4 accel_cmd_avg_millis file in debugfs\n");
+		goto task_cleanup;
+	}
+
+	if (!debugfs_create_file("decel_cmd_avg_millis", S_IRUGO, ecm_nss_ipv4_dentry,
+					NULL, &ecm_nss_ipv4_decel_cmd_avg_millis_fops)) {
+		DEBUG_ERROR("Failed to create ecm nss ipv4 decel_cmd_avg_millis file in debugfs\n");
+		goto task_cleanup;
+	}
+
+	if (!ecm_nss_ported_ipv4_debugfs_init(ecm_nss_ipv4_dentry)) {
+		DEBUG_ERROR("Failed to create ecm ported files in debugfs\n");
+		goto task_cleanup;
+	}
+
+#ifdef ECM_NON_PORTED_SUPPORT_ENABLE
+	if (!ecm_nss_non_ported_ipv4_debugfs_init(ecm_nss_ipv4_dentry)) {
+		DEBUG_ERROR("Failed to create ecm non-ported files in debugfs\n");
+		goto task_cleanup;
+	}
+#endif
 
 	/*
 	 * Register netfilter hooks
@@ -2437,7 +2170,7 @@ int ecm_nss_ipv4_init(void)
 	result = nf_register_hooks(ecm_nss_ipv4_netfilter_hooks, ARRAY_SIZE(ecm_nss_ipv4_netfilter_hooks));
 	if (result < 0) {
 		DEBUG_ERROR("Can't register netfilter hooks.\n");
-		goto task_cleanup_2;
+		goto task_cleanup;
 	}
 
 	/*
@@ -2447,14 +2180,9 @@ int ecm_nss_ipv4_init(void)
 
 	return 0;
 
-task_cleanup_2:
-	while (--i >= 0) {
-		device_remove_file(&ecm_nss_ipv4_dev, ecm_nss_ipv4_attrs[i]);
-	}
-	device_unregister(&ecm_nss_ipv4_dev);
-task_cleanup_1:
-	bus_unregister(&ecm_nss_ipv4_subsys);
+task_cleanup:
 
+	debugfs_remove_recursive(ecm_nss_ipv4_dentry);
 	return result;
 }
 EXPORT_SYMBOL(ecm_nss_ipv4_init);
@@ -2464,8 +2192,8 @@ EXPORT_SYMBOL(ecm_nss_ipv4_init);
  */
 void ecm_nss_ipv4_exit(void)
 {
-	int i;
 	DEBUG_INFO("ECM NSS IPv4 Module exit\n");
+
 	spin_lock_bh(&ecm_nss_ipv4_lock);
 	ecm_nss_ipv4_terminate_pending = true;
 	spin_unlock_bh(&ecm_nss_ipv4_lock);
@@ -2481,11 +2209,11 @@ void ecm_nss_ipv4_exit(void)
 	 */
 	nss_ipv4_notify_unregister();
 
-	for (i = 0; i < ARRAY_SIZE(ecm_nss_ipv4_attrs); i++) {
-		device_remove_file(&ecm_nss_ipv4_dev, ecm_nss_ipv4_attrs[i]);
+	/*
+	 * Remove the debugfs files recursively.
+	 */
+	if (ecm_nss_ipv4_dentry) {
+		debugfs_remove_recursive(ecm_nss_ipv4_dentry);
 	}
-
-	device_unregister(&ecm_nss_ipv4_dev);
-	bus_unregister(&ecm_nss_ipv4_subsys);
 }
 EXPORT_SYMBOL(ecm_nss_ipv4_exit);

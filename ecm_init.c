@@ -15,69 +15,59 @@
  */
 #include <linux/module.h>
 #include <linux/of.h>
+#include <linux/debugfs.h>
 
 #include "ecm_front_end_ipv4.h"
 
-extern int ecm_tracker_init(void);
-extern void ecm_tracker_exit(void);
+struct dentry *ecm_dentry;	/* Dentry object for top level ecm debugfs directory */
 
-extern int ecm_db_init(void);
+extern int ecm_db_init(struct dentry *dentry);
 extern void ecm_db_connection_defunct_all(void);
 extern void ecm_db_exit(void);
 
-extern int ecm_tracker_tcp_module_init(void);
-extern void ecm_tracker_tcp_module_exit(void);
-
-extern int ecm_tracker_udp_module_init(void);
-extern void ecm_tracker_udp_module_exit(void);
-
-extern int ecm_tracker_datagram_module_init(void);
-extern void ecm_tracker_datagram_module_exit(void);
-
-extern int ecm_classifier_default_init(void);
+extern int ecm_classifier_default_init(struct dentry *dentry);
 extern void ecm_classifier_default_exit(void);
 
 #ifdef ECM_CLASSIFIER_NL_ENABLE
-extern int ecm_classifier_nl_rules_init(void);
+extern int ecm_classifier_nl_rules_init(struct dentry *dentry);
 extern void ecm_classifier_nl_rules_exit(void);
 #endif
 
 #ifdef ECM_CLASSIFIER_HYFI_ENABLE
-extern int ecm_classifier_hyfi_rules_init(void);
+extern int ecm_classifier_hyfi_rules_init(struct dentry *dentry);
 extern void ecm_classifier_hyfi_rules_exit(void);
 #endif
 
 extern int ecm_interface_init(void);
-extern void ecm_interface_stop(int);
 extern void ecm_interface_exit(void);
 
 #ifdef ECM_INTERFACE_BOND_ENABLE
-extern int ecm_bond_notifier_init(void);
+extern int ecm_bond_notifier_init(struct dentry *dentry);
 extern void ecm_bond_notifier_stop(int);
 extern void ecm_bond_notifier_exit(void);
 #endif
 
-extern int ecm_front_end_ipv4_init(void);
+extern int ecm_front_end_ipv4_init(struct dentry *dentry);
 extern void ecm_front_end_ipv4_stop(int);
 extern void ecm_front_end_ipv4_exit(void);
 
 #ifdef ECM_IPV6_ENABLE
-extern int ecm_front_end_ipv6_init(void);
+extern int ecm_front_end_ipv6_init(struct dentry *dentry);
 extern void ecm_front_end_ipv6_stop(int);
 extern void ecm_front_end_ipv6_exit(void);
 #endif
 
-extern int ecm_conntrack_notifier_init(void);
+extern int ecm_conntrack_notifier_init(struct dentry *dentry);
 extern void ecm_conntrack_notifier_stop(int);
 extern void ecm_conntrack_notifier_exit(void);
 
 #ifdef ECM_CLASSIFIER_DSCP_ENABLE
-extern int ecm_classifier_dscp_init(void);
+extern int ecm_classifier_dscp_init(struct dentry *dentry);
 extern void ecm_classifier_dscp_exit(void);
 #endif
 
 #ifdef ECM_STATE_OUTPUT_ENABLE
-extern int ecm_state_init(void);
+extern int ecm_state_init(struct dentry *dentry);
 extern void ecm_state_exit(void);
 #endif
 
@@ -99,52 +89,38 @@ static int __init ecm_init(void)
 #endif
 	printk(KERN_INFO "ECM init\n");
 
-	ret = ecm_tracker_init();
-	if (0 != ret) {
-		return ret;
+	ecm_dentry = debugfs_create_dir("ecm", NULL);
+	if (!ecm_dentry) {
+		printk("Failed to create ecm directory in debugfs\n");
+		return -1;
 	}
 
-	ret = ecm_db_init();
+	ret = ecm_db_init(ecm_dentry);
 	if (0 != ret) {
 		goto err_db;
 	}
 
-	ret = ecm_tracker_tcp_module_init();
-	if (0 != ret) {
-		goto err_tr_tcp;
-	}
-
-	ret = ecm_tracker_udp_module_init();
-	if (0 != ret) {
-		goto err_tr_udp;
-	}
-
-	ret = ecm_tracker_datagram_module_init();
-	if (0 != ret) {
-		goto err_tr_datagram;
-	}
-
-	ret = ecm_classifier_default_init();
+	ret = ecm_classifier_default_init(ecm_dentry);
 	if (0 != ret) {
 		goto err_cls_default;
 	}
 
 #ifdef ECM_CLASSIFIER_NL_ENABLE
-	ret = ecm_classifier_nl_rules_init();
+	ret = ecm_classifier_nl_rules_init(ecm_dentry);
 	if (0 != ret) {
 		goto err_cls_nl;
 	}
 #endif
 
 #ifdef ECM_CLASSIFIER_HYFI_ENABLE
-	ret = ecm_classifier_hyfi_rules_init();
+	ret = ecm_classifier_hyfi_rules_init(ecm_dentry);
 	if (0 != ret) {
 		goto err_cls_hyfi;
 	}
 #endif
 
 #ifdef ECM_CLASSIFIER_DSCP_ENABLE
-	ret = ecm_classifier_dscp_init();
+	ret = ecm_classifier_dscp_init(ecm_dentry);
 	if (0 != ret) {
 		goto err_cls_dscp;
 	}
@@ -156,31 +132,31 @@ static int __init ecm_init(void)
 	}
 
 #ifdef ECM_INTERFACE_BOND_ENABLE
-	ret = ecm_bond_notifier_init();
+	ret = ecm_bond_notifier_init(ecm_dentry);
 	if (0 != ret) {
 		goto err_bond;
 	}
 #endif
 
-	ret = ecm_front_end_ipv4_init();
+	ret = ecm_front_end_ipv4_init(ecm_dentry);
 	if (0 != ret) {
 		goto err_fe_ipv4;
 	}
 
 #ifdef ECM_IPV6_ENABLE
-	ret = ecm_front_end_ipv6_init();
+	ret = ecm_front_end_ipv6_init(ecm_dentry);
 	if (0 != ret) {
 		goto err_fe_ipv6;
 	}
 #endif
 
-	ret = ecm_conntrack_notifier_init();
+	ret = ecm_conntrack_notifier_init(ecm_dentry);
 	if (0 != ret) {
 		goto err_ct;
 	}
 
 #ifdef ECM_STATE_OUTPUT_ENABLE
-	ret = ecm_state_init();
+	ret = ecm_state_init(ecm_dentry);
 	if (0 != ret) {
 		goto err_state;
 	}
@@ -220,15 +196,9 @@ err_cls_nl:
 #endif
 	ecm_classifier_default_exit();
 err_cls_default:
-	ecm_tracker_datagram_module_exit();
-err_tr_datagram:
-	ecm_tracker_udp_module_exit();
-err_tr_udp:
-	ecm_tracker_tcp_module_exit();
-err_tr_tcp:
 	ecm_db_exit();
 err_db:
-	ecm_tracker_exit();
+	debugfs_remove_recursive(ecm_dentry);
 
 	printk(KERN_INFO "ECM init failed: %d\n", ret);
 	return ret;
@@ -261,8 +231,6 @@ static void __exit ecm_exit(void)
 	printk(KERN_INFO "stop front_end_ipv6\n");
 	ecm_front_end_ipv6_stop(1);
 #endif
-	printk(KERN_INFO "stop interface\n");
-	ecm_interface_stop(1);
 #ifdef ECM_INTERFACE_BOND_ENABLE
 	printk(KERN_INFO "stop bond notifier\n");
 	ecm_bond_notifier_stop(1);
@@ -303,16 +271,13 @@ static void __exit ecm_exit(void)
 #endif
 	printk(KERN_INFO "exit default classifier\n");
 	ecm_classifier_default_exit();
-	printk(KERN_INFO "exit datagram tracker\n");
-	ecm_tracker_datagram_module_exit();
-	printk(KERN_INFO "exit udp tracker\n");
-	ecm_tracker_udp_module_exit();
-	printk(KERN_INFO "exit tcp tracker\n");
-	ecm_tracker_tcp_module_exit();
 	printk(KERN_INFO "exit db\n");
 	ecm_db_exit();
-	printk(KERN_INFO "exit tracker\n");
-	ecm_tracker_exit();
+
+	if (ecm_dentry != NULL) {
+		printk("remove ecm debugfs\n");
+		debugfs_remove_recursive(ecm_dentry);
+	}
 
 	printk(KERN_INFO "ECM exit complete\n");
 }

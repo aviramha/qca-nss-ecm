@@ -18,11 +18,9 @@
 #include <linux/types.h>
 #include <linux/ip.h>
 #include <linux/module.h>
-#include <linux/sysctl.h>
 #include <linux/kthread.h>
-#include <linux/device.h>
-#include <linux/fs.h>
 #include <linux/string.h>
+#include <linux/debugfs.h>
 #include <asm/unaligned.h>
 #include <asm/uaccess.h>	/* for put_user */
 #include <linux/inet.h>
@@ -55,14 +53,14 @@
 #define ECM_STATE_FILE_INSTANCE_MAGIC 0xB3FE
 
 /*
- * System device linkage
+ * Debugfs dentry object.
  */
-static struct device ecm_state_dev;				/* System device linkage */
+static struct dentry *ecm_state_dentry;
 
 /*
  * Locking of the state - concurrency control
  */
-static spinlock_t ecm_state_lock;					/* Protect the table from SMP access. */
+static DEFINE_SPINLOCK(ecm_state_lock);					/* Protect the table from SMP access. */
 
 /*
  * Character device stuff - used to communicate status back to user space
@@ -128,107 +126,6 @@ struct ecm_state_file_instance {
 };
 static int ecm_state_file_output_mask = ECM_STATE_FILE_OUTPUT_CONNECTIONS;
 							/* Bit mask specifies which data to output in the state file */
-
-/*
- * ecm_db_get_state_dev_major()
- */
-static ssize_t ecm_db_get_state_dev_major(struct device *dev,
-				  struct device_attribute *attr,
-				  char *buf)
-{
-	ssize_t count;
-	int major;
-
-	spin_lock_bh(&ecm_state_lock);
-	major = ecm_state_dev_major_id;
-	spin_unlock_bh(&ecm_state_lock);
-
-	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", major);
-
-	return count;
-}
-
-/*
- * ecm_db_get_state_file_output_mask()
- */
-static ssize_t ecm_db_get_state_file_output_mask(struct device *dev,
-				  struct device_attribute *attr,
-				  char *buf)
-{
-	ssize_t count;
-	int num;
-
-	/*
-	 * Operate under our locks
-	 */
-	spin_lock_bh(&ecm_state_lock);
-	num = ecm_state_file_output_mask;
-	spin_unlock_bh(&ecm_state_lock);
-
-	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", num);
-	return count;
-}
-
-/*
- * ecm_db_set_state_file_output_mask()
- */
-static ssize_t ecm_db_set_state_file_output_mask(struct device *dev,
-				  struct device_attribute *attr,
-				  const char *buf, size_t count)
-{
-	char num_buf[12];
-	int num;
-
-	/*
-	 * Get the number from buf into a properly z-termed number buffer
-	 */
-	if (count > 11) return 0;
-	memcpy(num_buf, buf, count);
-	num_buf[count] = '\0';
-	sscanf(num_buf, "%d", &num);
-	DEBUG_TRACE("ecm_state_file_output_mask = %x\n", num);
-
-	/*
-	 * Operate under our locks
-	 */
-	spin_lock_bh(&ecm_state_lock);
-	ecm_state_file_output_mask = num;
-	spin_unlock_bh(&ecm_state_lock);
-
-	return count;
-}
-
-/*
- * SysFS attributes for the default classifier itself.
- */
-static DEVICE_ATTR(state_dev_major, 0444, ecm_db_get_state_dev_major, NULL);
-static DEVICE_ATTR(state_file_output_mask, 0644, ecm_db_get_state_file_output_mask, ecm_db_set_state_file_output_mask);
-
-/*
- * System device attribute array.
- */
-static struct device_attribute *ecm_state_attrs[] = {
-	&dev_attr_state_dev_major,
-	&dev_attr_state_file_output_mask,
-};
-
-/*
- * Sub system node of the ECM DB State
- * Sys device control points can be found at /sys/devices/system/ecm_state/ecm_stateX/
- */
-static struct bus_type ecm_state_subsys = {
-	.name = "ecm_state",
-	.dev_name = "ecm_state",
-};
-
-/*
- * ecm_state_dev_release()
- *	This is a dummy release function for device.
- */
-static void ecm_state_dev_release(struct device *dev)
-{
-
-}
 
 /*
  * ecm_state_char_dev_conn_msg_prep()
@@ -1106,74 +1003,45 @@ static struct file_operations ecm_state_fops = {
 /*
  * ecm_state_init()
  */
-int ecm_state_init(void)
+int ecm_state_init(struct dentry *dentry)
 {
-	int result;
-	int attr_index;
+	int result = -1;
 	DEBUG_INFO("ECM State init\n");
 
-	/*
-	 * Initialise our global lock
-	 */
-	spin_lock_init(&ecm_state_lock);
-
-	/*
-	 * Register system device subsystem
-	 */
-	result = subsys_system_register(&ecm_state_subsys, NULL);
-	if (result) {
-		DEBUG_ERROR("Failed to register subsystem %d\n", result);
-		return result;
+	ecm_state_dentry = debugfs_create_dir("ecm_state", dentry);
+	if (!ecm_state_dentry) {
+		DEBUG_ERROR("Failed to create ecm state directory in debugfs\n");
+		return -1;
 	}
 
-	/*
-	 * Register system device that represents us
-	 */
-	memset(&ecm_state_dev, 0, sizeof(ecm_state_dev));
-	ecm_state_dev.id = 0;
-	ecm_state_dev.bus = &ecm_state_subsys;
-	ecm_state_dev.release = ecm_state_dev_release;
-	result = device_register(&ecm_state_dev);
-	if (result) {
-		DEBUG_ERROR("Failed to register system device %d\n", result);
-		goto init_cleanup_1;
+	if (!debugfs_create_u32("state_dev_major", S_IRUGO, ecm_state_dentry,
+					(u32 *)&ecm_state_dev_major_id)) {
+		DEBUG_ERROR("Failed to create ecm state dev major file in debugfs\n");
+		goto init_cleanup;
 	}
 
-	/*
-	 * Create files, one for each parameter supported
-	 */
-	for (attr_index = 0; attr_index < ARRAY_SIZE(ecm_state_attrs); attr_index++) {
-		result = device_create_file(&ecm_state_dev, ecm_state_attrs[attr_index]);
-		if (result) {
-			DEBUG_ERROR("Failed to create attribute file %d\n", result);
-			goto init_cleanup_2;
-		}
+	if (!debugfs_create_u32("state_file_output_mask", S_IRUGO | S_IWUSR, ecm_state_dentry,
+					(u32 *)&ecm_state_file_output_mask)) {
+		DEBUG_ERROR("Failed to create ecm state output mask file in debugfs\n");
+		goto init_cleanup;
 	}
 
 	/*
 	 * Register a char device that we will use to provide a dump of our state
 	 */
-	result = register_chrdev(0, ecm_state_subsys.name, &ecm_state_fops);
+	result = register_chrdev(0, "ecm_state", &ecm_state_fops);
 	if (result < 0) {
                 DEBUG_ERROR("Failed to register chrdev %d\n", result);
-		goto init_cleanup_2;
+		goto init_cleanup;
 	}
 	ecm_state_dev_major_id = result;
 	DEBUG_TRACE("registered chr dev major id assigned %d\n", ecm_state_dev_major_id);
 
 	return 0;
 
-init_cleanup_2:
-	/*
-	 * Unwind the attributes we have created so far
-	 */
-	while (--attr_index >= 0) {
-		device_remove_file(&ecm_state_dev, ecm_state_attrs[attr_index]);
-	}
-	device_unregister(&ecm_state_dev);
-init_cleanup_1:
-	bus_unregister(&ecm_state_subsys);
+init_cleanup:
 
+	debugfs_remove_recursive(ecm_state_dentry);
 	return result;
 }
 EXPORT_SYMBOL(ecm_state_init);
@@ -1183,18 +1051,16 @@ EXPORT_SYMBOL(ecm_state_init);
  */
 void ecm_state_exit(void)
 {
-	int attr_index;
-
 	DEBUG_INFO("ECM State exit\n");
 
-	unregister_chrdev(ecm_state_dev_major_id, ecm_state_subsys.name);
+	unregister_chrdev(ecm_state_dev_major_id, "ecm_state");
 
-	for (attr_index = 0; attr_index < ARRAY_SIZE(ecm_state_attrs); attr_index++) {
-		device_remove_file(&ecm_state_dev, ecm_state_attrs[attr_index]);
+	/*
+	 * Remove the debugfs files recursively.
+	 */
+	if (ecm_state_dentry) {
+		debugfs_remove_recursive(ecm_state_dentry);
 	}
-
-	device_unregister(&ecm_state_dev);
-	bus_unregister(&ecm_state_subsys);
 }
 EXPORT_SYMBOL(ecm_state_exit);
 

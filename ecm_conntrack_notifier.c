@@ -26,10 +26,8 @@
 #include <linux/module.h>
 #include <linux/skbuff.h>
 #include <linux/icmp.h>
-#include <linux/sysctl.h>
 #include <linux/kthread.h>
-#include <linux/device.h>
-#include <linux/fs.h>
+#include <linux/debugfs.h>
 #include <linux/pkt_sched.h>
 #include <linux/string.h>
 #include <net/route.h>
@@ -90,12 +88,12 @@
 /*
  * Locking of the classifier - concurrency control
  */
-static spinlock_t ecm_conntrack_notifier_lock;				/* Protect against SMP access between netfilter, events and private threaded function. */
+static DEFINE_SPINLOCK(ecm_conntrack_notifier_lock);				/* Protect against SMP access between netfilter, events and private threaded function. */
 
 /*
- * System device linkage
+ * Debugfs dentry object.
  */
-static struct device ecm_conntrack_notifier_dev;		/* System device linkage */
+static struct dentry *ecm_conntrack_notifier_dentry;
 
 /*
  * General operational control
@@ -176,128 +174,33 @@ static struct nf_ct_event_notifier ecm_conntrack_notifier = {
 #endif
 
 /*
- * ecm_conntrack_notifier_get_stop()
+ * ecm_conntrack_notifier_stop()
  */
-static ssize_t ecm_conntrack_notifier_get_stop(struct device *dev,
-				  struct device_attribute *attr,
-				  char *buf)
-{
-	ssize_t count;
-	int num;
-
-	/*
-	 * Operate under our locks
-	 */
-	spin_lock_bh(&ecm_conntrack_notifier_lock);
-	num = ecm_conntrack_notifier_stopped;
-	spin_unlock_bh(&ecm_conntrack_notifier_lock);
-
-	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", num);
-	return count;
-}
-
 void ecm_conntrack_notifier_stop(int num)
 {
-	/*
-	 * Operate under our locks and stop further processing of packets
-	 */
-	spin_lock_bh(&ecm_conntrack_notifier_lock);
 	ecm_conntrack_notifier_stopped = num;
-	spin_unlock_bh(&ecm_conntrack_notifier_lock);
 }
 EXPORT_SYMBOL(ecm_conntrack_notifier_stop);
 
 /*
- * ecm_conntrack_notifier_set_stop()
- */
-static ssize_t ecm_conntrack_notifier_set_stop(struct device *dev,
-				  struct device_attribute *attr,
-				  const char *buf, size_t count)
-{
-	char num_buf[12];
-	int num;
-
-	/*
-	 * Get the number from buf into a properly z-termed number buffer
-	 */
-	if (count > 11) {
-		return 0;
-	}
-	memcpy(num_buf, buf, count);
-	num_buf[count] = '\0';
-	sscanf(num_buf, "%d", &num);
-	DEBUG_TRACE("ecm_conntrack_notifier_stop = %d\n", num);
-
-	ecm_conntrack_notifier_stop(num);
-
-	return count;
-}
-
-/*
- * System device attributes.
- */
-static DEVICE_ATTR(stop, 0644, ecm_conntrack_notifier_get_stop, ecm_conntrack_notifier_set_stop);
-
-/*
- * Sub systme node
- * Sys device  control points can be found at /sys/devices/system/ecm_conntrack_notifier/ecm_conntrack_notifierX/
- */
-static struct bus_type ecm_conntrack_notifier_subsys = {
-	.name = "ecm_conntrack_notifier",
-	.dev_name = "ecm_conntrack_notifier",
-};
-
-/*
- * ecm_conntrack_notifier_dev_release()
- *	This is a dummy release function for device.
- */
-static void ecm_conntrack_notifier_dev_release(struct device *dev)
-{
-
-}
-
-/*
  * ecm_conntrack_notifier_init()
  */
-int ecm_conntrack_notifier_init(void)
+int ecm_conntrack_notifier_init(struct dentry *dentry)
 {
 	int result;
 	DEBUG_INFO("ECM Conntrack Notifier init\n");
 
-	/*
-	 * Initialise our global lock
-	 */
-	spin_lock_init(&ecm_conntrack_notifier_lock);
-
-	/*
-	 * Register the sub system
-	 */
-	result = subsys_system_register(&ecm_conntrack_notifier_subsys, NULL);
-	if (result) {
-		DEBUG_ERROR("Failed to register sub system %d\n", result);
-		return result;
+	ecm_conntrack_notifier_dentry = debugfs_create_dir("ecm_conntrack_notifier", dentry);
+	if (!ecm_conntrack_notifier_dentry) {
+		DEBUG_ERROR("Failed to create ecm conntrack notifier directory in debugfs\n");
+		return -1;
 	}
 
-	/*
-	 * Register system device control
-	 */
-	memset(&ecm_conntrack_notifier_dev, 0, sizeof(ecm_conntrack_notifier_dev));
-	ecm_conntrack_notifier_dev.id = 0;
-	ecm_conntrack_notifier_dev.bus = &ecm_conntrack_notifier_subsys;
-	ecm_conntrack_notifier_dev.release = &ecm_conntrack_notifier_dev_release;
-	result = device_register(&ecm_conntrack_notifier_dev);
-	if (result) {
-		DEBUG_ERROR("Failed to register system device %d\n", result);
-		goto task_cleanup_1;
-	}
-
-	/*
-	 * Create files, one for each parameter supported by this module
-	 */
-	result = device_create_file(&ecm_conntrack_notifier_dev, &dev_attr_stop);
-	if (result) {
-		DEBUG_ERROR("Failed to register stop file %d\n", result);
-		goto task_cleanup_2;
+	if (!debugfs_create_u32("stop", S_IRUGO | S_IWUSR, ecm_conntrack_notifier_dentry,
+					(u32 *)&ecm_conntrack_notifier_stopped)) {
+		DEBUG_ERROR("Failed to create ecm conntrack notifier stopped file in debugfs\n");
+		debugfs_remove_recursive(ecm_conntrack_notifier_dentry);
+		return -1;
 	}
 
 #ifdef CONFIG_NF_CONNTRACK_EVENTS
@@ -307,18 +210,12 @@ int ecm_conntrack_notifier_init(void)
 	result = nf_conntrack_register_notifier(&init_net, &ecm_conntrack_notifier);
 	if (result < 0) {
 		DEBUG_ERROR("Can't register nf notifier hook.\n");
-		goto task_cleanup_2;
+		debugfs_remove_recursive(ecm_conntrack_notifier_dentry);
+		return result;
 	}
 #endif
 
 	return 0;
-
-task_cleanup_2:
-	device_unregister(&ecm_conntrack_notifier_dev);
-task_cleanup_1:
-	bus_unregister(&ecm_conntrack_notifier_subsys);
-
-	return result;
 }
 EXPORT_SYMBOL(ecm_conntrack_notifier_init);
 
@@ -331,8 +228,11 @@ void ecm_conntrack_notifier_exit(void)
 #ifdef CONFIG_NF_CONNTRACK_EVENTS
 	nf_conntrack_unregister_notifier(&init_net, &ecm_conntrack_notifier);
 #endif
-	device_remove_file(&ecm_conntrack_notifier_dev, &dev_attr_stop);
-	device_unregister(&ecm_conntrack_notifier_dev);
-	bus_unregister(&ecm_conntrack_notifier_subsys);
+	/*
+	 * Remove the debugfs files recursively.
+	 */
+	if (ecm_conntrack_notifier_dentry) {
+		debugfs_remove_recursive(ecm_conntrack_notifier_dentry);
+	}
 }
 EXPORT_SYMBOL(ecm_conntrack_notifier_exit);

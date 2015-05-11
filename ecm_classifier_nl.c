@@ -21,10 +21,8 @@
 #include <linux/module.h>
 #include <linux/skbuff.h>
 #include <linux/icmp.h>
-#include <linux/sysctl.h>
 #include <linux/kthread.h>
-#include <linux/device.h>
-#include <linux/fs.h>
+#include <linux/debugfs.h>
 #include <linux/pkt_sched.h>
 #include <linux/string.h>
 #include <net/route.h>
@@ -112,14 +110,14 @@ static bool ecm_classifier_nl_enabled = false;		/* Operational behaviour */
 static bool ecm_classifier_nl_terminate_pending = false;		/* True when the user wants us to terminate */
 
 /*
- * System device linkage
+ * Debugfs dentry object.
  */
-static struct device ecm_classifier_nl_dev;		/* System device linkage */
+static struct dentry *ecm_classifier_nl_dentry;
 
 /*
  * Locking of the classifier structures
  */
-static spinlock_t ecm_classifier_nl_lock;			/* Protect SMP access. */
+static DEFINE_SPINLOCK(ecm_classifier_nl_lock);			/* Protect SMP access. */
 
 /*
  * List of our classifier instances
@@ -1112,12 +1110,13 @@ struct ecm_classifier_nl_instance *ecm_classifier_nl_instance_alloc(struct ecm_d
 EXPORT_SYMBOL(ecm_classifier_nl_instance_alloc);
 
 /*
- * ecm_classifier_nl_set_set_command()
+ * ecm_classifier_nl_set_command()
  *	Set Netlink command to accel/decel connection.
  */
-static ssize_t ecm_classifier_nl_set_command(struct device *dev,
-							  struct device_attribute *attr,
-							  const char *buf, size_t count)
+static ssize_t ecm_classifier_nl_set_command(struct file *file,
+						const char __user *user_buf,
+						size_t sz, loff_t *ppos)
+
 {
 #define ECM_CLASSIFIER_NL_SET_IP_COMMAND_FIELDS 7
 	char *cmd_buf;
@@ -1141,7 +1140,7 @@ static ssize_t ecm_classifier_nl_set_command(struct device *dev,
 	spin_lock_bh(&ecm_classifier_nl_lock);
 	if (!ecm_classifier_nl_enabled) {
 		spin_unlock_bh(&ecm_classifier_nl_lock);
-		return 0;
+		return -EINVAL;
 	}
 	spin_unlock_bh(&ecm_classifier_nl_lock);
 
@@ -1155,11 +1154,12 @@ static ssize_t ecm_classifier_nl_set_command(struct device *dev,
 	 *	S = Accelerate based on serial, <SERIAL> only becomes relevant
 	 *	s = Decelerate based on serial, <SERIAL> only becomes relevant
 	 */
-	cmd_buf = (char *)kzalloc(count + 1, GFP_ATOMIC);
+	cmd_buf = (char *)kzalloc(sz + 1, GFP_ATOMIC);
 	if (!cmd_buf) {
-		return 0;
+		return -ENOMEM;
 	}
-	memcpy(cmd_buf, buf, count);
+
+	sz = simple_write_to_buffer(cmd_buf, sz, ppos, user_buf, sz);
 
 	/*
 	 * Split the buffer into its fields
@@ -1179,7 +1179,7 @@ static ssize_t ecm_classifier_nl_set_command(struct device *dev,
 	if (field_count != ECM_CLASSIFIER_NL_SET_IP_COMMAND_FIELDS) {
 		DEBUG_WARN("invalid field count %d\n", field_count);
 		kfree(cmd_buf);
-		return 0;
+		return -EINVAL;
 	}
 
 	sscanf(fields[0], "%c", &cmd);
@@ -1209,12 +1209,12 @@ static ssize_t ecm_classifier_nl_set_command(struct device *dev,
 		break;
 	default:
 		DEBUG_WARN("invalid cmd %c\n", cmd);
-		return 0;
+		return -EINVAL;
 	}
 
 	if (!ci) {
 		DEBUG_WARN("database connection not found\n");
-		return 0;
+		return -ENOMEM;
 	}
 	DEBUG_TRACE("Connection found: %p\n", ci);
 
@@ -1224,7 +1224,7 @@ static ssize_t ecm_classifier_nl_set_command(struct device *dev,
 	cnli = (struct ecm_classifier_nl_instance *)ecm_db_connection_assigned_classifier_find_and_ref(ci, ECM_CLASSIFIER_TYPE_NL);
 	if (!cnli) {
 		ecm_db_connection_deref(ci);
-		return 0;
+		return -ENOMEM;
 	}
 
 	/*
@@ -1260,71 +1260,49 @@ static ssize_t ecm_classifier_nl_set_command(struct device *dev,
 	cnli->base.deref((struct ecm_classifier_instance *)cnli);
 	ecm_db_connection_deref(ci);
 
-	return count;
+	return sz;
 }
 
 /*
  * ecm_classifier_nl_rule_get_enabled()
  */
-static ssize_t ecm_classifier_nl_rule_get_enabled(struct device *dev,
-				  struct device_attribute *attr,
-				  char *buf)
+static int ecm_classifier_nl_rule_get_enabled(void *data, u64 *val)
 {
-	ssize_t count;
-	int num;
-
-	/*
-	 * Operate under our locks
-	 */
 	DEBUG_TRACE("get enabled\n");
-	spin_lock_bh(&ecm_classifier_nl_lock);
-	num = ecm_classifier_nl_enabled;
-	spin_unlock_bh(&ecm_classifier_nl_lock);
 
-	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", num);
-	return count;
+	*val = ecm_classifier_nl_enabled;
+
+	return 0;
 }
 
 /*
  * ecm_classifier_nl_rule_set_enabled()
  */
-static ssize_t ecm_classifier_nl_rule_set_enabled(struct device *dev,
-				  struct device_attribute *attr,
-				  const char *buf, size_t count)
+static int ecm_classifier_nl_rule_set_enabled(void *data, u64 val)
 {
-	char num_buf[12];
-	int enabled;
 	bool prev_state;
-
-	/*
-	 * Get the number from buf into a properly z-termed number buffer
-	 */
-	if (count > 11) return 0;
-	memcpy(num_buf, buf, count);
-	num_buf[count] = '\0';
-	sscanf(num_buf, "%d", &enabled);
 
 	/*
 	 * Boolean-ise
 	 */
-	if (enabled) {
-		enabled = true;
+	if (val) {
+		val = true;
 	}
-	DEBUG_TRACE("ecm_classifier_nl_enabled = %d\n", enabled);
+	DEBUG_TRACE("ecm_classifier_nl_enabled = %d\n", (int)val);
 
 	/*
 	 * Operate under our locks
 	 */
 	spin_lock_bh(&ecm_classifier_nl_lock);
 	prev_state = ecm_classifier_nl_enabled;
-	ecm_classifier_nl_enabled = (bool)enabled;
+	ecm_classifier_nl_enabled = (bool)val;
 	spin_unlock_bh(&ecm_classifier_nl_lock);
 
 	/*
 	 * If there is a change in operating state, and that change is that we are now disabled
 	 * then we need to re-generate all connections relevant to this classifier type
 	 */
-	if (!enabled && (prev_state ^ (bool)enabled)) {
+	if (!val && (prev_state ^ (bool)val)) {
 		/*
 		 * Change in state to become disabled.
 		 */
@@ -1334,40 +1312,20 @@ static ssize_t ecm_classifier_nl_rule_set_enabled(struct device *dev,
 		ecm_db_classifier_generation_change();
 #endif
 	}
-	return count;
+	return 0;
 }
 
 /*
- * System device attributes for the nl classifier itself.
+ * Debugfs attribute for the nl classifier enabled flag.
  */
-static DEVICE_ATTR(enabled, 0644, ecm_classifier_nl_rule_get_enabled, ecm_classifier_nl_rule_set_enabled);
-static DEVICE_ATTR(cmd, 0200, NULL, ecm_classifier_nl_set_command);
+DEFINE_SIMPLE_ATTRIBUTE(ecm_classifier_nl_enabled_fops, ecm_classifier_nl_rule_get_enabled, ecm_classifier_nl_rule_set_enabled, "%llu\n");
 
 /*
- * System device attribute array.
+ * File operations for nl classifier command.
  */
-static struct device_attribute *ecm_classifier_nl_attrs[] = {
-	&dev_attr_enabled,
-	&dev_attr_cmd,
+static struct file_operations ecm_classifier_nl_cmd_fops = {
+	.write = ecm_classifier_nl_set_command,
 };
-
-/*
- * System device node of the ECM nl classifier
- * Sysdevice control points can be found at /sys/devices/system/ecm_classifier_nl/ecm_classifier_nlX/
- */
-static struct bus_type ecm_classifier_nl_subsys = {
-	.name = "ecm_classifier_nl",
-	.dev_name = "ecm_classifier_nl",
-};
-
-/*
- * ecm_classifier_nl_dev_release()
- *	This is a dummy release function for device.
- */
-static void ecm_classifier_nl_dev_release(struct device *dev)
-{
-
-}
 
 /*
  * Generic Netlink attr checking policies
@@ -1450,54 +1408,35 @@ static void ecm_classifier_nl_unregister_genl(void)
 /*
  * ecm_classifier_nl_rules_init()
  */
-int ecm_classifier_nl_rules_init(void)
+int ecm_classifier_nl_rules_init(struct dentry *dentry)
 {
 	int result;
-	int i;
 	DEBUG_INFO("Netlink classifier Module init\n");
 
-	/*
-	 * Initialise our global lock
-	 */
-	spin_lock_init(&ecm_classifier_nl_lock);
-
-	/*
-	 * Register the Sub system
-	 */
-	result = subsys_system_register(&ecm_classifier_nl_subsys, NULL);
-	if (result) {
-		DEBUG_ERROR("Failed to register sub system %d\n", result);
-		return result;
+	ecm_classifier_nl_dentry = debugfs_create_dir("ecm_classifier_nl", dentry);
+	if (!ecm_classifier_nl_dentry) {
+		DEBUG_ERROR("Failed to create ecm nl classifier directory in debugfs\n");
+		return -1;
 	}
 
-	/*
-	 * Register System device control
-	 */
-	memset(&ecm_classifier_nl_dev, 0, sizeof(ecm_classifier_nl_dev));
-	ecm_classifier_nl_dev.id = 0;
-	ecm_classifier_nl_dev.bus = &ecm_classifier_nl_subsys;
-	ecm_classifier_nl_dev.release = &ecm_classifier_nl_dev_release;
-	result = device_register(&ecm_classifier_nl_dev);
-	if (result) {
-		DEBUG_ERROR("Failed to register System device %d\n", result);
-		goto classifier_task_cleanup_1;
+	if (!debugfs_create_file("enabled", S_IRUGO | S_IWUSR, ecm_classifier_nl_dentry,
+					NULL, &ecm_classifier_nl_enabled_fops)) {
+		DEBUG_ERROR("Failed to create ecm nl classifier enabled file in debugfs\n");
+		debugfs_remove_recursive(ecm_classifier_nl_dentry);
+		return -1;
 	}
 
-	/*
-	 * Create files, one for each parameter supported by this module
-	 */
-	for (i = 0; i < ARRAY_SIZE(ecm_classifier_nl_attrs); i++) {
-		result = device_create_file(&ecm_classifier_nl_dev, ecm_classifier_nl_attrs[i]);
-		if (result) {
-			DEBUG_ERROR("Failed to register system device file %d\n", result);
-			goto classifier_task_cleanup_2;
-		}
+	if (!debugfs_create_file("cmd", S_IRUGO | S_IWUSR, ecm_classifier_nl_dentry,
+					NULL, &ecm_classifier_nl_cmd_fops)) {
+		DEBUG_ERROR("Failed to create ecm nl classifier cmd file in debugfs\n");
+		debugfs_remove_recursive(ecm_classifier_nl_dentry);
+		return -1;
 	}
 
 	result = ecm_classifier_nl_register_genl();
 	if (result) {
-		DEBUG_TRACE("Failed to register genl sockets\n");
-		goto classifier_task_cleanup_2;
+		DEBUG_ERROR("Failed to register genl sockets\n");
+		return result;
 	}
 
 	/*
@@ -1506,7 +1445,7 @@ int ecm_classifier_nl_rules_init(void)
 	ecm_classifier_nl_li = ecm_db_listener_alloc();
 	if (!ecm_classifier_nl_li) {
 		DEBUG_ERROR("Failed to allocate listener\n");
-		goto classifier_task_cleanup_2;
+		return -1;
 	}
 
 	/*
@@ -1528,17 +1467,6 @@ int ecm_classifier_nl_rules_init(void)
 			ecm_classifier_nl_li);
 
 	return 0;
-
-classifier_task_cleanup_2:
-	while (--i >= 0) {
-		device_remove_file(&ecm_classifier_nl_dev, ecm_classifier_nl_attrs[i]);
-	}
-	device_unregister(&ecm_classifier_nl_dev);
-classifier_task_cleanup_1:
-	bus_unregister(&ecm_classifier_nl_subsys);
-
-	return result;
-
 }
 EXPORT_SYMBOL(ecm_classifier_nl_rules_init);
 
@@ -1547,7 +1475,6 @@ EXPORT_SYMBOL(ecm_classifier_nl_rules_init);
  */
 void ecm_classifier_nl_rules_exit(void)
 {
-	int i;
 	DEBUG_INFO("Netlink classifier Module exit\n");
 
 	/*
@@ -1566,11 +1493,11 @@ void ecm_classifier_nl_rules_exit(void)
 
 	ecm_classifier_nl_unregister_genl();
 
-	for (i = 0; i < ARRAY_SIZE(ecm_classifier_nl_attrs); i++) {
-		device_remove_file(&ecm_classifier_nl_dev, ecm_classifier_nl_attrs[i]);
+	/*
+	 * Remove the debugfs files recursively.
+	 */
+	if (ecm_classifier_nl_dentry) {
+		debugfs_remove_recursive(ecm_classifier_nl_dentry);
 	}
-
-	device_unregister(&ecm_classifier_nl_dev);
-	bus_unregister(&ecm_classifier_nl_subsys);
 }
 EXPORT_SYMBOL(ecm_classifier_nl_rules_exit);

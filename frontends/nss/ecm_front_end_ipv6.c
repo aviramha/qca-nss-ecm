@@ -21,10 +21,8 @@
 #include <linux/module.h>
 #include <linux/skbuff.h>
 #include <linux/icmp.h>
-#include <linux/sysctl.h>
+#include <linux/debugfs.h>
 #include <linux/kthread.h>
-#include <linux/device.h>
-#include <linux/fs.h>
 #include <linux/pkt_sched.h>
 #include <linux/string.h>
 #include <net/ip6_route.h>
@@ -162,12 +160,12 @@ uint32_t ecm_front_end_ipv6_accel_limit_mode = ECM_FRONT_END_ACCEL_LIMIT_MODE_UN
 /*
  * Locking of the classifier - concurrency control
  */
-static spinlock_t ecm_front_end_ipv6_lock;			/* Protect against SMP access between netfilter, events and private threaded function. */
+static DEFINE_SPINLOCK(ecm_front_end_ipv6_lock);			/* Protect against SMP access between netfilter, events and private threaded function. */
 
 /*
- * System device linkage
+ * Debugfs dentry object.
  */
-static struct device ecm_front_end_ipv6_dev;		/* System device linkage */
+static struct dentry *ecm_front_end_ipv6_dentry;
 
 /*
  * General operational control
@@ -8233,406 +8231,65 @@ int ecm_front_end_ipv6_conntrack_event(unsigned long events, struct nf_conn *ct)
 }
 EXPORT_SYMBOL(ecm_front_end_ipv6_conntrack_event);
 
-/*
- * ecm_front_end_ipv6_get_stop()
- */
-static ssize_t ecm_front_end_ipv6_get_stop(struct device *dev,
-				  struct device_attribute *attr,
-				  char *buf)
-{
-	ssize_t count;
-	int num;
-
-	/*
-	 * Operate under our locks
-	 */
-	spin_lock_bh(&ecm_front_end_ipv6_lock);
-	num = ecm_front_end_ipv6_stopped;
-	spin_unlock_bh(&ecm_front_end_ipv6_lock);
-
-	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", num);
-	return count;
-}
-
 void ecm_front_end_ipv6_stop(int num)
 {
-	/*
-	 * Operate under our locks and stop further processing of packets
-	 */
-	spin_lock_bh(&ecm_front_end_ipv6_lock);
 	ecm_front_end_ipv6_stopped = num;
-	spin_unlock_bh(&ecm_front_end_ipv6_lock);
 }
 EXPORT_SYMBOL(ecm_front_end_ipv6_stop);
 
 /*
- * ecm_front_end_ipv6_set_stop()
- */
-static ssize_t ecm_front_end_ipv6_set_stop(struct device *dev,
-				  struct device_attribute *attr,
-				  const char *buf, size_t count)
-{
-	char num_buf[12];
-	int num;
-
-	/*
-	 * Get the number from buf into a properly z-termed number buffer
-	 */
-	if (count > 11) {
-		return 0;
-	}
-	memcpy(num_buf, buf, count);
-	num_buf[count] = '\0';
-	sscanf(num_buf, "%d", &num);
-	DEBUG_TRACE("ecm_front_end_ipv6_stop = %d\n", num);
-
-	ecm_front_end_ipv6_stop(num);
-
-	return count;
-}
-
-/*
- * ecm_front_end_ipv6_get_udp_accelerated_count()
- */
-static ssize_t ecm_front_end_ipv6_get_udp_accelerated_count(struct device *dev,
-				  struct device_attribute *attr,
-				  char *buf)
-{
-	ssize_t count;
-	int num;
-
-	/*
-	 * Operate under our locks
-	 */
-	spin_lock_bh(&ecm_front_end_ipv6_lock);
-	num = ecm_front_end_ipv6_udp_accelerated_count;
-	spin_unlock_bh(&ecm_front_end_ipv6_lock);
-
-	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", num);
-	return count;
-}
-
-/*
- * ecm_front_end_ipv6_get_tcp_accelerated_count()
- */
-static ssize_t ecm_front_end_ipv6_get_tcp_accelerated_count(struct device *dev,
-				  struct device_attribute *attr,
-				  char *buf)
-{
-	ssize_t count;
-	int num;
-
-	/*
-	 * Operate under our locks
-	 */
-	spin_lock_bh(&ecm_front_end_ipv6_lock);
-	num = ecm_front_end_ipv6_tcp_accelerated_count;
-	spin_unlock_bh(&ecm_front_end_ipv6_lock);
-
-	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", num);
-	return count;
-}
-
-/*
- * ecm_front_end_ipv6_get_non_ported_accelerated_count()
- */
-static ssize_t ecm_front_end_ipv6_get_non_ported_accelerated_count(struct device *dev,
-				  struct device_attribute *attr,
-				  char *buf)
-{
-	ssize_t count;
-	int num;
-
-	/*
-	 * Operate under our locks
-	 */
-	spin_lock_bh(&ecm_front_end_ipv6_lock);
-	num = ecm_front_end_ipv6_non_ported_accelerated_count;
-	spin_unlock_bh(&ecm_front_end_ipv6_lock);
-
-	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", num);
-	return count;
-}
-
-/*
- * ecm_front_end_ipv6_get_accelerated_count()
- */
-static ssize_t ecm_front_end_ipv6_get_accelerated_count(struct device *dev,
-				  struct device_attribute *attr,
-				  char *buf)
-{
-	ssize_t count;
-	int num;
-
-	/*
-	 * Operate under our locks
-	 */
-	spin_lock_bh(&ecm_front_end_ipv6_lock);
-	num = ecm_front_end_ipv6_accelerated_count;
-	spin_unlock_bh(&ecm_front_end_ipv6_lock);
-
-	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", num);
-	return count;
-}
-
-/*
- * ecm_front_end_ipv6_get_pending_accel_count()
- */
-static ssize_t ecm_front_end_ipv6_get_pending_accel_count(struct device *dev,
-				  struct device_attribute *attr,
-				  char *buf)
-{
-	ssize_t count;
-	int num;
-
-	/*
-	 * Operate under our locks
-	 */
-	spin_lock_bh(&ecm_front_end_ipv6_lock);
-	num = ecm_front_end_ipv6_pending_accel_count;
-	spin_unlock_bh(&ecm_front_end_ipv6_lock);
-
-	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", num);
-	return count;
-}
-
-/*
- * ecm_front_end_ipv6_get_pending_decel_count()
- */
-static ssize_t ecm_front_end_ipv6_get_pending_decel_count(struct device *dev,
-				  struct device_attribute *attr,
-				  char *buf)
-{
-	ssize_t count;
-	int num;
-
-	/*
-	 * Operate under our locks
-	 */
-	spin_lock_bh(&ecm_front_end_ipv6_lock);
-	num = ecm_front_end_ipv6_pending_decel_count;
-	spin_unlock_bh(&ecm_front_end_ipv6_lock);
-
-	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", num);
-	return count;
-}
-
-/*
- * ecm_front_end_ipv6_get_no_action_limit_default()
- */
-static ssize_t ecm_front_end_ipv6_get_no_action_limit_default(struct device *dev,
-				  struct device_attribute *attr,
-				  char *buf)
-{
-	ssize_t count;
-	int num;
-
-	/*
-	 * Operate under our locks
-	 */
-	spin_lock_bh(&ecm_front_end_ipv6_lock);
-	num = ecm_front_end_ipv6_no_action_limit_default;
-	spin_unlock_bh(&ecm_front_end_ipv6_lock);
-
-	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", num);
-	return count;
-}
-
-/*
- * ecm_front_end_ipv6_set_no_action_limit_default()
- */
-static ssize_t ecm_front_end_ipv6_set_no_action_limit_default(struct device *dev,
-				  struct device_attribute *attr,
-				  const char *buf, size_t count)
-{
-	char num_buf[12];
-	int num;
-
-	/*
-	 * Get the number from buf into a properly z-termed number buffer
-	 */
-	if (count > 11) {
-		return 0;
-	}
-	memcpy(num_buf, buf, count);
-	num_buf[count] = '\0';
-	sscanf(num_buf, "%d", &num);
-	DEBUG_TRACE("ecm_front_end_ipv6_no_action_limit_default = %d\n", num);
-
-	spin_lock_bh(&ecm_front_end_ipv6_lock);
-	ecm_front_end_ipv6_no_action_limit_default = num;
-	spin_unlock_bh(&ecm_front_end_ipv6_lock);
-
-	return count;
-}
-
-/*
- * ecm_front_end_ipv6_get_driver_fail_limit_default()
- */
-static ssize_t ecm_front_end_ipv6_get_driver_fail_limit_default(struct device *dev,
-				  struct device_attribute *attr,
-				  char *buf)
-{
-	ssize_t count;
-	int num;
-
-	/*
-	 * Operate under our locks
-	 */
-	spin_lock_bh(&ecm_front_end_ipv6_lock);
-	num = ecm_front_end_ipv6_driver_fail_limit_default;
-	spin_unlock_bh(&ecm_front_end_ipv6_lock);
-
-	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", num);
-	return count;
-}
-
-/*
- * ecm_front_end_ipv6_set_driver_fail_limit_default()
- */
-static ssize_t ecm_front_end_ipv6_set_driver_fail_limit_default(struct device *dev,
-				  struct device_attribute *attr,
-				  const char *buf, size_t count)
-{
-	char num_buf[12];
-	int num;
-
-	/*
-	 * Get the number from buf into a properly z-termed number buffer
-	 */
-	if (count > 11) {
-		return 0;
-	}
-	memcpy(num_buf, buf, count);
-	num_buf[count] = '\0';
-	sscanf(num_buf, "%d", &num);
-	DEBUG_TRACE("ecm_front_end_ipv6_driver_fail_limit_default = %d\n", num);
-
-	spin_lock_bh(&ecm_front_end_ipv6_lock);
-	ecm_front_end_ipv6_driver_fail_limit_default = num;
-	spin_unlock_bh(&ecm_front_end_ipv6_lock);
-
-	return count;
-}
-
-/*
- * ecm_front_end_ipv6_get_nack_limit_default()
- */
-static ssize_t ecm_front_end_ipv6_get_nack_limit_default(struct device *dev,
-				  struct device_attribute *attr,
-				  char *buf)
-{
-	ssize_t count;
-	int num;
-
-	/*
-	 * Operate under our locks
-	 */
-	spin_lock_bh(&ecm_front_end_ipv6_lock);
-	num = ecm_front_end_ipv6_nack_limit_default;
-	spin_unlock_bh(&ecm_front_end_ipv6_lock);
-
-	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", num);
-	return count;
-}
-
-/*
- * ecm_front_end_ipv6_set_nack_limit_default()
- */
-static ssize_t ecm_front_end_ipv6_set_nack_limit_default(struct device *dev,
-				  struct device_attribute *attr,
-				  const char *buf, size_t count)
-{
-	char num_buf[12];
-	int num;
-
-	/*
-	 * Get the number from buf into a properly z-termed number buffer
-	 */
-	if (count > 11) {
-		return 0;
-	}
-	memcpy(num_buf, buf, count);
-	num_buf[count] = '\0';
-	sscanf(num_buf, "%d", &num);
-	DEBUG_TRACE("ecm_front_end_ipv6_nack_limit_default = %d\n", num);
-
-	spin_lock_bh(&ecm_front_end_ipv6_lock);
-	ecm_front_end_ipv6_nack_limit_default = num;
-	spin_unlock_bh(&ecm_front_end_ipv6_lock);
-
-	return count;
-}
-
-/*
  * ecm_front_end_ipv6_get_accel_limit_mode()
  */
-static ssize_t ecm_front_end_ipv6_get_accel_limit_mode(struct device *dev,
-				  struct device_attribute *attr,
-				  char *buf)
+static int ecm_front_end_ipv6_get_accel_limit_mode(void *data, u64 *val)
 {
-	ssize_t count;
-	int num;
+	*val = ecm_front_end_ipv6_accel_limit_mode;
 
-	/*
-	 * Operate under our locks
-	 */
-	spin_lock_bh(&ecm_front_end_ipv6_lock);
-	num = ecm_front_end_ipv6_accel_limit_mode;
-	spin_unlock_bh(&ecm_front_end_ipv6_lock);
-
-	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", num);
-	return count;
+	return 0;
 }
 
 /*
  * ecm_front_end_ipv6_set_accel_limit_mode()
  */
-static ssize_t ecm_front_end_ipv6_set_accel_limit_mode(struct device *dev,
-				  struct device_attribute *attr,
-				  const char *buf, size_t count)
+static int ecm_front_end_ipv6_set_accel_limit_mode(void *data, u64 val)
 {
-	char num_buf[12];
-	int bits;
-
-	/*
-	 * Get the number from buf into a properly z-termed number buffer
-	 */
-	if (count > 11) {
-		return 0;
-	}
-	memcpy(num_buf, buf, count);
-	num_buf[count] = '\0';
-	sscanf(num_buf, "%d", &bits);
-	DEBUG_TRACE("ecm_front_end_ipv6_accel_limit_mode = %x\n", bits);
+	DEBUG_TRACE("ecm_front_end_ipv6_accel_limit_mode = %x\n", (int)val);
 
 	/*
 	 * Check that only valid bits are set.
 	 * It's fine for no bits to be set as that suggests no modes are wanted.
 	 */
-	if (bits && (bits ^ (ECM_FRONT_END_ACCEL_LIMIT_MODE_FIXED | ECM_FRONT_END_ACCEL_LIMIT_MODE_UNLIMITED))) {
-		DEBUG_WARN("ecm_front_end_ipv6_accel_limit_mode = %x bad\n", bits);
-		return 0;
+	if (val && (val ^ (ECM_FRONT_END_ACCEL_LIMIT_MODE_FIXED | ECM_FRONT_END_ACCEL_LIMIT_MODE_UNLIMITED))) {
+		DEBUG_WARN("ecm_front_end_ipv6_accel_limit_mode = %x bad\n", (int)val);
+		return -EINVAL;
 	}
 
-	spin_lock_bh(&ecm_front_end_ipv6_lock);
-	ecm_front_end_ipv6_accel_limit_mode = bits;
-	spin_unlock_bh(&ecm_front_end_ipv6_lock);
+	ecm_front_end_ipv6_accel_limit_mode = (int)val;
 
-	return count;
+	return 0;
 }
 
 /*
- * ecm_front_end_ipv6_get_accel_average_millis()
+ * Debugfs attribute for accel limit mode.
  */
-static ssize_t ecm_front_end_ipv6_get_accel_average_millis(struct device *dev,
-				  struct device_attribute *attr,
-				  char *buf)
+DEFINE_SIMPLE_ATTRIBUTE(ecm_front_end_ipv6_accel_limit_mode_fops, ecm_front_end_ipv6_get_accel_limit_mode, ecm_front_end_ipv6_set_accel_limit_mode, "%llu\n");
+
+/*
+ * ecm_front_end_ipv6_get_accel_cmd_average_millis()
+ */
+static ssize_t ecm_front_end_ipv6_get_accel_cmd_avg_millis(struct file *file,
+								char __user *user_buf,
+								size_t sz, loff_t *ppos)
 {
-	ssize_t count;
 	unsigned long set;
 	unsigned long samples;
 	unsigned long avg;
+	char *buf;
+	int ret;
+
+	buf = kmalloc(PAGE_SIZE, GFP_KERNEL);
+	if (!buf) {
+		return -ENOMEM;
+	}
 
 	/*
 	 * Operate under our locks.
@@ -8652,21 +8309,41 @@ static ssize_t ecm_front_end_ipv6_get_accel_average_millis(struct device *dev,
 	avg *= 1000;
 	avg /= HZ;
 
-	count = snprintf(buf, (ssize_t)PAGE_SIZE, "avg=%lu\tsamples=%lu\tset_size=%lu\n", avg, samples, set);
-	return count;
+	ret = snprintf(buf, (ssize_t)PAGE_SIZE, "avg=%lu\tsamples=%lu\tset_size=%lu\n", avg, samples, set);
+	if (ret < 0) {
+		kfree(buf);
+		return -EFAULT;
+	}
+
+	ret = simple_read_from_buffer(user_buf, sz, ppos, buf, ret);
+	kfree(buf);
+	return ret;
 }
 
 /*
- * ecm_front_end_ipv6_get_decel_average_millis()
+ * File operations for accel command average time.
  */
-static ssize_t ecm_front_end_ipv6_get_decel_average_millis(struct device *dev,
-				  struct device_attribute *attr,
-				  char *buf)
+static struct file_operations ecm_front_end_ipv6_accel_cmd_avg_millis_fops = {
+	.read = ecm_front_end_ipv6_get_accel_cmd_avg_millis,
+};
+
+/*
+ * ecm_front_end_ipv6_get_decel_cmd_average_millis()
+ */
+static ssize_t ecm_front_end_ipv6_get_decel_cmd_avg_millis(struct file *file,
+								char __user *user_buf,
+								size_t sz, loff_t *ppos)
 {
-	ssize_t count;
 	unsigned long set;
 	unsigned long samples;
 	unsigned long avg;
+	char *buf;
+	int ret;
+
+	buf = kmalloc(PAGE_SIZE, GFP_KERNEL);
+	if (!buf) {
+		return -ENOMEM;
+	}
 
 	/*
 	 * Operate under our locks.
@@ -8686,109 +8363,115 @@ static ssize_t ecm_front_end_ipv6_get_decel_average_millis(struct device *dev,
 	avg *= 1000;
 	avg /= HZ;
 
-	count = snprintf(buf, (ssize_t)PAGE_SIZE, "avg=%lu\tsamples=%lu\tset_size=%lu\n", avg, samples, set);
-	return count;
+	ret = snprintf(buf, (ssize_t)PAGE_SIZE, "avg=%lu\tsamples=%lu\tset_size=%lu\n", avg, samples, set);
+	if (ret < 0) {
+		kfree(buf);
+		return -EFAULT;
+	}
+
+	ret = simple_read_from_buffer(user_buf, sz, ppos, buf, ret);
+	kfree(buf);
+	return ret;
 }
 
 /*
- * System device attributes
+ * File operations for decel command average time.
  */
-static DEVICE_ATTR(stop, 0644, ecm_front_end_ipv6_get_stop, ecm_front_end_ipv6_set_stop);
-static DEVICE_ATTR(no_action_limit_default, 0644, ecm_front_end_ipv6_get_no_action_limit_default, ecm_front_end_ipv6_set_no_action_limit_default);
-static DEVICE_ATTR(driver_fail_limit_default, 0644, ecm_front_end_ipv6_get_driver_fail_limit_default, ecm_front_end_ipv6_set_driver_fail_limit_default);
-static DEVICE_ATTR(nack_limit_default, 0644, ecm_front_end_ipv6_get_nack_limit_default, ecm_front_end_ipv6_set_nack_limit_default);
-static DEVICE_ATTR(udp_accelerated_count, 0444, ecm_front_end_ipv6_get_udp_accelerated_count, NULL);
-static DEVICE_ATTR(tcp_accelerated_count, 0444, ecm_front_end_ipv6_get_tcp_accelerated_count, NULL);
-static DEVICE_ATTR(non_ported_accelerated_count, 0444, ecm_front_end_ipv6_get_non_ported_accelerated_count, NULL);
-static DEVICE_ATTR(accelerated_count, 0444, ecm_front_end_ipv6_get_accelerated_count, NULL);
-static DEVICE_ATTR(pending_accel_count, 0444, ecm_front_end_ipv6_get_pending_accel_count, NULL);
-static DEVICE_ATTR(pending_decel_count, 0444, ecm_front_end_ipv6_get_pending_decel_count, NULL);
-static DEVICE_ATTR(accel_limit_mode, 0644, ecm_front_end_ipv6_get_accel_limit_mode, ecm_front_end_ipv6_set_accel_limit_mode);
-static DEVICE_ATTR(accel_cmd_avg_millis, 0444, ecm_front_end_ipv6_get_accel_average_millis, NULL);
-static DEVICE_ATTR(decel_cmd_avg_millis, 0444, ecm_front_end_ipv6_get_decel_average_millis, NULL);
-
-/*
- * System device attribute array.
- */
-static struct device_attribute *ecm_front_end_ipv6_attrs[] = {
-	&dev_attr_stop,
-	&dev_attr_no_action_limit_default,
-	&dev_attr_driver_fail_limit_default,
-	&dev_attr_nack_limit_default,
-	&dev_attr_udp_accelerated_count,
-	&dev_attr_tcp_accelerated_count,
-	&dev_attr_non_ported_accelerated_count,
-	&dev_attr_accelerated_count,
-	&dev_attr_pending_accel_count,
-	&dev_attr_pending_decel_count,
-	&dev_attr_accel_limit_mode,
-	&dev_attr_accel_cmd_avg_millis,
-	&dev_attr_decel_cmd_avg_millis
+static struct file_operations ecm_front_end_ipv6_decel_cmd_avg_millis_fops = {
+	.read = ecm_front_end_ipv6_get_decel_cmd_avg_millis,
 };
-
-/*
- * Sub system node of the front end
- * Sysdevice control points can be found at /sys/devices/system/ecm_front_end_ipv6/ecm_front_end_ipv6X/
- */
-static struct bus_type ecm_front_end_ipv6_subsys = {
-	.name = "ecm_front_end_ipv6",
-	.dev_name = "ecm_front_end_ipv6",
-};
-
-/*
- * ecm_front_end_ipv6_dev_release()
- *	This is a dummy release function for device.
- */
-static void ecm_front_end_ipv6_dev_release(struct device *dev)
-{
-
-}
 
 /*
  * ecm_front_end_ipv6_init()
  */
-int ecm_front_end_ipv6_init(void)
+int ecm_front_end_ipv6_init(struct dentry *dentry)
 {
-	int result;
-	int i;
+	int result = -1;
+
 	DEBUG_INFO("ECM Front end IPv6 init\n");
 
-	/*
-	 * Initialise our global lock
-	 */
-	spin_lock_init(&ecm_front_end_ipv6_lock);
-
-	/*
-	 * Register the Sub system
-	 */
-	result = subsys_system_register(&ecm_front_end_ipv6_subsys, NULL);
-	if (result) {
-		DEBUG_ERROR("Failed to register sub system %d\n", result);
+	ecm_front_end_ipv6_dentry = debugfs_create_dir("ecm_front_end_ipv6", dentry);
+	if (!ecm_front_end_ipv6_dentry) {
+		DEBUG_ERROR("Failed to create ecm front end ipv6 directory in debugfs\n");
 		return result;
 	}
 
-	/*
-	 * Register System device control
-	 */
-	memset(&ecm_front_end_ipv6_dev, 0, sizeof(ecm_front_end_ipv6_dev));
-	ecm_front_end_ipv6_dev.id = 0;
-	ecm_front_end_ipv6_dev.bus = &ecm_front_end_ipv6_subsys;
-	ecm_front_end_ipv6_dev.release = ecm_front_end_ipv6_dev_release;
-	result = device_register(&ecm_front_end_ipv6_dev);
-	if (result) {
-		DEBUG_ERROR("Failed to register System device %d\n", result);
-		goto task_cleanup_1;
+	if (!debugfs_create_u32("stop", S_IRUGO | S_IWUSR, ecm_front_end_ipv6_dentry,
+					(u32 *)&ecm_front_end_ipv6_stopped)) {
+		DEBUG_ERROR("Failed to create ecm front end ipv6 stop file in debugfs\n");
+		goto task_cleanup;
 	}
 
-	/*
-	 * Create files, one for each parameter supported by this module
-	 */
-	for (i = 0; i < ARRAY_SIZE(ecm_front_end_ipv6_attrs); i++) {
-		result = device_create_file(&ecm_front_end_ipv6_dev, ecm_front_end_ipv6_attrs[i]);
-		if (result) {
-			DEBUG_ERROR("Failed to register stop file %d\n", result);
-			goto task_cleanup_2;
-		}
+	if (!debugfs_create_u32("no_action_limit_default", S_IRUGO | S_IWUSR, ecm_front_end_ipv6_dentry,
+					(u32 *)&ecm_front_end_ipv6_no_action_limit_default)) {
+		DEBUG_ERROR("Failed to create ecm front end ipv6 no_action_limit_default file in debugfs\n");
+		goto task_cleanup;
+	}
+
+	if (!debugfs_create_u32("driver_fail_limit_default", S_IRUGO | S_IWUSR, ecm_front_end_ipv6_dentry,
+					(u32 *)&ecm_front_end_ipv6_driver_fail_limit_default)) {
+		DEBUG_ERROR("Failed to create ecm front end ipv6 driver_fail_limit_default file in debugfs\n");
+		goto task_cleanup;
+	}
+
+	if (!debugfs_create_u32("nack_limit_default", S_IRUGO | S_IWUSR, ecm_front_end_ipv6_dentry,
+					(u32 *)&ecm_front_end_ipv6_nack_limit_default)) {
+		DEBUG_ERROR("Failed to create ecm front end ipv6 nack_limit_default file in debugfs\n");
+		goto task_cleanup;
+	}
+
+	if (!debugfs_create_u32("udp_accelerated_count", S_IRUGO, ecm_front_end_ipv6_dentry,
+					(u32 *)&ecm_front_end_ipv6_udp_accelerated_count)) {
+		DEBUG_ERROR("Failed to create ecm front end ipv6 udp_accelerated_count file in debugfs\n");
+		goto task_cleanup;
+	}
+
+	if (!debugfs_create_u32("tcp_accelerated_count", S_IRUGO, ecm_front_end_ipv6_dentry,
+					(u32 *)&ecm_front_end_ipv6_tcp_accelerated_count)) {
+		DEBUG_ERROR("Failed to create ecm front end ipv6 tcp_accelerated_count file in debugfs\n");
+		goto task_cleanup;
+	}
+
+	if (!debugfs_create_u32("non_ported_accelerated_count", S_IRUGO, ecm_front_end_ipv6_dentry,
+					(u32 *)&ecm_front_end_ipv6_non_ported_accelerated_count)) {
+		DEBUG_ERROR("Failed to create ecm front end ipv6 non_ported_accelerated_count file in debugfs\n");
+		goto task_cleanup;
+	}
+
+	if (!debugfs_create_u32("accelerated_count", S_IRUGO, ecm_front_end_ipv6_dentry,
+					(u32 *)&ecm_front_end_ipv6_accelerated_count)) {
+		DEBUG_ERROR("Failed to create ecm front end ipv6 accelerated_count file in debugfs\n");
+		goto task_cleanup;
+	}
+
+	if (!debugfs_create_u32("pending_accel_count", S_IRUGO, ecm_front_end_ipv6_dentry,
+					(u32 *)&ecm_front_end_ipv6_pending_accel_count)) {
+		DEBUG_ERROR("Failed to create ecm front end ipv6 pending_accel_count file in debugfs\n");
+		goto task_cleanup;
+	}
+
+	if (!debugfs_create_u32("pending_decel_count", S_IRUGO, ecm_front_end_ipv6_dentry,
+					(u32 *)&ecm_front_end_ipv6_pending_decel_count)) {
+		DEBUG_ERROR("Failed to create ecm front end ipv6 pending_decel_count file in debugfs\n");
+		goto task_cleanup;
+	}
+
+	if (!debugfs_create_file("accel_limit_mode", S_IRUGO | S_IWUSR, ecm_front_end_ipv6_dentry,
+					NULL, &ecm_front_end_ipv6_accel_limit_mode_fops)) {
+		DEBUG_ERROR("Failed to create ecm front end ipv6 accel_limit_mode file in debugfs\n");
+		goto task_cleanup;
+	}
+
+	if (!debugfs_create_file("accel_cmd_avg_millis", S_IRUGO, ecm_front_end_ipv6_dentry,
+					NULL, &ecm_front_end_ipv6_accel_cmd_avg_millis_fops)) {
+		DEBUG_ERROR("Failed to create ecm front end ipv6 accel_cmd_avg_millis file in debugfs\n");
+		goto task_cleanup;
+	}
+
+	if (!debugfs_create_file("decel_cmd_avg_millis", S_IRUGO, ecm_front_end_ipv6_dentry,
+					NULL, &ecm_front_end_ipv6_decel_cmd_avg_millis_fops)) {
+		DEBUG_ERROR("Failed to create ecm front end ipv6 decel_cmd_avg_millis file in debugfs\n");
+		goto task_cleanup;
 	}
 
 	/*
@@ -8797,7 +8480,7 @@ int ecm_front_end_ipv6_init(void)
 	result = nf_register_hooks(ecm_front_end_ipv6_netfilter_hooks, ARRAY_SIZE(ecm_front_end_ipv6_netfilter_hooks));
 	if (result < 0) {
 		DEBUG_ERROR("Can't register netfilter hooks.\n");
-		goto task_cleanup_2;
+		goto task_cleanup;
 	}
 
 	/*
@@ -8807,14 +8490,9 @@ int ecm_front_end_ipv6_init(void)
 
 	return 0;
 
-task_cleanup_2:
-	while (--i >= 0) {
-		device_remove_file(&ecm_front_end_ipv6_dev, ecm_front_end_ipv6_attrs[i]);
-	}
-	device_unregister(&ecm_front_end_ipv6_dev);
-task_cleanup_1:
-	bus_unregister(&ecm_front_end_ipv6_subsys);
+task_cleanup:
 
+	debugfs_remove_recursive(ecm_front_end_ipv6_dentry);
 	return result;
 }
 EXPORT_SYMBOL(ecm_front_end_ipv6_init);
@@ -8824,7 +8502,6 @@ EXPORT_SYMBOL(ecm_front_end_ipv6_init);
  */
 void ecm_front_end_ipv6_exit(void)
 {
-	int i;
 	DEBUG_INFO("ECM Front end IPv6 Module exit\n");
 	spin_lock_bh(&ecm_front_end_ipv6_lock);
 	ecm_front_end_ipv6_terminate_pending = true;
@@ -8841,11 +8518,11 @@ void ecm_front_end_ipv6_exit(void)
 	 */
 	nss_ipv6_notify_unregister();
 
-	for (i = 0; i < ARRAY_SIZE(ecm_front_end_ipv6_attrs); i++) {
-		device_remove_file(&ecm_front_end_ipv6_dev, ecm_front_end_ipv6_attrs[i]);
+	/*
+	 * Remove the debugfs files recursively.
+	 */
+	if (ecm_front_end_ipv6_dentry) {
+		debugfs_remove_recursive(ecm_front_end_ipv6_dentry);
 	}
-
-	device_unregister(&ecm_front_end_ipv6_dev);
-	bus_unregister(&ecm_front_end_ipv6_subsys);
 }
 EXPORT_SYMBOL(ecm_front_end_ipv6_exit);

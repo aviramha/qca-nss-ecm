@@ -21,10 +21,8 @@
 #include <linux/module.h>
 #include <linux/skbuff.h>
 #include <linux/icmp.h>
-#include <linux/sysctl.h>
 #include <linux/kthread.h>
-#include <linux/device.h>
-#include <linux/fs.h>
+#include <linux/debugfs.h>
 #include <linux/pkt_sched.h>
 #include <linux/string.h>
 #include <linux/random.h>
@@ -765,7 +763,7 @@ static int ecm_db_connection_count_by_protocol[ECM_DB_PROTOCOL_COUNT];	/* Each I
 /*
  * Locking of the database - concurrency control
  */
-static spinlock_t ecm_db_lock;					/* Protect the table from SMP access. */
+static DEFINE_SPINLOCK(ecm_db_lock);					/* Protect the table from SMP access. */
 
 /*
  * Connection validity
@@ -773,9 +771,9 @@ static spinlock_t ecm_db_lock;					/* Protect the table from SMP access. */
 static uint16_t ecm_db_classifier_generation = 0;		/* Generation counter to detect out of date connections that should be reclassified */
 
 /*
- * System device linkage
+ * Debugfs dentry object.
  */
-static struct device ecm_db_dev;				/* System device linkage */
+static struct dentry *ecm_db_dentry;
 
 /*
  * Management thread control
@@ -9434,120 +9432,21 @@ uint32_t ecm_db_time_get(void)
 EXPORT_SYMBOL(ecm_db_time_get);
 
 /*
- * ecm_db_get_connection_count()
- */
-static ssize_t ecm_db_get_connection_count(struct device *dev,
-				  struct device_attribute *attr,
-				  char *buf)
-{
-	ssize_t count;
-	int num;
-
-	/*
-	 * Operate under our locks
-	 */
-	spin_lock_bh(&ecm_db_lock);
-	num = ecm_db_connection_count;
-	spin_unlock_bh(&ecm_db_lock);
-
-	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", num);
-	return count;
-}
-
-/*
- * ecm_db_get_host_count()
- */
-static ssize_t ecm_db_get_host_count(struct device *dev,
-				  struct device_attribute *attr,
-				  char *buf)
-{
-	ssize_t count;
-	int num;
-
-	/*
-	 * Operate under our locks
-	 */
-	spin_lock_bh(&ecm_db_lock);
-	num = ecm_db_host_count;
-	spin_unlock_bh(&ecm_db_lock);
-
-	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", num);
-	return count;
-}
-
-/*
- * ecm_db_get_mapping_count()
- */
-static ssize_t ecm_db_get_mapping_count(struct device *dev,
-				  struct device_attribute *attr,
-				  char *buf)
-{
-	ssize_t count;
-	int num;
-
-	/*
-	 * Operate under our locks
-	 */
-	spin_lock_bh(&ecm_db_lock);
-	num = ecm_db_mapping_count;
-	spin_unlock_bh(&ecm_db_lock);
-
-	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", num);
-	return count;
-}
-
-/*
- * ecm_db_get_node_count()
- */
-static ssize_t ecm_db_get_node_count(struct device *dev,
-				  struct device_attribute *attr,
-				  char *buf)
-{
-	ssize_t count;
-	int num;
-
-	/*
-	 * Operate under our locks
-	 */
-	spin_lock_bh(&ecm_db_lock);
-	num = ecm_db_node_count;
-	spin_unlock_bh(&ecm_db_lock);
-
-	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", num);
-	return count;
-}
-
-/*
- * ecm_db_get_iface_count()
- */
-static ssize_t ecm_db_get_iface_count(struct device *dev,
-				  struct device_attribute *attr,
-				  char *buf)
-{
-	ssize_t count;
-	int num;
-
-	/*
-	 * Operate under our locks
-	 */
-	spin_lock_bh(&ecm_db_lock);
-	num = ecm_db_iface_count;
-	spin_unlock_bh(&ecm_db_lock);
-
-	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", num);
-	return count;
-}
-
-/*
  * ecm_db_get_defunct_all()
  *	Reading this file returns the accumulated total of all objects
  */
-static ssize_t ecm_db_get_defunct_all(struct device *dev,
-				  struct device_attribute *attr,
-				  char *buf)
+static ssize_t ecm_db_get_defunct_all(struct file *file,
+					char __user *user_buf,
+					size_t sz, loff_t *ppos)
 {
-	ssize_t count;
+	int ret;
 	int num;
+	char *buf;
+
+	buf = kmalloc(PAGE_SIZE, GFP_KERNEL);
+	if (!buf) {
+		return -ENOMEM;
+	}
 
 	/*
 	 * Operate under our locks
@@ -9557,34 +9456,55 @@ static ssize_t ecm_db_get_defunct_all(struct device *dev,
 			+ ecm_db_node_count + ecm_db_iface_count;
 	spin_unlock_bh(&ecm_db_lock);
 
-	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", num);
-	return count;
+	ret = snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", num);
+	if (ret < 0) {
+		kfree(buf);
+		return ret;
+	}
+
+	ret = simple_read_from_buffer(user_buf, sz, ppos, buf, ret);
+	kfree(buf);
+	return ret;
 }
 
 /*
  * ecm_db_set_defunct_all()
  */
-static ssize_t ecm_db_set_defunct_all(struct device *dev,
-				  struct device_attribute *attr,
-				  const char *buf, size_t count)
+static ssize_t ecm_db_set_defunct_all(struct file *file,
+					const char __user *user_buf,
+					size_t sz, loff_t *ppos)
 {
 	ecm_db_connection_defunct_all();
-	return count;
+	return sz;
 }
+
+/*
+ * File operations for defunct_all.
+ */
+static struct file_operations ecm_db_defunct_all_fops = {
+	.read = ecm_db_get_defunct_all,
+	.write = ecm_db_set_defunct_all,
+};
 
 /*
  * ecm_db_get_connection_counts_simple()
  *	Return total of connections for each simple protocol (tcp, udp, other).  Primarily for use by the luci-bwc service.
  */
-static ssize_t ecm_db_get_connection_counts_simple(struct device *dev,
-				  struct device_attribute *attr,
-				  char *buf)
+static ssize_t ecm_db_get_connection_counts_simple(struct file *file,
+						char __user *user_buf,
+						size_t sz, loff_t *ppos)
 {
 	int tcp_count;
 	int udp_count;
 	int other_count;
 	int total_count;
-	ssize_t count;
+	int ret;
+	char *buf;
+
+	buf = kmalloc(PAGE_SIZE, GFP_KERNEL);
+	if (!buf) {
+		return -ENOMEM;
+	}
 
 	/*
 	 * Get snapshot of the protocol counts
@@ -9596,52 +9516,23 @@ static ssize_t ecm_db_get_connection_counts_simple(struct device *dev,
 	other_count = total_count - (tcp_count + udp_count);
 	spin_unlock_bh(&ecm_db_lock);
 
-	count = snprintf(buf, (ssize_t)PAGE_SIZE, "tcp %d udp %d other %d total %d\n", tcp_count, udp_count, other_count, total_count);
-	return count;
+	ret = snprintf(buf, (ssize_t)PAGE_SIZE, "tcp %d udp %d other %d total %d\n", tcp_count, udp_count, other_count, total_count);
+	if (ret < 0) {
+		kfree(buf);
+		return -EFAULT;
+	}
+
+	ret = simple_read_from_buffer(user_buf, sz, ppos, buf, ret);
+	kfree(buf);
+	return ret;
 }
 
-
 /*
- * SysFS attributes for the default classifier itself.
+ * File operations for simple connection counts.
  */
-static DEVICE_ATTR(connection_count, 0444, ecm_db_get_connection_count, NULL);
-static DEVICE_ATTR(host_count, 0444, ecm_db_get_host_count, NULL);
-static DEVICE_ATTR(mapping_count, 0444, ecm_db_get_mapping_count, NULL);
-static DEVICE_ATTR(node_count, 0444, ecm_db_get_node_count, NULL);
-static DEVICE_ATTR(iface_count, 0444, ecm_db_get_iface_count, NULL);
-static DEVICE_ATTR(defunct_all, 0644, ecm_db_get_defunct_all, ecm_db_set_defunct_all);
-static DEVICE_ATTR(connection_counts_simple, 0444, ecm_db_get_connection_counts_simple, NULL);
-
-/*
- * System device attribute array.
- */
-static struct device_attribute *ecm_db_attrs[] = {
-	&dev_attr_connection_count,
-	&dev_attr_host_count,
-	&dev_attr_mapping_count,
-	&dev_attr_node_count,
-	&dev_attr_iface_count,
-	&dev_attr_defunct_all,
-	&dev_attr_connection_counts_simple,
+static struct file_operations ecm_db_connection_count_simple_fops = {
+	.read = ecm_db_get_connection_counts_simple,
 };
-
-/*
- * Sub system node of the ECM default classifier
- * Sys device control points can be found at /sys/devices/system/ecm_db/ecm_dbX/
- */
-static struct bus_type ecm_db_subsys = {
-	.name = "ecm_db",
-	.dev_name = "ecm_db",
-};
-
-/*
- * ecm_db_dev_release()
- *	This is a dummy release function for device.
- */
-static void ecm_db_dev_release(struct device *dev)
-{
-
-}
 
 /*
  * ecm_db_timer_callback()
@@ -9941,16 +9832,15 @@ void ecm_db_traverse_node_to_nat_connection_list_and_decelerate(struct ecm_db_no
 /*
  * ecm_db_init()
  */
-int ecm_db_init(void)
+int ecm_db_init(struct dentry *dentry)
 {
-	int result;
-	int i;
 	DEBUG_INFO("ECM Module init\n");
 
-	/*
-	 * Initialise our global database lock
-	 */
-	spin_lock_init(&ecm_db_lock);
+	ecm_db_dentry = debugfs_create_dir("ecm_db", dentry);
+	if (!ecm_db_dentry) {
+		DEBUG_ERROR("Failed to create ecm db directory in debugfs\n");
+		return -1;
+	}
 
 	/*
 	 * Get a random seed for jhash()
@@ -9958,37 +9848,46 @@ int ecm_db_init(void)
 	get_random_bytes(&ecm_db_jhash_rnd, sizeof(ecm_db_jhash_rnd));
 	DEBUG_INFO("jhash random seed: %u\n", ecm_db_jhash_rnd);
 
-	/*
-	 * Register System device control
-	 */
-	result = subsys_system_register(&ecm_db_subsys, NULL);
-	if (result) {
-		DEBUG_ERROR("Failed to register SysFS class %d\n", result);
-		return result;
+	if (!debugfs_create_u32("connection_count", S_IRUGO, ecm_db_dentry,
+					(u32 *)&ecm_db_connection_count)) {
+		DEBUG_ERROR("Failed to create ecm db connection count file in debugfs\n");
+		goto init_cleanup;
 	}
 
-	/*
-	 * Register SYSFS device control
-	 */
-	memset(&ecm_db_dev, 0, sizeof(ecm_db_dev));
-	ecm_db_dev.id = 0;
-	ecm_db_dev.bus = &ecm_db_subsys;
-	ecm_db_dev.release = ecm_db_dev_release;
-	result = device_register(&ecm_db_dev);
-	if (result) {
-		DEBUG_ERROR("Failed to register System device %d\n", result);
-		goto task_cleanup_1;
+	if (!debugfs_create_u32("host_count", S_IRUGO, ecm_db_dentry,
+					(u32 *)&ecm_db_host_count)) {
+		DEBUG_ERROR("Failed to create ecm db host count file in debugfs\n");
+		goto init_cleanup;
 	}
 
-	/*
-	 * Create files, one for each parameter supported by this module
-	 */
-	for (i = 0; i < ARRAY_SIZE(ecm_db_attrs); i++) {
-		result = device_create_file(&ecm_db_dev, ecm_db_attrs[i]);
-		if (result) {
-			DEBUG_ERROR("Failed to create attribute file %d\n", result);
-			goto task_cleanup_2;
-		}
+	if (!debugfs_create_u32("mapping_count", S_IRUGO, ecm_db_dentry,
+					(u32 *)&ecm_db_mapping_count)) {
+		DEBUG_ERROR("Failed to create ecm db mapping count file in debugfs\n");
+		goto init_cleanup;
+	}
+
+	if (!debugfs_create_u32("node_count", S_IRUGO, ecm_db_dentry,
+					(u32 *)&ecm_db_node_count)) {
+		DEBUG_ERROR("Failed to create ecm db node count file in debugfs\n");
+		goto init_cleanup;
+	}
+
+	if (!debugfs_create_u32("iface_count", S_IRUGO, ecm_db_dentry,
+					(u32 *)&ecm_db_iface_count)) {
+		DEBUG_ERROR("Failed to create ecm db iface count file in debugfs\n");
+		goto init_cleanup;
+	}
+
+	if (!debugfs_create_file("defunct_all", S_IRUGO | S_IWUSR, ecm_db_dentry,
+					NULL, &ecm_db_defunct_all_fops)) {
+		DEBUG_ERROR("Failed to create ecm db defunct_all file in debugfs\n");
+		goto init_cleanup;
+	}
+
+	if (!debugfs_create_file("connection_count_simple", S_IRUGO, ecm_db_dentry,
+					NULL, &ecm_db_connection_count_simple_fops)) {
+		DEBUG_ERROR("Failed to create ecm db connection count simple file in debugfs\n");
+		goto init_cleanup;
 	}
 
 	/*
@@ -10073,15 +9972,10 @@ int ecm_db_init(void)
 #endif
 	return 0;
 
-task_cleanup_2:
-	while (--i >= 0) {
-		device_remove_file(&ecm_db_dev, ecm_db_attrs[i]);
-	}
-	device_unregister(&ecm_db_dev);
-task_cleanup_1:
-	bus_unregister(&ecm_db_subsys);
+init_cleanup:
 
-	return result;
+	debugfs_remove_recursive(ecm_db_dentry);
+	return -1;
 }
 EXPORT_SYMBOL(ecm_db_init);
 
@@ -10090,7 +9984,6 @@ EXPORT_SYMBOL(ecm_db_init);
  */
 void ecm_db_exit(void)
 {
-	int i;
 	DEBUG_INFO("ECM DB Module exit\n");
 
 	spin_lock_bh(&ecm_db_lock);
@@ -10108,11 +10001,11 @@ void ecm_db_exit(void)
 	 */
 	del_timer_sync(&ecm_db_timer);
 
-	for (i = 0; i < ARRAY_SIZE(ecm_db_attrs); i++) {
-		device_remove_file(&ecm_db_dev, ecm_db_attrs[i]);
+	/*
+	 * Remove the debugfs files recursively.
+	 */
+	if (ecm_db_dentry) {
+		debugfs_remove_recursive(ecm_db_dentry);
 	}
-
-	device_unregister(&ecm_db_dev);
-	bus_unregister(&ecm_db_subsys);
 }
 EXPORT_SYMBOL(ecm_db_exit);

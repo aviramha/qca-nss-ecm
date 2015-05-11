@@ -21,11 +21,9 @@
 #include <linux/module.h>
 #include <linux/skbuff.h>
 #include <linux/icmp.h>
-#include <linux/sysctl.h>
 #include <linux/kthread.h>
-#include <linux/device.h>
-#include <linux/fs.h>
 #include <linux/pkt_sched.h>
+#include <linux/debugfs.h>
 #include <linux/string.h>
 #include <net/route.h>
 #include <net/ip.h>
@@ -2396,43 +2394,26 @@ unsigned int ecm_nss_ported_ipv4_process(struct net_device *out_dev, struct net_
 }
 
 /*
- * ecm_nss_ported_ipv4_get_tcp_accelerated_count()
+ * ecm_nss_ported_ipv4_debugfs_init()
  */
-ssize_t ecm_nss_ported_ipv4_get_tcp_accelerated_count(struct device *dev,
-				  struct device_attribute *attr,
-				  char *buf)
+bool ecm_nss_ported_ipv4_debugfs_init(struct dentry *dentry)
 {
-	ssize_t count;
-	int num;
+	struct dentry *udp_dentry;
 
-	/*
-	 * Operate under our locks
-	 */
-	spin_lock_bh(&ecm_nss_ipv4_lock);
-	num = ecm_nss_ported_ipv4_accelerated_count[ECM_NSS_PORTED_IPV4_PROTO_TCP];
-	spin_unlock_bh(&ecm_nss_ipv4_lock);
+	udp_dentry = debugfs_create_u32("udp_accelerated_count", S_IRUGO, dentry,
+						&ecm_nss_ported_ipv4_accelerated_count[ECM_NSS_PORTED_IPV4_PROTO_UDP]);
+	if (!udp_dentry) {
+		DEBUG_ERROR("Failed to create ecm nss ipv4 udp_accelerated_count file in debugfs\n");
+		return false;
+	}
 
-	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", num);
-	return count;
+	if (!debugfs_create_u32("tcp_accelerated_count", S_IRUGO, dentry,
+					&ecm_nss_ported_ipv4_accelerated_count[ECM_NSS_PORTED_IPV4_PROTO_TCP])) {
+		DEBUG_ERROR("Failed to create ecm nss ipv4 tcp_accelerated_count file in debugfs\n");
+		debugfs_remove(udp_dentry);
+		return false;
+	}
+
+	return true;
 }
 
-/*
- * ecm_nss_ported_ipv4_get_udp_accelerated_count()
- */
-ssize_t ecm_nss_ported_ipv4_get_udp_accelerated_count(struct device *dev,
-				  struct device_attribute *attr,
-				  char *buf)
-{
-	ssize_t count;
-	int num;
-
-	/*
-	 * Operate under our locks
-	 */
-	spin_lock_bh(&ecm_nss_ipv4_lock);
-	num = ecm_nss_ported_ipv4_accelerated_count[ECM_NSS_PORTED_IPV4_PROTO_UDP];
-	spin_unlock_bh(&ecm_nss_ipv4_lock);
-
-	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", num);
-	return count;
-}

@@ -21,10 +21,8 @@
 #include <linux/module.h>
 #include <linux/skbuff.h>
 #include <linux/icmp.h>
-#include <linux/sysctl.h>
+#include <linux/debugfs.h>
 #include <linux/kthread.h>
-#include <linux/device.h>
-#include <linux/fs.h>
 #include <linux/pkt_sched.h>
 #include <linux/string.h>
 #include <linux/ctype.h>
@@ -104,7 +102,7 @@ struct ecm_classifier_default_internal_instance {
 #endif
 };
 
-static spinlock_t ecm_classifier_default_lock;			/* Concurrency control SMP access */
+static  DEFINE_SPINLOCK(ecm_classifier_default_lock);			/* Concurrency control SMP access */
 static int ecm_classifier_default_count = 0;			/* Tracks number of instances allocated */
 
 /*
@@ -134,7 +132,7 @@ struct ecm_classifier_default_state_file_instance {
 	uint16_t magic;
 #endif
 };
-static struct device ecm_classifier_default_dev;		/* System device linkage */
+static struct dentry *ecm_classifier_default_dentry;		/* Debugfs dentry object */
 
 /*
  * _ecm_classifier_default_ref()
@@ -643,190 +641,35 @@ struct ecm_classifier_default_instance *ecm_classifier_default_instance_alloc(st
 EXPORT_SYMBOL(ecm_classifier_default_instance_alloc);
 
 /*
- * ecm_classifier_default_get_accel_mode()
- *	Display accel_mode of classifier.
- */
-static ssize_t ecm_classifier_default_get_accel_mode(struct device *dev,
-		  struct device_attribute *attr,
-		  char *buf)
-{
-	ssize_t count;
-	uint32_t num;
-
-	DEBUG_INFO("ecm_classifier_default_get_accel_mode\n");
-
-	spin_lock_bh(&ecm_classifier_default_lock);
-	num = (uint32_t)ecm_classifier_default_accel_mode;
-	spin_unlock_bh(&ecm_classifier_default_lock);
-
-	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%u", num);
-	return count;
-}
-
-/*
- * ecm_classifier_default_set_accel_mode()
- *	Set new accel mode value for default classifier.
- */
-static ssize_t ecm_classifier_default_set_accel_mode(struct device *dev,
-		  struct device_attribute *attr,
-		  const char *buf, size_t count)
-{
-	char num_buf[12];
-	uint32_t num;
-
-	/*
-	 * Get the number from buf into a properly z-termed number buffer
-	 */
-	if (count >= sizeof(num_buf)) return 0;
-	memcpy(num_buf, buf, count);
-	num_buf[count] = '\0';
-	sscanf(num_buf, "%u", &num);
-
-	DEBUG_TRACE("ecm_classifier_default_set_accel_mode = %u\n", num);
-
-	spin_lock_bh(&ecm_classifier_default_lock);
-	ecm_classifier_default_accel_mode = (ecm_classifier_acceleration_mode_t)num;
-	spin_unlock_bh(&ecm_classifier_default_lock);
-	return count;
-}
-
-/*
- * ecm_classifier_default_get_enabled()
- *	Display enabled of classifier.
- */
-static ssize_t ecm_classifier_default_get_enabled(struct device *dev,
-		  struct device_attribute *attr,
-		  char *buf)
-{
-	ssize_t count;
-	uint32_t num;
-
-	DEBUG_INFO("ecm_classifier_default_get_enabled\n");
-
-	spin_lock_bh(&ecm_classifier_default_lock);
-	num = (uint32_t)ecm_classifier_default_enabled;
-	spin_unlock_bh(&ecm_classifier_default_lock);
-
-	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%u", num);
-	return count;
-}
-
-/*
- * ecm_classifier_default_set_enabled()
- *	Set new enabled value for default classifier.
- */
-static ssize_t ecm_classifier_default_set_enabled(struct device *dev,
-		  struct device_attribute *attr,
-		  const char *buf, size_t count)
-{
-	char num_buf[12];
-	uint32_t num;
-
-	/*
-	 * Get the number from buf into a properly z-termed number buffer
-	 */
-	if (count >= sizeof(num_buf)) return 0;
-	memcpy(num_buf, buf, count);
-	num_buf[count] = '\0';
-	sscanf(num_buf, "%u", &num);
-
-	DEBUG_TRACE("ecm_classifier_default_set_enabled = %u\n", num);
-
-	spin_lock_bh(&ecm_classifier_default_lock);
-	ecm_classifier_default_enabled = (bool)num;
-	spin_unlock_bh(&ecm_classifier_default_lock);
-	return count;
-}
-
-static DEVICE_ATTR(accel_mode, 0644, ecm_classifier_default_get_accel_mode, ecm_classifier_default_set_accel_mode);
-static DEVICE_ATTR(enabled, 0644, ecm_classifier_default_get_enabled, ecm_classifier_default_set_enabled);
-
-/*
- * System device attribute array.
- */
-static struct device_attribute *ecm_classifier_default_attrs[] = {
-	&dev_attr_accel_mode,
-	&dev_attr_enabled,
-};
-
-/*
- * System device node the ECM default classifier
- * Sysdevice control points can be found at /sys/devices/system/ecm_classifier_default/ecm_classifier_defaultX/
- */
-static struct bus_type ecm_classifier_default_subsys = {
-	.name = "ecm_classifier_default",
-	.dev_name = "ecm_classifier_default",
-};
-
-/*
- * ecm_classifier_default_dev_release()
- *	This is a dummy release function for device.
- */
-static void ecm_classifier_default_dev_release(struct device *dev)
-{
-
-}
-
-/*
  * ecm_classifier_default_init()
  */
-int ecm_classifier_default_init(void)
+int ecm_classifier_default_init(struct dentry *dentry)
 {
-	int result;
-	int i;
 	DEBUG_INFO("Default classifier Module init\n");
 
 	DEBUG_ASSERT(ECM_CLASSIFIER_TYPE_DEFAULT == 0, "DO NOT CHANGE DEFAULT PRIORITY");
 
-	/*
-	 * Initialise our global lock
-	 */
-	spin_lock_init(&ecm_classifier_default_lock);
-
-	/*
-	 * Register the Sub system
-	 */
-	result = subsys_system_register(&ecm_classifier_default_subsys, NULL);
-	if (result) {
-		DEBUG_ERROR("Failed to register sub system %d\n", result);
-		return result;
+	ecm_classifier_default_dentry = debugfs_create_dir("ecm_classifier_default", dentry);
+	if (!ecm_classifier_default_dentry) {
+		DEBUG_ERROR("Failed to create ecm default classifier directory in debugfs\n");
+		return -1;
 	}
 
-	/*
-	 * Register System device control
-	 */
-	memset(&ecm_classifier_default_dev, 0, sizeof(ecm_classifier_default_dev));
-	ecm_classifier_default_dev.id = 0;
-	ecm_classifier_default_dev.bus = &ecm_classifier_default_subsys;
-	ecm_classifier_default_dev.release = &ecm_classifier_default_dev_release;
-	result = device_register(&ecm_classifier_default_dev);
-	if (result) {
-		DEBUG_ERROR("Failed to register System device %d\n", result);
-		goto classifier_task_cleanup_1;
+	if (!debugfs_create_bool("enabled", S_IRUGO | S_IWUSR, ecm_classifier_default_dentry,
+					(u32 *)&ecm_classifier_default_enabled)) {
+		DEBUG_ERROR("Failed to create ecm deafult classifier enabled file in debugfs\n");
+		debugfs_remove_recursive(ecm_classifier_default_dentry);
+		return -1;
 	}
 
-	/*
-	 * Create files, one for each parameter supported by this module
-	 */
-	for (i = 0; i < ARRAY_SIZE(ecm_classifier_default_attrs); i++) {
-		result = device_create_file(&ecm_classifier_default_dev, ecm_classifier_default_attrs[i]);
-		if (result) {
-			DEBUG_ERROR("Failed to register system device file %d\n", result);
-			goto classifier_task_cleanup_2;
-		}
+	if (!debugfs_create_u32("accel_mode", S_IRUGO | S_IWUSR, ecm_classifier_default_dentry,
+					(u32 *)&ecm_classifier_default_accel_mode)) {
+		DEBUG_ERROR("Failed to create ecm deafult classifier accel_mode file in debugfs\n");
+		debugfs_remove_recursive(ecm_classifier_default_dentry);
+		return -1;
 	}
 
 	return 0;
-
-classifier_task_cleanup_2:
-	while (--i >= 0) {
-		device_remove_file(&ecm_classifier_default_dev, ecm_classifier_default_attrs[i]);
-	}
-	device_unregister(&ecm_classifier_default_dev);
-classifier_task_cleanup_1:
-	bus_unregister(&ecm_classifier_default_subsys);
-
-	return result;
 }
 EXPORT_SYMBOL(ecm_classifier_default_init);
 
@@ -835,17 +678,16 @@ EXPORT_SYMBOL(ecm_classifier_default_init);
  */
 void ecm_classifier_default_exit(void)
 {
-	int i;
 	DEBUG_INFO("Default classifier Module exit\n");
 	spin_lock_bh(&ecm_classifier_default_lock);
 	ecm_classifier_default_terminate_pending = true;
 	spin_unlock_bh(&ecm_classifier_default_lock);
 
-	for (i = 0; i < ARRAY_SIZE(ecm_classifier_default_attrs); i++) {
-		device_remove_file(&ecm_classifier_default_dev, ecm_classifier_default_attrs[i]);
+	/*
+	 * Remove the debugfs files recursively.
+	 */
+	if (ecm_classifier_default_dentry) {
+		debugfs_remove_recursive(ecm_classifier_default_dentry);
 	}
-
-	device_unregister(&ecm_classifier_default_dev);
-	bus_unregister(&ecm_classifier_default_subsys);
 }
 EXPORT_SYMBOL(ecm_classifier_default_exit);

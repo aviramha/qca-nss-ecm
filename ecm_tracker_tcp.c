@@ -248,7 +248,7 @@ int ecm_tracker_tcp_count = 0;		/* Counts the number of TCP data trackers right 
 #ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
 int ecm_tracker_tcp_reader_count = 0;	/* Counts the number of TCP readers right now */
 #endif
-spinlock_t ecm_tracker_tcp_lock;	/* Global lock for the tracker globals */
+static  DEFINE_SPINLOCK(ecm_tracker_tcp_lock);	/* Global lock for the tracker globals */
 
 /*
  * ecm_tracker_tcp_connection_state_matrix[][]
@@ -2529,23 +2529,3 @@ struct ecm_tracker_tcp_reader_instance *ecm_tracker_tcp_reader_alloc(void)
 }
 EXPORT_SYMBOL(ecm_tracker_tcp_reader_alloc);
 #endif
-
-/*
- * ecm_tracker_tcp_module_init()
- */
-int ecm_tracker_tcp_module_init(void)
-{
-	DEBUG_INFO("TCP Tracker Module init\n");
-	spin_lock_init(&ecm_tracker_tcp_lock);
-	return 0;
-}
-EXPORT_SYMBOL(ecm_tracker_tcp_module_init);
-
-/*
- * ecm_tracker_tcp_module_exit()
- */
-void ecm_tracker_tcp_module_exit(void)
-{
-	DEBUG_INFO("TCP Tracker Module exit\n");
-}
-EXPORT_SYMBOL(ecm_tracker_tcp_module_exit);

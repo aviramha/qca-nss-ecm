@@ -124,7 +124,7 @@ struct ecm_tracker_udp_internal_instance {
 };
 
 int ecm_tracker_udp_count = 0;		/* Counts the number of UDP data trackers right now */
-spinlock_t ecm_tracker_udp_lock;		/* Global lock for the tracker globals */
+static DEFINE_SPINLOCK(ecm_tracker_udp_lock);		/* Global lock for the tracker globals */
 
 /*
  * ecm_trracker_udp_connection_state_matrix[][]
@@ -966,23 +966,3 @@ struct ecm_tracker_udp_instance *ecm_tracker_udp_alloc(void)
 	return (struct ecm_tracker_udp_instance *)utii;
 }
 EXPORT_SYMBOL(ecm_tracker_udp_alloc);
-
-/*
- * ecm_tracker_udp_module_init()
- */
-int ecm_tracker_udp_module_init(void)
-{
-	DEBUG_INFO("UDP Tracker Module init\n");
-	spin_lock_init(&ecm_tracker_udp_lock);
-	return 0;
-}
-EXPORT_SYMBOL(ecm_tracker_udp_module_init);
-
-/*
- * ecm_tracker_udp_module_exit()
- */
-void ecm_tracker_udp_module_exit(void)
-{
-	DEBUG_INFO("UDP Tracker Module exit\n");
-}
-EXPORT_SYMBOL(ecm_tracker_udp_module_exit);
