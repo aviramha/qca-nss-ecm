@@ -126,7 +126,9 @@ static int ecm_nss_ported_ipv4_accelerated_count[ECM_NSS_PORTED_IPV4_PROTO_MAX] 
 /*
  * Expose what should be a static flag in the TCP connection tracker.
  */
+#ifdef ECM_OPENWRT_SUPPORT
 extern int nf_ct_tcp_no_window_check;
+#endif
 extern int nf_ct_tcp_be_liberal;
 
 /*
@@ -909,7 +911,11 @@ static void ecm_nss_ported_ipv4_connection_accelerate(struct ecm_front_end_conne
 			nircm->tcp_rule.return_max_window = ct->proto.tcp.seen[1].td_maxwin;
 			nircm->tcp_rule.return_end = ct->proto.tcp.seen[1].td_end;
 			nircm->tcp_rule.return_max_end = ct->proto.tcp.seen[1].td_maxend;
+#ifdef ECM_OPENWRT_SUPPORT
 			if (nf_ct_tcp_be_liberal || nf_ct_tcp_no_window_check
+#else
+			if (nf_ct_tcp_be_liberal
+#endif
 					|| (ct->proto.tcp.seen[0].flags & IP_CT_TCP_FLAG_BE_LIBERAL)
 					|| (ct->proto.tcp.seen[1].flags & IP_CT_TCP_FLAG_BE_LIBERAL)) {
 				nircm->rule_flags |= NSS_IPV4_RULE_CREATE_FLAG_NO_SEQ_CHECK;

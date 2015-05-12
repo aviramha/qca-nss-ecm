@@ -187,7 +187,9 @@ static struct nss_ctx_instance *ecm_front_end_ipv6_nss_ipv6_mgr = NULL;
 /*
  * Expose what should be a static flag in the TCP connection tracker.
  */
+#ifdef ECM_OPENWRT_SUPPORT
 extern int nf_ct_tcp_no_window_check;
+#endif
 extern int nf_ct_tcp_be_liberal;
 
 /*
@@ -1970,7 +1972,11 @@ static void ecm_front_end_ipv6_connection_tcp_front_end_accelerate(struct ecm_fr
 		nircm->tcp_rule.return_max_window = ct->proto.tcp.seen[1].td_maxwin;
 		nircm->tcp_rule.return_end = ct->proto.tcp.seen[1].td_end;
 		nircm->tcp_rule.return_max_end = ct->proto.tcp.seen[1].td_maxend;
+#ifdef ECM_OPENWRT_SUPPORT
 		if (nf_ct_tcp_be_liberal || nf_ct_tcp_no_window_check
+#else
+		if (nf_ct_tcp_be_liberal
+#endif
 				|| (ct->proto.tcp.seen[0].flags & IP_CT_TCP_FLAG_BE_LIBERAL)
 				|| (ct->proto.tcp.seen[1].flags & IP_CT_TCP_FLAG_BE_LIBERAL)) {
 			nircm->rule_flags |= NSS_IPV6_RULE_CREATE_FLAG_NO_SEQ_CHECK;
