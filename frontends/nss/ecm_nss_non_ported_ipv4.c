@@ -2076,7 +2076,7 @@ unsigned int ecm_nss_non_ported_ipv4_process(struct net_device *out_dev, struct 
 			 */
 			ecm_db_connection_add(nci, feci, src_mi, dest_mi, src_nat_mi, dest_nat_mi,
 					src_ni, dest_ni, src_nat_ni, dest_nat_ni,
-					protocol, ecm_dir,
+					4, protocol, ecm_dir,
 					NULL /* final callback */,
 					ecm_nss_non_ported_ipv4_connection_defunct_callback,
 					tg, is_routed, nci);

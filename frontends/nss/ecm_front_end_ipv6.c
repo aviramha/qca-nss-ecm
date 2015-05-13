@@ -6211,7 +6211,7 @@ static unsigned int ecm_front_end_ipv6_tcp_process(struct net_device *out_dev,
 			 */
 			ecm_db_connection_add(nci, feci, src_mi, dest_mi, src_mi, dest_mi,
 					src_ni, dest_ni, src_ni, dest_ni,
-					IPPROTO_TCP, ecm_dir,
+					6, IPPROTO_TCP, ecm_dir,
 					NULL /* final callback */,
 					ecm_front_end_ipv6_connection_tcp_defunct_callback,
 					tg, is_routed, nci);
@@ -6738,7 +6738,7 @@ static unsigned int ecm_front_end_ipv6_udp_process(struct net_device *out_dev,
 			 */
 			ecm_db_connection_add(nci, feci, src_mi, dest_mi, src_mi, dest_mi,
 					src_ni, dest_ni, src_ni, dest_ni,
-					IPPROTO_UDP, ecm_dir,
+					6, IPPROTO_UDP, ecm_dir,
 					NULL /* final callback */,
 					ecm_front_end_ipv6_connection_udp_defunct_callback,
 					tg, is_routed, nci);
@@ -7221,7 +7221,7 @@ static unsigned int ecm_front_end_ipv6_non_ported_process(struct net_device *out
 			 */
 			ecm_db_connection_add(nci, feci, src_mi, dest_mi, src_mi, dest_mi,
 					src_ni, dest_ni, src_ni, dest_ni,
-					protocol, ecm_dir,
+					6, protocol, ecm_dir,
 					NULL /* final callback */,
 					ecm_front_end_ipv6_connection_non_ported_defunct_callback,
 					tg, is_routed, nci);

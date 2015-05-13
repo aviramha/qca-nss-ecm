@@ -551,6 +551,7 @@ struct ecm_db_connection_instance {
 
 	uint32_t time_added;					/* RO: DB time stamp when the connection was added into the database */
 
+	int ip_version;						/* RO: The version of IP protocol this connection was established for */
 	int protocol;						/* RO: Protocol of the connection */
 	ecm_db_direction_t direction;				/* RO: 'Direction' of connection establishment. */
 	bool is_routed;						/* RO: True when connection is routed, false when not */
@@ -1716,6 +1717,17 @@ int ecm_db_connection_protocol_get(struct ecm_db_connection_instance *ci)
 	return ci->protocol;
 }
 EXPORT_SYMBOL(ecm_db_connection_protocol_get);
+
+/*
+ * ecm_db_connection_ip_version_get()
+ *	Return IP version of connection
+ */
+int ecm_db_connection_ip_version_get(struct ecm_db_connection_instance *ci)
+{
+	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed", ci);
+	return ci->ip_version;
+}
+EXPORT_SYMBOL(ecm_db_connection_ip_version_get);
 
 /*
  * ecm_db_host_address_get()
@@ -6025,6 +6037,7 @@ void ecm_db_connection_add(struct ecm_db_connection_instance *ci,
 							struct ecm_db_mapping_instance *mapping_nat_from, struct ecm_db_mapping_instance *mapping_nat_to,
 							struct ecm_db_node_instance *from_node, struct ecm_db_node_instance *to_node,
 							struct ecm_db_node_instance *from_nat_node, struct ecm_db_node_instance *to_nat_node,
+							int ip_version,
 							int protocol, ecm_db_direction_t dir,
 							ecm_db_connection_final_callback_t final,
 							ecm_db_connection_defunct_callback_t defunct,
@@ -6103,6 +6116,7 @@ void ecm_db_connection_add(struct ecm_db_connection_instance *ci,
 	/*
 	 * Set the protocol and routed flag
 	 */
+	ci->ip_version = ip_version;
 	ci->protocol = protocol;
 	ci->is_routed = is_routed;
 
@@ -7202,6 +7216,7 @@ int ecm_db_connection_state_get(struct ecm_state_file_instance *sfi, struct ecm_
 	char dip_address[50];
 	char dip_address_nat[50];
 	ecm_db_direction_t direction;
+	int ip_version;
 	int protocol;
 	bool is_routed;
 	uint32_t generations;
@@ -7269,6 +7284,7 @@ int ecm_db_connection_state_get(struct ecm_state_file_instance *sfi, struct ecm_
 	sprintf(snode_address_nat, "%pM", ni->address);
 
 	direction = ci->direction;
+	ip_version = ci->ip_version;
 	protocol = ci->protocol;
 	is_routed = ci->is_routed;
 	generations = ci->generations;
@@ -7335,6 +7351,10 @@ int ecm_db_connection_state_get(struct ecm_state_file_instance *sfi, struct ecm_
 	}
 
 	if ((result = ecm_state_write(sfi, "dnode_address_nat", "%s", dnode_address_nat))) {
+		return result;
+	}
+
+	if ((result = ecm_state_write(sfi, "ip_version", "%d", ip_version))) {
 		return result;
 	}
 
