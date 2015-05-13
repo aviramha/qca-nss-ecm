@@ -71,6 +71,11 @@ extern int ecm_state_init(struct dentry *dentry);
 extern void ecm_state_exit(void);
 #endif
 
+#ifdef ECM_CLASSIFIER_PCC_ENABLE
+extern int ecm_classifier_pcc_init(struct dentry *dentry);
+extern void ecm_classifier_pcc_exit(void);
+#endif
+
 /*
  * ecm_init()
  */
@@ -123,6 +128,13 @@ static int __init ecm_init(void)
 	ret = ecm_classifier_dscp_init(ecm_dentry);
 	if (0 != ret) {
 		goto err_cls_dscp;
+	}
+#endif
+
+#ifdef ECM_CLASSIFIER_PCC_ENABLE
+	ret = ecm_classifier_pcc_init(ecm_dentry);
+	if (0 != ret) {
+		goto err_cls_pcc;
 	}
 #endif
 
@@ -182,6 +194,10 @@ err_bond:
 #endif
 	ecm_interface_exit();
 err_iface:
+#ifdef ECM_CLASSIFIER_PCC_ENABLE
+	ecm_classifier_pcc_exit();
+err_cls_pcc:
+#endif
 #ifdef ECM_CLASSIFIER_DSCP_ENABLE
 	ecm_classifier_dscp_exit();
 err_cls_dscp:
@@ -257,6 +273,11 @@ static void __exit ecm_exit(void)
 #endif
 	printk(KERN_INFO "exit interface\n");
 	ecm_interface_exit();
+
+#ifdef ECM_CLASSIFIER_PCC_ENABLE
+	printk(KERN_INFO "exit pcc classifier\n");
+	ecm_classifier_pcc_exit();
+#endif
 #ifdef ECM_CLASSIFIER_DSCP_ENABLE
 	printk(KERN_INFO "exit dscp classifier\n");
 	ecm_classifier_dscp_exit();

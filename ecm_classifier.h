@@ -31,6 +31,9 @@ enum ecm_classifier_types {
 #ifdef ECM_CLASSIFIER_NL_ENABLE
 	ECM_CLASSIFIER_TYPE_NL,			/* Provides netlink interface */
 #endif
+#ifdef ECM_CLASSIFIER_PCC_ENABLE
+	ECM_CLASSIFIER_TYPE_PCC,		/* Parental control subsystem support classifier */
+#endif
 	ECM_CLASSIFIER_TYPES,			/* MUST BE LAST */
 };
 typedef enum ecm_classifier_types ecm_classifier_type_t;
