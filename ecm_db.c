@@ -1108,6 +1108,125 @@ void ecm_db_connection_data_totals_update(struct ecm_db_connection_instance *ci,
 }
 EXPORT_SYMBOL(ecm_db_connection_data_totals_update);
 
+#ifdef ECM_MULTICAST_ENABLE
+/*
+ * ecm_db_multicast_connection_data_totals_update()
+ *	Update the total bytes and packets sent/received by the multicast connection
+ *	TODO: This function is almost similar to unicast connection_data_totals_update() except few
+ *	      lines of code. The next merge should have a common logic for both unicast and multicast.
+ */
+void ecm_db_multicast_connection_data_totals_update(struct ecm_db_connection_instance *ci, bool is_from, uint64_t size, uint64_t packets)
+{
+	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed\n", ci);
+
+	spin_lock_bh(&ecm_db_lock);
+
+	if (is_from) {
+		/*
+		 * Update totals sent by the FROM side of connection
+		 */
+		ci->from_data_total += size;
+		ci->from_packet_total += packets;
+#ifdef ECM_DB_ADVANCED_STATS_ENABLE
+		ci->mapping_from->from_data_total += size;
+		ci->mapping_from->host->from_data_total += size;
+		ci->from_node->from_data_total += size;
+		ci->mapping_from->from_packet_total += packets;
+		ci->mapping_from->host->from_packet_total += packets;
+		ci->from_node->from_packet_total += packets;
+
+		/*
+		 * Data from the host is essentially TO the interface on which the host is reachable
+		 */
+		ci->from_node->iface->to_data_total += size;
+		ci->from_node->iface->to_packet_total += packets;
+
+		/*
+		 * Update totals sent TO the other side of the connection
+		 */
+		ci->mapping_to->to_data_total += size;
+		ci->mapping_to->host->to_data_total += size;
+		ci->to_node->to_data_total += size;
+		ci->mapping_to->to_packet_total += packets;
+		ci->mapping_to->host->to_packet_total += packets;
+		ci->to_node->to_packet_total += packets;
+#endif
+		spin_unlock_bh(&ecm_db_lock);
+		return;
+	}
+
+	/*
+	 * Update totals sent by the TO side of this connection
+	 */
+	ci->to_data_total += size;
+	ci->to_packet_total += packets;
+#ifdef ECM_DB_ADVANCED_STATS_ENABLE
+	ci->mapping_to->from_data_total += size;
+	ci->mapping_to->host->from_data_total += size;
+	ci->to_node->from_data_total += size;
+	ci->mapping_to->from_packet_total += packets;
+	ci->mapping_to->host->from_packet_total += packets;
+	ci->to_node->from_packet_total += packets;
+
+	/*
+	 * Update totals sent TO the other side of the connection
+	 */
+	ci->mapping_from->to_data_total += size;
+	ci->mapping_from->host->to_data_total += size;
+	ci->from_node->to_data_total += size;
+	ci->mapping_from->to_packet_total += packets;
+	ci->mapping_from->host->to_packet_total += packets;
+	ci->from_node->to_packet_total += packets;
+
+	/*
+	 * Sending to the other side means FROM the interface we reach that host
+	 */
+	ci->from_node->iface->from_data_total += size;
+	ci->from_node->iface->from_packet_total += packets;
+#endif
+	spin_unlock_bh(&ecm_db_lock);
+}
+EXPORT_SYMBOL(ecm_db_multicast_connection_data_totals_update);
+
+/*
+ * ecm_db_multicast_connection_interface_heirarchy_stats_update()
+ * 	Traverse through the multicast destination interface heirarchy and update the stats (data and packets).
+ */
+void ecm_db_multicast_connection_interface_heirarchy_stats_update(struct ecm_db_connection_instance *ci, uint64_t size, uint64_t packets)
+{
+	struct ecm_db_iface_instance *to_mc_ifaces;
+	struct ecm_db_iface_instance *ii;
+	struct ecm_db_iface_instance **ifaces;
+	struct ecm_db_iface_instance *ii_temp;
+	int32_t *to_mc_ifaces_first;
+	int heirarchy_index;
+	int ret;
+
+	ret = ecm_db_multicast_connection_to_interfaces_get_and_ref_all(ci, &to_mc_ifaces, &to_mc_ifaces_first);
+	if (ret == 0) {
+		DEBUG_WARN("%p: no interfaces in to_multicast_interfaces list!\n", ci);
+		return;
+	}
+
+	spin_lock_bh(&ecm_db_lock);
+	for (heirarchy_index = 0; heirarchy_index < ECM_DB_MULTICAST_IF_MAX; heirarchy_index++) {
+
+		if (to_mc_ifaces_first[heirarchy_index] < ECM_DB_IFACE_HEIRARCHY_MAX) {
+			ii_temp = ecm_db_multicast_if_heirarchy_get(to_mc_ifaces, heirarchy_index);
+			ii_temp = ecm_db_multicast_if_instance_get_at_index(ii_temp, ECM_DB_IFACE_HEIRARCHY_MAX - 1);
+			ifaces = (struct ecm_db_iface_instance **)ii_temp;
+			ii = *ifaces;
+			ii->to_data_total += size;
+			ii->to_packet_total += packets;
+		}
+	}
+	spin_unlock_bh(&ecm_db_lock);
+
+	ecm_db_multicast_connection_to_interfaces_deref_all(to_mc_ifaces, to_mc_ifaces_first);
+}
+EXPORT_SYMBOL(ecm_db_multicast_connection_interface_heirarchy_stats_update);
+#endif
+
 /*
  * ecm_db_connection_data_totals_update_dropped()
  *	Update the total data (and packets) sent by the given host but which we dropped
@@ -5669,6 +5788,131 @@ void ecm_db_connection_interfaces_deref(struct ecm_db_iface_instance *interfaces
 }
 EXPORT_SYMBOL(ecm_db_connection_interfaces_deref);
 
+#ifdef ECM_MULTICAST_ENABLE
+/*
+ * ecm_db_multicast_connection_to_interfaces_reset()
+ *	Reset the 'to' interfaces heirarchy with a new set of destination interfaces for
+ *	the multicast connection
+ */
+void ecm_db_multicast_connection_to_interfaces_reset(struct ecm_db_connection_instance *ci, struct ecm_db_iface_instance *interfaces, int32_t *new_first)
+{
+	struct ecm_db_iface_instance *ii_temp;
+	struct ecm_db_iface_instance *ii_single;
+	struct ecm_db_iface_instance **ifaces;
+	int32_t *nf_p;
+	int32_t heirarchy_index;
+	int32_t i;
+	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed\n", ci);
+
+	/*
+	 * First remove all old interface hierarchies if any hierarchy
+	 * uphold in the ci->to_mcast_interfaces.
+	 */
+	ecm_db_multicast_connection_to_interfaces_clear(ci);
+
+	/*
+	 * Iterate the to interface list and add the new interface hierarchies
+	 */
+	spin_lock_bh(&ecm_db_lock);
+
+	for (heirarchy_index = 0; heirarchy_index < ECM_DB_MULTICAST_IF_MAX; heirarchy_index++) {
+		ii_temp = ecm_db_multicast_if_heirarchy_get(interfaces, heirarchy_index);
+		nf_p = ecm_db_multicast_if_first_get_at_index(new_first, heirarchy_index);
+
+		if (*nf_p == ECM_DB_IFACE_HEIRARCHY_MAX) {
+			continue;
+		}
+
+		for (i = *nf_p; i < ECM_DB_IFACE_HEIRARCHY_MAX; ++i) {
+
+			/*
+			 * Store valid dest interface list into DB connection
+			 */
+			ii_single = ecm_db_multicast_if_instance_get_at_index(ii_temp, i);
+			ifaces = (struct ecm_db_iface_instance **)ii_single;
+			ci->to_mcast_interfaces[heirarchy_index][i] = *ifaces;
+			_ecm_db_iface_ref(ci->to_mcast_interfaces[heirarchy_index][i]);
+		}
+	}
+
+	/*
+	 * Update the first indices
+	 */
+	for (heirarchy_index = 0; heirarchy_index < ECM_DB_MULTICAST_IF_MAX; heirarchy_index++) {
+		nf_p = ecm_db_multicast_if_first_get_at_index(new_first, heirarchy_index);
+		ci->to_mcast_interface_first[heirarchy_index] = *nf_p;
+	}
+
+	ci->to_mcast_interfaces_set = true;
+	spin_unlock_bh(&ecm_db_lock);
+
+}
+EXPORT_SYMBOL(ecm_db_multicast_connection_to_interfaces_reset);
+
+/*
+ *  ecm_db_multicast_connection_to_interfaces_update()
+ *  	Merge the latest valid multicast destination interfaces into DB Connection
+ *  	instance. The new list holds the updated list of interfaces for the multicast
+ *  	connection, due to JOIN updates.
+ */
+void ecm_db_multicast_connection_to_interfaces_update(struct ecm_db_connection_instance *ci,
+			struct ecm_db_iface_instance *interfaces, int32_t *mc_join_first, int32_t *mc_join_valid_idx)
+{
+	struct ecm_db_iface_instance *ii_temp;
+	struct ecm_db_iface_instance *ii_single;
+	struct ecm_db_iface_instance **ifaces;
+	int32_t *join_first;
+	int32_t *join_idx;
+	int heirarchy_index;
+	int32_t if_index;
+	int32_t i;
+
+	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed\n", ci);
+
+	/*
+	 * Iterate the to interface list, adding in the new
+	 */
+	spin_lock_bh(&ecm_db_lock);
+	for (heirarchy_index = 0, if_index = 0; heirarchy_index < ECM_DB_MULTICAST_IF_MAX; heirarchy_index++) {
+		ii_temp = ecm_db_multicast_if_heirarchy_get(interfaces, if_index);
+		join_first = ecm_db_multicast_if_first_get_at_index(mc_join_first, if_index);
+		join_idx = ecm_db_multicast_if_num_get_at_index(mc_join_valid_idx, heirarchy_index);
+
+		if (*join_idx == 0) {
+
+			/*
+		 	 * No update for the interface at this index
+		 	 */
+			continue;
+		}
+
+		/*
+		 * This interface has joined the group. Add it to the list.
+		 */
+		if (*join_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
+			if_index++;
+			continue;
+		}
+
+		ci->to_mcast_interface_first[heirarchy_index] = *join_first;
+		for (i = *join_first; i < ECM_DB_IFACE_HEIRARCHY_MAX; ++i) {
+
+			/*
+			 * Store valid dest interface list into DB connection
+			 */
+			ii_single = ecm_db_multicast_if_instance_get_at_index(ii_temp, i);
+			ifaces = (struct ecm_db_iface_instance **)ii_single;
+			ci->to_mcast_interfaces[heirarchy_index][i] = *ifaces;
+			_ecm_db_iface_ref(ci->to_mcast_interfaces[heirarchy_index][i]);
+		}
+		if_index++;
+	}
+	spin_unlock_bh(&ecm_db_lock);
+	return;
+}
+EXPORT_SYMBOL(ecm_db_multicast_connection_to_interfaces_update);
+#endif
+
 /*
  * ecm_db_connection_from_interfaces_reset()
  *	Reset the from interfaces heirarchy with a new set of interfaces
@@ -7264,6 +7508,47 @@ static int ecm_db_connection_heirarchy_state_get(struct ecm_state_file_instance 
 	return 0;
 }
 
+#ifdef ECM_MULTICAST_ENABLE
+/*
+ * ecm_db_multicast_to_interfaces_xml_state_get()
+ * 	 Obtain XML state for the multicast destination interfaces list
+ */
+static int ecm_db_multicast_to_interfaces_xml_state_get(struct ecm_db_connection_instance *ci, struct ecm_state_file_instance *sfi)
+{
+	struct ecm_db_iface_instance *mc_ifaces;
+	struct ecm_db_iface_instance *mc_ifaces_single[ECM_DB_IFACE_HEIRARCHY_MAX];
+	struct ecm_db_iface_instance *ii_temp;
+	int32_t *mc_ifaces_first;
+	int32_t *ifaces_first;
+	int32_t heirarchy_index;
+	int ret;
+
+	ret = ecm_db_multicast_connection_to_interfaces_get_and_ref_all(ci, &mc_ifaces, &mc_ifaces_first);
+	if (ret == 0) {
+		return -1;
+	}
+
+	for (heirarchy_index = 0; heirarchy_index < ECM_DB_MULTICAST_IF_MAX; heirarchy_index++) {
+
+		ii_temp = ecm_db_multicast_if_heirarchy_get(mc_ifaces, heirarchy_index);
+		ecm_db_multicast_copy_if_heirarchy(mc_ifaces_single, ii_temp);
+		ifaces_first = ecm_db_multicast_if_first_get_at_index(mc_ifaces_first, heirarchy_index);
+
+		if (ci->to_mcast_interface_first[heirarchy_index] < ECM_DB_IFACE_HEIRARCHY_MAX) {
+			ret = ecm_db_connection_heirarchy_state_get(sfi, mc_ifaces_single, *ifaces_first);
+			if (ret) {
+				ecm_db_multicast_connection_to_interfaces_deref_all(mc_ifaces, mc_ifaces_first);
+				return ret;
+			}
+
+		}
+	}
+	ecm_db_multicast_connection_to_interfaces_deref_all(mc_ifaces, mc_ifaces_first);
+
+	return ret;
+}
+#endif
+
 /*
  * ecm_db_connection_state_get()
  *	Prepare a connection message
@@ -7303,6 +7588,7 @@ int ecm_db_connection_state_get(struct ecm_state_file_instance *sfi, struct ecm_
 	struct ecm_db_node_instance *ni;
 	int aci_index;
 	int aci_count;
+	ip_addr_t __attribute__((unused)) group_ip;
 	struct ecm_front_end_connection_instance *feci;
 	struct ecm_classifier_instance *assignments[ECM_CLASSIFIER_TYPES];
 	int32_t first_interface;
@@ -7475,6 +7761,38 @@ int ecm_db_connection_state_get(struct ecm_state_file_instance *sfi, struct ecm_
 		return result;
 	}
 
+#ifdef ECM_MULTICAST_ENABLE
+	ecm_db_connection_to_address_get(ci, group_ip);
+	if (ecm_ip_addr_is_multicast(group_ip)) {
+		if ((result = ecm_state_prefix_add(sfi, "to_mc_interfaces"))) {
+			return result;
+		}
+
+		if ((result = ecm_db_multicast_to_interfaces_xml_state_get(ci, sfi))) {
+			return result;
+		}
+
+		if ((result = ecm_state_prefix_remove(sfi))) {
+			return result;
+		}
+	}
+	else {
+		if ((result = ecm_state_prefix_add(sfi, "to_interfaces"))) {
+			return result;
+		}
+
+		first_interface = ecm_db_connection_to_interfaces_get_and_ref(ci, interfaces);
+		result = ecm_db_connection_heirarchy_state_get(sfi, interfaces, first_interface);
+		ecm_db_connection_interfaces_deref(interfaces, first_interface);
+		if (result) {
+			return result;
+		}
+
+		if ((result = ecm_state_prefix_remove(sfi))) {
+			return result;
+		}
+	}
+#else
 	if ((result = ecm_state_prefix_add(sfi, "to_interfaces"))) {
 		return result;
 	}
@@ -7487,6 +7805,7 @@ int ecm_db_connection_state_get(struct ecm_state_file_instance *sfi, struct ecm_
 	if ((result = ecm_state_prefix_remove(sfi))) {
 		return result;
 	}
+#endif
 
 	if ((result = ecm_state_prefix_add(sfi, "from_nat_interfaces"))) {
 		return result;
@@ -9156,6 +9475,7 @@ EXPORT_SYMBOL(ecm_db_listener_add);
 struct ecm_db_connection_instance *ecm_db_connection_alloc(void)
 {
 	struct ecm_db_connection_instance *ci;
+	int __attribute__((unused)) i;
 
 	/*
 	 * Allocate the connection
@@ -9186,6 +9506,11 @@ struct ecm_db_connection_instance *ecm_db_connection_alloc(void)
 	ci->from_nat_interface_first = ECM_DB_IFACE_HEIRARCHY_MAX;
 	ci->to_nat_interface_first = ECM_DB_IFACE_HEIRARCHY_MAX;
 
+#ifdef ECM_MULTICAST_ENABLE
+	for (i = 0; i < ECM_DB_MULTICAST_IF_MAX; ++i) {
+		ci->to_mcast_interface_first[i] = ECM_DB_IFACE_HEIRARCHY_MAX;
+	}
+#endif
 	/*
 	 * If the master thread is terminating then we cannot create new instances
 	 */
@@ -9786,7 +10111,6 @@ void ecm_db_multicast_connection_to_interfaces_deref_all(struct ecm_db_iface_ins
 	struct ecm_db_iface_instance *ii_temp[ECM_DB_IFACE_HEIRARCHY_MAX];
 	int32_t *to_first;
 	int heirarchy_index;
-
 	DEBUG_ASSERT(interfaces, "Bad memory, multicast interfaces list has been already freed\n");
 	DEBUG_ASSERT(ifaces_first, "Bad memory, multicast interfaces first has been already freed\n");
 

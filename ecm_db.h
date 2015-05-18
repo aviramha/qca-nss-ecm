@@ -343,6 +343,8 @@ void ecm_db_multicast_connection_to_interfaces_reset(struct ecm_db_connection_in
 void ecm_db_multicast_connection_to_interfaces_update(struct ecm_db_connection_instance *ci, struct ecm_db_iface_instance *interfaces, int32_t *new_first, int *join_valid_idx);
 void ecm_db_multicast_connection_data_totals_update(struct ecm_db_connection_instance *ci, bool is_from, uint64_t size, uint64_t packets);
 void ecm_db_multicast_connection_to_interfaces_clear_at_index(struct ecm_db_connection_instance *ci, uint32_t index);
+void ecm_db_multicast_connection_data_totals_update(struct ecm_db_connection_instance *ci, bool is_from, uint64_t size, uint64_t packets);
+void ecm_db_multicast_connection_interface_heirarchy_stats_update(struct ecm_db_connection_instance *ci, uint64_t size, uint64_t packets);
 bool ecm_db_multicast_connection_to_interfaces_set_check(struct ecm_db_connection_instance *ci);
 #endif
 #endif

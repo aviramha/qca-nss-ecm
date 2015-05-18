@@ -143,7 +143,7 @@ typedef void (*ecm_db_timer_group_entry_callback_t)(void *arg);	/* Timer entry h
 
 #ifdef ECM_MULTICAST_ENABLE
 
-struct ecm_db_multicast_connection_instance;
+struct ecm_db_multicast_tuple_instance;
 
 /*
  *  This flag is used to find out whether a bridge device is present or not in a
@@ -157,7 +157,21 @@ struct ecm_db_multicast_connection_instance;
  *  a multicast connection
  */
 #define ECM_DB_MULTICAST_IF_MAX 16
-#define ECM_DB_MULTICAST_BR_IF_MAX 12
+
+/*
+ * struct ecm_multicast_if_update
+ * 	This is used for storing processed updates to the destination
+ * 	interface list of a multicast connection. The updates are
+ * 	received from multicast routing or bridge snooper due to IGMP
+ * 	join or leave events
+ */
+struct ecm_multicast_if_update {
+	uint32_t if_join_cnt;
+	uint32_t if_join_idx[ECM_DB_MULTICAST_IF_MAX];
+	uint32_t join_dev[ECM_DB_MULTICAST_IF_MAX];
+	uint32_t if_leave_cnt;
+	uint32_t if_leave_idx[ECM_DB_MULTICAST_IF_MAX];
+};
 #endif
 
 /*
@@ -354,7 +368,7 @@ static inline int32_t *ecm_db_multicast_if_first_get_at_index(int32_t *if_first,
 
 /*
  * ecm_db_multicast_if_num_get_at_index()
- *	Returns a pointer to 'if_index' entry in the array at index position.
+ *	Returns a pointer to 'if_index' entry in an array at index position.
  */
 static inline int32_t *ecm_db_multicast_if_num_get_at_index(int32_t *if_num, uint32_t index)
 {
