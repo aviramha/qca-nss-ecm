@@ -80,6 +80,9 @@
 #ifdef ECM_DB_CTA_TRACK_ENABLE
 #define ECM_DB_CLASSIFIER_TYPE_ASSIGNMENT_MAGIC 0xAEF4
 #endif
+#ifdef ECM_MULTICAST_ENABLE
+#define ECM_DB_MULTICAST_INSTANCE_MAGIC 0xc34a
+#endif
 
 /*
  * Global lists.
@@ -496,7 +499,6 @@ static struct ecm_db_timer_group ecm_db_timer_groups[ECM_DB_TIMER_GROUPS_MAX];
 								/* Timer groups */
 static struct timer_list ecm_db_timer;				/* Timer to drive timer groups */
 
-
 #ifdef ECM_DB_CTA_TRACK_ENABLE
 /*
  * Classifier TYPE assignment lists.
@@ -665,6 +667,17 @@ struct ecm_db_connection_instance {
 	int32_t to_nat_interface_first;				/* The index of the first interface in the list */
 	bool to_nat_interface_set;				/* True when a list has been set - even if there is NO list, it's still deliberately set that way. */
 
+#ifdef ECM_MULTICAST_ENABLE
+	/*
+	 * Destination Multicast interfaces list
+	 */
+	struct ecm_db_iface_instance *to_mcast_interfaces[ECM_DB_MULTICAST_IF_MAX][ECM_DB_IFACE_HEIRARCHY_MAX];
+								/* The outermost to innnermost interfaces this connection is using in the to path */
+	int32_t to_mcast_interface_first[ECM_DB_MULTICAST_IF_MAX];
+								/* The indexes of the first interfaces in the destinaiton interface list */
+	struct ecm_db_multicast_tuple_instance *ti; 		/* Multicast Connection instance */
+	bool to_mcast_interfaces_set;				/* Flag to indicate if the destination interface list is currently empty or not */
+#endif
 	/*
 	 * Time values in seconds
 	 */
@@ -755,6 +768,40 @@ struct ecm_db_listener_instance {
  * Listener flags
  */
 #define ECM_DB_LISTENER_FLAGS_INSERTED 1			/* Is inserted into database */
+
+#ifdef ECM_MULTICAST_ENABLE
+/*
+ * struct ecm_db_multicast_tuple_instance
+ * 	Tuple information for an accelerated multicast connection.
+ * 	This tuple information is further used to find an attached
+ * 	connection for the multicast flow.
+ */
+struct ecm_db_multicast_tuple_instance {
+	struct ecm_db_multicast_tuple_instance *next;	/* Next instance in global list */
+	struct ecm_db_multicast_tuple_instance *prev;	/* Previous instance in global list */
+	uint16_t src_port;	/* RO: IPv4/v6 Source Port */
+	uint16_t dst_port;	/* RO: IPv4/v6 Destination Port */
+	ip_addr_t src_ip;	/* RO: IPv4/v6 Source Address */
+	ip_addr_t grp_ip;	/* RO: IPv4/v6 Multicast Group Address */
+	uint32_t flags;		/* Flags for this instance node */
+	uint32_t hash_index;	/* Hash index of this node */
+	int proto;		/* RO: Protocol */
+	int refs;		/* Integer to trap we never go negative */
+#if (DEBUG_LEVEL > 0)
+	uint16_t magic;		/* Magic value for debug */
+#endif
+};
+
+#define ECM_DB_MULTICAST_TUPLE_INSTANCE_HASH_SLOTS 16
+typedef uint32_t ecm_db_multicast_tuple_instance_hash_t;
+
+/*
+ * Multicast connection tuple table
+ * 	This table is used to lookup a complete tuple for multicast connections
+ * 	using the multicast group address
+ */
+static struct ecm_db_multicast_tuple_instance *ecm_db_multicast_tuple_instance_table[ECM_DB_MULTICAST_TUPLE_INSTANCE_HASH_SLOTS];
+#endif
 
 /*
  * Simple stats
@@ -3431,6 +3478,28 @@ static inline ecm_db_connection_serial_hash_t ecm_db_connection_generate_serial_
 
 	return (ecm_db_connection_serial_hash_t)(hash_val & (ECM_DB_CONNECTION_SERIAL_HASH_SLOTS - 1));
 }
+
+#ifdef ECM_MULTICAST_ENABLE
+/*
+ * ecm_db_multicast_generate_hash_index()
+ * 	Calculate the hash index given a multicast group address.
+ */
+static inline ecm_db_multicast_tuple_instance_hash_t ecm_db_multicast_generate_hash_index(ip_addr_t address)
+{
+	uint32_t temp;
+	uint32_t hash_val;
+
+	if (ECM_IP_ADDR_IS_V4(address)){
+		temp = (uint32_t)address[0];
+	} else {
+		temp = (uint32_t)address[3];
+	}
+
+	hash_val = (uint32_t)jhash_1word(temp, ecm_db_jhash_rnd);
+
+	return (ecm_db_multicast_tuple_instance_hash_t)(hash_val & (ECM_DB_MULTICAST_TUPLE_INSTANCE_HASH_SLOTS - 1));
+}
+#endif
 
 /*
  * ecm_db_mapping_generate_hash_index()
@@ -9342,6 +9411,482 @@ struct ecm_db_listener_instance *ecm_db_listener_alloc(void)
 	return li;
 }
 EXPORT_SYMBOL(ecm_db_listener_alloc);
+
+#ifdef ECM_MULTICAST_ENABLE
+/*
+ *  _ecm_db_multicast_tuple_instance_ref()
+ * 	Increment tuple reference count by one
+ */
+static void _ecm_db_multicast_tuple_instance_ref(struct ecm_db_multicast_tuple_instance *ti)
+{
+	DEBUG_CHECK_MAGIC(ti, ECM_DB_MULTICAST_INSTANCE_MAGIC, "%p: magic failed", ti);
+	ti->refs++;
+	DEBUG_TRACE("%p: ti ref %d\n", ti, ti->refs);
+	DEBUG_ASSERT(ti->refs > 0, "%p: ref wrap\n", ti)
+}
+
+/*
+ * ecm_db_multicast_alloc_connection()
+ * 	Allocate memory for the connection structure.
+ */
+struct ecm_db_multicast_tuple_instance *ecm_db_multicast_tuple_instance_alloc(ip_addr_t origin, ip_addr_t group, uint16_t src_port, uint16_t dst_port)
+{
+	struct ecm_db_multicast_tuple_instance *ti;
+	ti = (struct ecm_db_multicast_tuple_instance *)kzalloc(sizeof(struct ecm_db_multicast_tuple_instance), GFP_ATOMIC | __GFP_NOWARN);
+	if (!ti) {
+		DEBUG_WARN("ti: Alloc failed\n");
+		return NULL;
+	}
+	ti->src_port = src_port;
+	ti->dst_port = dst_port;
+	ECM_IP_ADDR_COPY(ti->src_ip, origin);
+	ECM_IP_ADDR_COPY(ti->grp_ip, group);
+	ti->proto = IPPROTO_UDP;
+	ti->hash_index = ecm_db_multicast_generate_hash_index(group);
+	ti->flags = 0;
+	ti->refs = 1;
+	ti->next = NULL;
+	ti->prev = NULL;
+	DEBUG_SET_MAGIC(ti, ECM_DB_MULTICAST_INSTANCE_MAGIC);
+
+	return ti;
+}
+EXPORT_SYMBOL(ecm_db_multicast_tuple_instance_alloc);
+
+/*
+ * ecm_db_multicast_tuple_instance_find_and_ref()
+ * 	Called by MFC event update to fetch connection from the table
+ */
+struct ecm_db_multicast_tuple_instance *ecm_db_multicast_tuple_instance_find_and_ref(ip_addr_t origin, ip_addr_t group)
+{
+	ecm_db_multicast_tuple_instance_hash_t hash_index;
+	struct ecm_db_multicast_tuple_instance *ti;
+
+	/*
+	 * Compute the hash chain index
+	 */
+	hash_index = ecm_db_multicast_generate_hash_index(group);
+
+	spin_lock_bh(&ecm_db_lock);
+	ti = ecm_db_multicast_tuple_instance_table[hash_index];
+
+	/*
+	 * Traverse through the list and find the ti
+	 */
+	while (ti) {
+		if (!(ECM_IP_ADDR_MATCH(ti->src_ip, origin) && ECM_IP_ADDR_MATCH(ti->grp_ip, group))) {
+			ti = ti->next;
+			continue;
+		}
+
+		_ecm_db_multicast_tuple_instance_ref(ti);
+		spin_unlock_bh(&ecm_db_lock);
+		DEBUG_TRACE("multicast tuple instance found %p\n", ti);
+		return ti;
+	}
+
+	spin_unlock_bh(&ecm_db_lock);
+	DEBUG_TRACE("multicast tuple instance not found\n");
+	return NULL;
+}
+EXPORT_SYMBOL(ecm_db_multicast_tuple_instance_find_and_ref);
+
+/*
+ * ecm_db_multicast_tuple_instance_deref()
+ * 	Deref the reference count or
+ * 	Free the connection struct, when the multicast connection dies
+ */
+int ecm_db_multicast_tuple_instance_deref(struct ecm_db_multicast_tuple_instance *ti)
+{
+	DEBUG_CHECK_MAGIC(ti, ECM_DB_MULTICAST_INSTANCE_MAGIC, "%p: magic failed", ti);
+	spin_lock_bh(&ecm_db_lock);
+	ti->refs--;
+	DEBUG_TRACE("%p: ti deref %d\n", ti, ti->refs);
+	DEBUG_ASSERT(ti->refs >= 0, "%p: ref wrap\n", ti);
+
+	if (ti->refs > 0) {
+		int refs = ti->refs;
+		spin_unlock_bh(&ecm_db_lock);
+		return refs;
+	}
+
+	if (!ti->prev) {
+		DEBUG_ASSERT(ecm_db_multicast_tuple_instance_table[ti->hash_index] == ti, "%p: hash table bad\n", ti);
+		ecm_db_multicast_tuple_instance_table[ti->hash_index] = ti->next;
+	} else {
+		ti->prev->next = ti->next;
+	}
+
+	if (ti->next) {
+		ti->next->prev = ti->prev;
+	}
+	spin_unlock_bh(&ecm_db_lock);
+
+	DEBUG_CLEAR_MAGIC(ti);
+	kfree(ti);
+
+	return 0;
+}
+EXPORT_SYMBOL(ecm_db_multicast_tuple_instance_deref);
+
+/*
+ * ecm_db_multicast_tuple_instance_add()
+ * 	Add the connection into the table when a connection is added
+ * 	Note: This function takes a reference count and caller has to also call
+ * 	ecm_db_multicast_tuple_instance_deref() after this function.
+ */
+void ecm_db_multicast_tuple_instance_add(struct ecm_db_multicast_tuple_instance *ti)
+{
+	DEBUG_CHECK_MAGIC(ti, ECM_DB_MULTICAST_INSTANCE_MAGIC, "%p: magic failed", ti);
+
+	spin_lock_bh(&ecm_db_lock);
+
+	/*
+	 * Take a local reference to ti
+	 */
+	_ecm_db_multicast_tuple_instance_ref(ti);
+	ti->next = ecm_db_multicast_tuple_instance_table[ti->hash_index];
+	if (ecm_db_multicast_tuple_instance_table[ti->hash_index]) {
+		ecm_db_multicast_tuple_instance_table[ti->hash_index]->prev = ti;
+	}
+
+	ecm_db_multicast_tuple_instance_table[ti->hash_index] = ti;
+	spin_unlock_bh(&ecm_db_lock);
+
+}
+EXPORT_SYMBOL(ecm_db_multicast_tuple_instance_add);
+
+/*
+ * ecm_db_multicast_tuple_instance_get_and_ref_first()
+ * 	Return the first tuple instance from the table when given a group
+ */
+struct ecm_db_multicast_tuple_instance *ecm_db_multicast_tuple_instance_get_and_ref_first(ip_addr_t group)
+{
+	ecm_db_multicast_tuple_instance_hash_t hash_index;
+	struct ecm_db_multicast_tuple_instance *ti;
+
+	hash_index = ecm_db_multicast_generate_hash_index(group);
+
+	spin_lock_bh(&ecm_db_lock);
+	ti = ecm_db_multicast_tuple_instance_table[hash_index];
+	if (ti) {
+		_ecm_db_multicast_tuple_instance_ref(ti);
+	}
+	spin_unlock_bh(&ecm_db_lock);
+
+	return ti;
+}
+EXPORT_SYMBOL(ecm_db_multicast_tuple_instance_get_and_ref_first);
+
+/*
+ * ecm_db_multicast_tuple_instance_get_and_ref_next()
+ * 	Return the next tuple instance node
+ */
+struct ecm_db_multicast_tuple_instance *ecm_db_multicast_tuple_instance_get_and_ref_next(struct ecm_db_multicast_tuple_instance *ti)
+{
+	struct ecm_db_multicast_tuple_instance *tin;
+	DEBUG_CHECK_MAGIC(ti, ECM_DB_MULTICAST_INSTANCE_MAGIC, "%p: magic failed", ti);
+	spin_lock_bh(&ecm_db_lock);
+	tin = ti->next;
+	if (tin) {
+		_ecm_db_multicast_tuple_instance_ref(tin);
+	}
+	spin_unlock_bh(&ecm_db_lock);
+	return tin;
+}
+EXPORT_SYMBOL(ecm_db_multicast_tuple_instance_get_and_ref_next);
+
+/*
+ * ecm_db_multicast_tuple_instance_source_ip_get()
+ * 	This function return the source IP for a connection object
+ */
+void ecm_db_multicast_tuple_instance_source_ip_get(struct ecm_db_multicast_tuple_instance *ti, ip_addr_t origin)
+{
+	DEBUG_CHECK_MAGIC(ti, ECM_DB_MULTICAST_INSTANCE_MAGIC, "%p: magic failed", ti);
+	ECM_IP_ADDR_COPY(origin, ti->src_ip);
+}
+EXPORT_SYMBOL(ecm_db_multicast_tuple_instance_source_ip_get);
+
+/*
+ * ecm_db_multicast_tuple_instance_flags_get()
+ * 	Return flags related to Multicast connection
+ */
+uint32_t ecm_db_multicast_tuple_instance_flags_get(struct ecm_db_multicast_tuple_instance *ti)
+{
+	uint32_t flags;
+
+	DEBUG_CHECK_MAGIC(ti, ECM_DB_MULTICAST_INSTANCE_MAGIC, "%p: magic failed\n", ti);
+	spin_lock_bh(&ecm_db_lock);
+	flags = ti->flags;
+	spin_unlock_bh(&ecm_db_lock);
+	return flags;
+}
+EXPORT_SYMBOL(ecm_db_multicast_tuple_instance_flags_get);
+
+/*
+ * ecm_db_multicast_tuple_instance_flags_set()
+ * 	Set the multicast connection flags
+ */
+void ecm_db_multicast_tuple_instance_flags_set(struct ecm_db_multicast_tuple_instance *ti, uint32_t flags)
+{
+	DEBUG_CHECK_MAGIC(ti, ECM_DB_MULTICAST_INSTANCE_MAGIC, "%p: magic failed\n", ti);
+
+	spin_lock_bh(&ecm_db_lock);
+	ti->flags |= flags;
+	spin_unlock_bh(&ecm_db_lock);
+}
+EXPORT_SYMBOL(ecm_db_multicast_tuple_instance_flags_set);
+
+/*
+ * ecm_db_multicast_tuple_instance_flags_clear()
+ * 	Clear the multicast connection flags
+ */
+void ecm_db_multicast_tuple_instance_flags_clear(struct ecm_db_multicast_tuple_instance *ti, uint32_t flags)
+{
+	DEBUG_CHECK_MAGIC(ti, ECM_DB_MULTICAST_INSTANCE_MAGIC, "%p: magic failed\n", ti);
+
+	spin_lock_bh(&ecm_db_lock);
+	ti->flags &= ~flags;
+	spin_unlock_bh(&ecm_db_lock);
+}
+EXPORT_SYMBOL(ecm_db_multicast_tuple_instance_flags_clear);
+
+/*
+ * ecm_db_multicast_connection_to_interfaces_get_and_ref_all()
+ *	Return the list of multicast destination interface heirarchies to which this connection is established.
+ *	The function returns the heirarchies using the 'interface' pointer passed to it. It also returns the first
+ *	index in the interface heirarchy for each of the heirarchies using the 'ifaces_first' pointer.
+ *
+ * NOTE: This function allocates the memory for the destination interface heirachy. This memory is expected to be
+ * freed only by making a call to ecm_db_multicast_connection_interfaces_deref_all().
+ *
+ * The size of the buffer allocated for the heirarchies and pointed to by 'interfaces' is as large as
+ * sizeof(struct ecm_db_iface_instance *) * ECM_DB_MULTICAST_IF_MAX * ECM_DB_IFACE_HEIRARCHY_MAX.
+ * Returns the number of interface heirarchies in the list as a return value.
+ *
+ * Each interface is referenced on return, be sure to release them using ecm_db_multicast_connection_interfaces_deref_all().
+ */
+int32_t ecm_db_multicast_connection_to_interfaces_get_and_ref_all(struct ecm_db_connection_instance *ci,
+						struct ecm_db_iface_instance **interfaces, int32_t **ifaces_first)
+{
+	struct ecm_db_iface_instance *heirarchy_base;
+	struct ecm_db_iface_instance *heirarchy_temp;
+	struct ecm_db_iface_instance *ii_single;
+	struct ecm_db_iface_instance **ifaces;
+	struct ecm_db_iface_instance *ii;
+	int32_t *ii_first_base;
+	int32_t *ii_first;
+	int32_t heirarchy_index;
+	int32_t ii_index;
+	int32_t if_count = 0;
+
+	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed\n", ci);
+
+	heirarchy_base = (struct ecm_db_iface_instance *)kzalloc(ECM_DB_TO_MCAST_INTERFACES_SIZE, GFP_ATOMIC | __GFP_NOWARN);
+	if (!heirarchy_base) {
+		DEBUG_WARN("%p: No memory for interface hierarchies \n", ci);
+		return if_count;
+	}
+
+	ii_first_base = (int32_t *)kzalloc(sizeof(int32_t *) * ECM_DB_MULTICAST_IF_MAX, GFP_ATOMIC | __GFP_NOWARN);
+	if (!ii_first_base) {
+		DEBUG_WARN("%p: No memory for first interface \n", ci);
+		kfree(heirarchy_base);
+		return if_count;
+	}
+
+	spin_lock_bh(&ecm_db_lock);
+	if (!ci->to_mcast_interfaces_set) {
+		spin_unlock_bh(&ecm_db_lock);
+		kfree(ii_first_base);
+		kfree(heirarchy_base);
+		return if_count;
+	}
+
+	for (heirarchy_index = 0; heirarchy_index < ECM_DB_MULTICAST_IF_MAX; heirarchy_index++) {
+
+		heirarchy_temp = ecm_db_multicast_if_heirarchy_get(heirarchy_base, heirarchy_index);
+
+		if (ci->to_mcast_interface_first[heirarchy_index] < ECM_DB_IFACE_HEIRARCHY_MAX) {
+			if_count++;
+		}
+
+		for (ii_index = ci->to_mcast_interface_first[heirarchy_index]; ii_index < ECM_DB_IFACE_HEIRARCHY_MAX; ++ii_index) {
+
+			ii = ci->to_mcast_interfaces[heirarchy_index][ii_index];
+			_ecm_db_iface_ref(ii);
+			ii_single = ecm_db_multicast_if_instance_get_at_index(heirarchy_temp, ii_index);
+			ifaces = (struct ecm_db_iface_instance **)ii_single;
+			*ifaces = ii;
+		}
+
+		ii_first = ecm_db_multicast_if_first_get_at_index(ii_first_base, heirarchy_index);
+		*ii_first = ci->to_mcast_interface_first[heirarchy_index];
+	}
+
+	*interfaces = heirarchy_base;
+	*ifaces_first = ii_first_base;
+
+	spin_unlock_bh(&ecm_db_lock);
+	return if_count;
+}
+EXPORT_SYMBOL(ecm_db_multicast_connection_to_interfaces_get_and_ref_all);
+
+/*
+ * ecm_db_multicast_connection_to_interfaces_set_check()
+ *	Returns true if the multicast destination interfaces list has been set.
+ */
+bool ecm_db_multicast_connection_to_interfaces_set_check(struct ecm_db_connection_instance *ci)
+{
+	bool set;
+
+	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed\n", ci);
+	spin_lock_bh(&ecm_db_lock);
+	set = ci->to_mcast_interfaces_set;
+	spin_unlock_bh(&ecm_db_lock);
+	return set;
+}
+EXPORT_SYMBOL(ecm_db_multicast_connection_to_interfaces_set_check);
+
+/*
+ * ecm_db_multicast_connection_to_interfaces_set_clear()
+ *	Clear the to_mcast_interfaces_set flag if the multicast destination interfaces list has been freed.
+ */
+static void  _ecm_db_multicast_connection_to_interfaces_set_clear(struct ecm_db_connection_instance *ci)
+{
+	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed\n", ci);
+	spin_lock_bh(&ecm_db_lock);
+	ci->to_mcast_interfaces_set = false;
+	spin_unlock_bh(&ecm_db_lock);
+}
+
+/*
+ * ecm_db_multicast_connection_find_and_ref()
+ * 	Return the connection instance
+ */
+struct ecm_db_connection_instance *ecm_db_multicast_connection_find_and_ref(struct ecm_db_multicast_tuple_instance *ti)
+{
+	struct ecm_db_connection_instance *ci;
+	ci = ecm_db_connection_find_and_ref(ti->src_ip, ti->grp_ip, ti->proto, (int)ti->src_port, (int)ti->dst_port);
+	if (!ci) {
+		DEBUG_ASSERT(false, "%p: Bad connection instance \n", ti);
+	}
+
+	return ci;
+}
+EXPORT_SYMBOL(ecm_db_multicast_connection_find_and_ref);
+
+/*
+ * ecm_db_multicast_connection_to_interfaces_deref_all()
+ * 	Deref all destination multicast interface heirarchies at once
+ */
+void ecm_db_multicast_connection_to_interfaces_deref_all(struct ecm_db_iface_instance *interfaces, int32_t *ifaces_first)
+{
+	struct ecm_db_iface_instance *ifaces_single;
+	struct ecm_db_iface_instance *ii_temp[ECM_DB_IFACE_HEIRARCHY_MAX];
+	int32_t *to_first;
+	int heirarchy_index;
+
+	DEBUG_ASSERT(interfaces, "Bad memory, multicast interfaces list has been already freed\n");
+	DEBUG_ASSERT(ifaces_first, "Bad memory, multicast interfaces first has been already freed\n");
+
+	for (heirarchy_index = 0; heirarchy_index < ECM_DB_MULTICAST_IF_MAX; heirarchy_index++) {
+		to_first = ecm_db_multicast_if_first_get_at_index(ifaces_first, heirarchy_index);
+		if (*to_first < ECM_DB_IFACE_HEIRARCHY_MAX) {
+			ifaces_single = ecm_db_multicast_if_heirarchy_get(interfaces, heirarchy_index);
+			ecm_db_multicast_copy_if_heirarchy(ii_temp, ifaces_single);
+			ecm_db_connection_interfaces_deref(ii_temp, *to_first);
+		}
+	}
+
+	/*
+	 * Free the temporary memory allocated by ecm_db_multicast_connection_to_interfaces_get_and_ref_all()
+	 */
+	kfree(interfaces);
+	kfree(ifaces_first);
+
+}
+EXPORT_SYMBOL(ecm_db_multicast_connection_to_interfaces_deref_all);
+
+/*
+ * _ecm_db_multicast_connection_to_interface_first_is_valid()
+ * 	Check if destnation interfaces first list uphold a valid interface
+ * 	first or all entries have discarded.
+ */
+static bool _ecm_db_multicast_connection_to_interface_first_is_valid(int32_t ifaces_first[])
+{
+	int heirarchy_index;
+
+	for (heirarchy_index = 0; heirarchy_index < ECM_DB_MULTICAST_IF_MAX; heirarchy_index++) {
+		if (ifaces_first[heirarchy_index] < ECM_DB_IFACE_HEIRARCHY_MAX) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+/*
+ * ecm_db_multicast_connection_to_interfaces_clear_at_index()
+ * 	Dereference and clear a interface heirarchy at 'index' position
+ */
+void ecm_db_multicast_connection_to_interfaces_clear_at_index(struct ecm_db_connection_instance *ci, uint32_t index)
+{
+	struct ecm_db_iface_instance *discard[ECM_DB_IFACE_HEIRARCHY_MAX];
+	int32_t discard_first;
+	int32_t i;
+
+	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed\n", ci);
+
+	/*
+	 * Invalid Index Value
+	 */
+	DEBUG_ASSERT((index < ECM_DB_MULTICAST_IF_MAX), "%p: Invalid index for multicast interface heirarchies list %u\n", ci, index);
+
+	spin_lock_bh(&ecm_db_lock);
+	if (ci->to_mcast_interface_first[index] == ECM_DB_IFACE_HEIRARCHY_MAX) {
+		spin_unlock_bh(&ecm_db_lock);
+		return;
+	}
+
+	for (i = ci->to_mcast_interface_first[index]; i < ECM_DB_IFACE_HEIRARCHY_MAX; ++i) {
+		discard[i] = ci->to_mcast_interfaces[index][i];
+	}
+
+	discard_first = ci->to_mcast_interface_first[index];
+	ci->to_mcast_interface_first[index] = ECM_DB_IFACE_HEIRARCHY_MAX;
+
+	/*
+	 * If this is the only valid interface hierarchy left in the list of destination
+	 * interface hierarchies then clear the ci->to_mcast_interfaces_set flag here before
+	 * deleting this.
+	 */
+	if (!_ecm_db_multicast_connection_to_interface_first_is_valid(ci->to_mcast_interface_first)) {
+		ci->to_mcast_interfaces_set = false;
+	}
+
+	spin_unlock_bh(&ecm_db_lock);
+
+	ecm_db_connection_interfaces_deref(discard, discard_first);
+}
+EXPORT_SYMBOL(ecm_db_multicast_connection_to_interfaces_clear_at_index);
+
+/*
+ * ecm_db_multicast_connection_to_interfaces_clear()
+ * 	Deref and clear all destination multicast interface heirarchies
+ */
+void ecm_db_multicast_connection_to_interfaces_clear(struct ecm_db_connection_instance *ci)
+{
+	int heirarchy_index;
+	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed\n", ci);
+
+	_ecm_db_multicast_connection_to_interfaces_set_clear(ci);
+	for (heirarchy_index = 0; heirarchy_index < ECM_DB_MULTICAST_IF_MAX; heirarchy_index++) {
+		ecm_db_multicast_connection_to_interfaces_clear_at_index(ci, heirarchy_index);
+	}
+}
+EXPORT_SYMBOL(ecm_db_multicast_connection_to_interfaces_clear);
+#endif
 
 /*
  * ecm_db_time_get()

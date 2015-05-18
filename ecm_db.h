@@ -322,4 +322,27 @@ int ecm_db_iface_hash_index_get_first(void);
 int ecm_db_protocol_get_next(int protocol);
 int ecm_db_protocol_get_first(void);
 #endif
+
+#ifdef ECM_MULTICAST_ENABLE
+struct ecm_db_multicast_tuple_instance *ecm_db_multicast_tuple_instance_alloc(ip_addr_t origin, ip_addr_t group, uint16_t src_port, uint16_t dst_port);
+int ecm_db_multicast_tuple_instance_deref(struct ecm_db_multicast_tuple_instance *ti);
+void ecm_db_multicast_tuple_instance_add(struct ecm_db_multicast_tuple_instance *ti);
+struct ecm_db_multicast_tuple_instance *ecm_db_multicast_tuple_instance_find_and_ref(ip_addr_t origin, ip_addr_t group);
+struct ecm_db_multicast_tuple_instance *ecm_db_multicast_tuple_instance_get_and_ref_first(ip_addr_t group);
+struct ecm_db_multicast_tuple_instance *ecm_db_multicast_tuple_instance_get_and_ref_next(struct ecm_db_multicast_tuple_instance *ti);
+void ecm_db_multicast_tuple_instance_source_ip_get(struct ecm_db_multicast_tuple_instance *ti, ip_addr_t origin);
+uint32_t ecm_db_multicast_tuple_instance_flags_get(struct ecm_db_multicast_tuple_instance *ti);
+void ecm_db_multicast_tuple_instance_flags_set(struct ecm_db_multicast_tuple_instance *ti, uint32_t flags);
+void ecm_db_multicast_tuple_instance_flags_clear(struct ecm_db_multicast_tuple_instance *ti, uint32_t flags);
+
+struct ecm_db_connection_instance *ecm_db_multicast_connection_find_and_ref(struct ecm_db_multicast_tuple_instance *ti);
+void ecm_db_multicast_connection_to_interfaces_deref_all(struct ecm_db_iface_instance *interfaces, int32_t *ifaces_first);
+void ecm_db_multicast_connection_to_interfaces_clear(struct ecm_db_connection_instance *ci);
+int32_t ecm_db_multicast_connection_to_interfaces_get_and_ref_all(struct ecm_db_connection_instance *ci, struct ecm_db_iface_instance **interfaces, int32_t **to_ifaces_first);
+void ecm_db_multicast_connection_to_interfaces_reset(struct ecm_db_connection_instance *ci, struct ecm_db_iface_instance *interfaces, int32_t *new_first);
+void ecm_db_multicast_connection_to_interfaces_update(struct ecm_db_connection_instance *ci, struct ecm_db_iface_instance *interfaces, int32_t *new_first, int *join_valid_idx);
+void ecm_db_multicast_connection_data_totals_update(struct ecm_db_connection_instance *ci, bool is_from, uint64_t size, uint64_t packets);
+void ecm_db_multicast_connection_to_interfaces_clear_at_index(struct ecm_db_connection_instance *ci, uint32_t index);
+bool ecm_db_multicast_connection_to_interfaces_set_check(struct ecm_db_connection_instance *ci);
+#endif
 #endif

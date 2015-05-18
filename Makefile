@@ -67,6 +67,14 @@ endif
 ccflags-$(ECM_INTERFACE_TUNIPIP6_ENABLE) += -DECM_INTERFACE_TUNIPIP6_ENABLE
 
 # #############################################################################
+# Define ECM_MULTICAST_ENABLE=y in order to enable support for ECM Multicast
+# #############################################################################
+ifneq ($(findstring 3.4, $(KERNELVERSION)),)
+ECM_MULTICAST_ENABLE=y
+endif
+ccflags-$(ECM_MULTICAST_ENABLE) += -DECM_MULTICAST_ENABLE
+
+# #############################################################################
 # Define ECM_INTERFACE_VLAN_ENABLE=y in order to enable support for VLAN
 # #############################################################################
 ECM_INTERFACE_VLAN_ENABLE=y

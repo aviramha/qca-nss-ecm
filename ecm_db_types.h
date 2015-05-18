@@ -141,6 +141,25 @@ enum ecm_db_timer_groups {
 typedef enum ecm_db_timer_groups ecm_db_timer_group_t;
 typedef void (*ecm_db_timer_group_entry_callback_t)(void *arg);	/* Timer entry has expired */
 
+#ifdef ECM_MULTICAST_ENABLE
+
+struct ecm_db_multicast_connection_instance;
+
+/*
+ *  This flag is used to find out whether a bridge device is present or not in a
+ *  multicast destination interface list, struct ecm_db_multicast_connection_instance
+ *  flags field use this flag.
+ */
+#define ECM_DB_MULTICAST_CONNECTION_BRIDGE_DEV_SET_FLAG 0x10
+
+/*
+ *  Maximum number of destination interfaces for
+ *  a multicast connection
+ */
+#define ECM_DB_MULTICAST_IF_MAX 16
+#define ECM_DB_MULTICAST_BR_IF_MAX 12
+#endif
+
 /*
  * struct ecm_db_timer_group_entry
  *	Time entry structure used to request timer service
@@ -291,3 +310,74 @@ struct ecm_db_interface_info_tunipip6 {			/* type == ECM_DB_IFACE_TYPE_TUNIPIP6 
  * Lists have a finite size.
  */
 #define ECM_DB_IFACE_HEIRARCHY_MAX 10		/* This is the number of interfaces allowed in a heirarchy */
+
+#ifdef ECM_MULTICAST_ENABLE
+/*
+ * Buffer size for multicast destination interface list
+ */
+#define ECM_DB_TO_MCAST_INTERFACES_SIZE (sizeof(struct ecm_db_iface_instance *) * ECM_DB_MULTICAST_IF_MAX * ECM_DB_IFACE_HEIRARCHY_MAX)
+
+/*
+ * ecm_db_multicast_if_heirarchy_get()
+ * 	Returns the address of next heirarchy row from base address of the current heirarchy.
+ */
+static inline struct ecm_db_iface_instance *ecm_db_multicast_if_heirarchy_get(struct ecm_db_iface_instance *heirarchy_base, uint32_t index)
+{
+	uint32_t *heirarchy_instance = (uint32_t *)heirarchy_base;
+	DEBUG_ASSERT(heirarchy_instance, "Bad memory, multicast interfaces list has been already freed\n");
+	DEBUG_ASSERT((index <= ECM_DB_MULTICAST_IF_MAX), "Bad index %u\n", index);
+	return (struct ecm_db_iface_instance *)(heirarchy_instance + (index * ECM_DB_IFACE_HEIRARCHY_MAX));
+}
+
+/*
+ * ecm_db_multicast_if_instance_get_at_index()
+ *	Returns a single interface instance pointer from heirarchy at position index.
+ */
+static inline struct ecm_db_iface_instance *ecm_db_multicast_if_instance_get_at_index(struct ecm_db_iface_instance *heirarchy_start, uint32_t index)
+{
+	uint32_t *iface_instance = (uint32_t *)heirarchy_start;
+	DEBUG_ASSERT(iface_instance, "Bad memory, multicast interfaces list has been already freed\n");
+	DEBUG_ASSERT((index <= ECM_DB_IFACE_HEIRARCHY_MAX), "Bad first %u\n", index);
+	return ((struct ecm_db_iface_instance *)(iface_instance + index));
+}
+
+/*
+ * ecm_db_multicast_if_first_get_at_index()
+ *	Returns a index of the first interface in the list at index position.
+ */
+static inline int32_t *ecm_db_multicast_if_first_get_at_index(int32_t *if_first, uint32_t index)
+{
+	DEBUG_ASSERT(if_first, "Bad memory, multicast interfaces first has been already freed\n");
+	DEBUG_ASSERT((index <= ECM_DB_MULTICAST_IF_MAX), "Bad first %u\n", index);
+	return (if_first + index);
+}
+
+/*
+ * ecm_db_multicast_if_num_get_at_index()
+ *	Returns a pointer to 'if_index' entry in the array at index position.
+ */
+static inline int32_t *ecm_db_multicast_if_num_get_at_index(int32_t *if_num, uint32_t index)
+{
+	DEBUG_ASSERT(if_num, "Bad memory, ifindex list has been already freed\n");
+	return (if_num + index);
+}
+
+/*
+ * ecm_db_multicast_copy_if_heirarchy()
+ * 	Copy a heirarchy into an array of pointers starting from the heirarchy.
+ */
+static inline void ecm_db_multicast_copy_if_heirarchy(struct ecm_db_iface_instance *if_hr[], struct ecm_db_iface_instance *heirarchy_start)
+{
+	uint32_t *iface_instance = (uint32_t *)heirarchy_start;
+	struct ecm_db_iface_instance **heirarchy;
+	int i;
+
+	DEBUG_ASSERT(iface_instance, "Bad memory, multicast interfaces list has been already freed\n");
+
+        for (i = 0; i < ECM_DB_IFACE_HEIRARCHY_MAX; i++) {
+		heirarchy = (struct ecm_db_iface_instance **)iface_instance;
+                if_hr[i] = *heirarchy;
+                iface_instance = iface_instance + 1;
+        }
+}
+#endif

@@ -284,6 +284,61 @@ static inline bool ecm_ip_addr_is_non_unicast(ip_addr_t addr)
 }
 
 /*
+ * ecm_ip_addr_is_multicast()
+ *	Returns true if the IP address is multicast
+ */
+static inline bool ecm_ip_addr_is_multicast(ip_addr_t addr)
+{
+	uint32_t v4_addr = addr[0];
+
+#ifdef ECM_IPV6_ENABLE
+	if (!ECM_IP_ADDR_IS_V4(addr)) {
+		/*
+		 * IPv6
+		 * ff00::0/8 are multicast
+		 */
+		if (((addr[3] & 0xff000000) == 0xff000000)) {
+			return true;
+		}
+		return false;
+	}
+#endif
+
+	if (((v4_addr & 0xf0000000) == 0xe0000000)) {
+		return true;
+	}
+	return false;
+}
+
+#ifdef ECM_MULTICAST_ENABLE
+/*
+ * ecm_translate_multicast_mac()
+ * 	Create the multicast MAC address given a multicast IP address
+ */
+static inline void ecm_translate_multicast_mac(ip_addr_t addr, unsigned char multicast_mac[])
+{
+	uint32_t ip_addr = addr[0];
+
+	if (ECM_IP_ADDR_IS_V4(addr)) {
+		multicast_mac[0] = 0x01;
+		multicast_mac[1] = 0x00;
+		multicast_mac[2] = 0x5e;
+		multicast_mac[3] = (ip_addr & 0x7f0000) >> 16;
+		multicast_mac[4] = (ip_addr & 0xff00) >> 8;
+		multicast_mac[5] = (ip_addr & 0xff);
+		return;
+	}
+
+	multicast_mac[0] = 0x33;
+	multicast_mac[1] = 0x33;
+	multicast_mac[2] = (ip_addr & 0xff000000) >> 24;
+	multicast_mac[3] = (ip_addr & 0xff0000) >> 16;
+	multicast_mac[4] = (ip_addr & 0xff00) >> 8;
+	multicast_mac[5] = (ip_addr & 0xff);
+}
+#endif
+
+/*
  * ecm_ip_addr_in_range()
  *	Tests if a is >= s && <= e
  */
