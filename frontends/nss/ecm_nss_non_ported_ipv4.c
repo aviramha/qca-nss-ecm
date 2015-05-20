@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2014,2015 The Linux Foundation.  All rights reserved.
+ * Copyright (c) 2014-2015 The Linux Foundation.  All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -70,6 +70,7 @@
 
 #include "ecm_types.h"
 #include "ecm_db_types.h"
+#include "ecm_state.h"
 #include "ecm_tracker.h"
 #include "ecm_classifier.h"
 #include "ecm_front_end_types.h"
@@ -1560,11 +1561,12 @@ static int ecm_nss_non_ported_ipv4_connection_deref(struct ecm_front_end_connect
 
 #ifdef ECM_STATE_OUTPUT_ENABLE
 /*
- * ecm_nss_non_ported_ipv4_connection_xml_state_get()
- *	Return an XML element containing the state of this Non ported front end instance
+ * ecm_nss_non_ported_ipv4_connection_state_get()
+ *	Return the state of this Non ported front end instance
  */
-static int ecm_nss_non_ported_ipv4_connection_xml_state_get(struct ecm_front_end_connection_instance *feci, char *buf, int buf_sz)
+static int ecm_nss_non_ported_ipv4_connection_state_get(struct ecm_front_end_connection_instance *feci, struct ecm_state_file_instance *sfi)
 {
+	int result;
 	bool can_accel;
 	ecm_front_end_acceleration_mode_t accel_mode;
 	struct ecm_front_end_connection_mode_stats stats;
@@ -1578,21 +1580,51 @@ static int ecm_nss_non_ported_ipv4_connection_xml_state_get(struct ecm_front_end
 	memcpy(&stats, &feci->stats, sizeof(struct ecm_front_end_connection_mode_stats));
 	spin_unlock_bh(&feci->lock);
 
-	return snprintf(buf, buf_sz, "<nss_non_ported can_accel=\"%d\" accel_mode=\"%d\" decelerate_pending=\"%d\" flush_happened_total=\"%d\" no_action_seen_total=\"%d\" no_action_seen=\"%d\" no_action_seen_limit=\"%d\""
-				" driver_fail_total=\"%d\" driver_fail=\"%d\" driver_fail_limit=\"%d\" nss_nack_total=\"%d\" nss_nack=\"%d\" nss_nack_limit=\"%d\"/>\n",
-			can_accel,
-			accel_mode,
-			stats.decelerate_pending,
-			stats.flush_happened_total,
-			stats.no_action_seen_total,
-			stats.no_action_seen,
-			stats.no_action_seen_limit,
-			stats.driver_fail_total,
-			stats.driver_fail,
-			stats.driver_fail_limit,
-			stats.nss_nack_total,
-			stats.nss_nack,
-			stats.nss_nack_limit);
+	if ((result = ecm_state_prefix_add(sfi, "front_end_v4.non_ported"))) {
+		return result;
+	}
+
+	if ((result = ecm_state_write(sfi, "can_accel", "%d", can_accel))) {
+		return result;
+	}
+	if ((result = ecm_state_write(sfi, "accel_mode", "%d", accel_mode))) {
+		return result;
+	}
+	if ((result = ecm_state_write(sfi, "decelerate_pending", "%d", stats.decelerate_pending))) {
+		return result;
+	}
+	if ((result = ecm_state_write(sfi, "flush_happened_total", "%d", stats.flush_happened_total))) {
+		return result;
+	}
+	if ((result = ecm_state_write(sfi, "no_action_seen_total", "%d", stats.no_action_seen_total))) {
+		return result;
+	}
+	if ((result = ecm_state_write(sfi, "no_action_seen", "%d", stats.no_action_seen))) {
+		return result;
+	}
+	if ((result = ecm_state_write(sfi, "no_action_seen_limit", "%d", stats.no_action_seen_limit))) {
+		return result;
+	}
+	if ((result = ecm_state_write(sfi, "driver_fail_total", "%d", stats.driver_fail_total))) {
+		return result;
+	}
+	if ((result = ecm_state_write(sfi, "driver_fail", "%d", stats.driver_fail))) {
+		return result;
+	}
+	if ((result = ecm_state_write(sfi, "driver_fail_limit", "%d", stats.driver_fail_limit))) {
+		return result;
+	}
+	if ((result = ecm_state_write(sfi, "nss_nack_total", "%d", stats.nss_nack_total))) {
+		return result;
+	}
+	if ((result = ecm_state_write(sfi, "nss_nack", "%d", stats.nss_nack))) {
+		return result;
+	}
+	if ((result = ecm_state_write(sfi, "nss_nack_limit", "%d", stats.nss_nack_limit))) {
+		return result;
+	}
+
+ 	return ecm_state_prefix_remove(sfi);
 }
 #endif
 
@@ -1646,7 +1678,7 @@ static struct ecm_nss_non_ported_ipv4_connection_instance *ecm_nss_non_ported_ip
 	feci->action_seen = ecm_nss_non_ported_ipv4_connection_action_seen;
 	feci->accel_ceased = ecm_nss_non_ported_ipv4_connection_accel_ceased;
 #ifdef ECM_STATE_OUTPUT_ENABLE
-	feci->xml_state_get = ecm_nss_non_ported_ipv4_connection_xml_state_get;
+	feci->state_get = ecm_nss_non_ported_ipv4_connection_state_get;
 #endif
 
 	return nnpci;

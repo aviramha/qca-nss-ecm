@@ -41,6 +41,7 @@
 
 #include "ecm_types.h"
 #include "ecm_db_types.h"
+#include "ecm_state.h"
 #include "ecm_tracker.h"
 #include "ecm_classifier.h"
 #include "ecm_front_end_types.h"
@@ -65,9 +66,18 @@ static DEFINE_SPINLOCK(ecm_state_lock);					/* Protect the table from SMP access
 /*
  * Character device stuff - used to communicate status back to user space
  */
-#define ECM_STATE_FILE_BUFFER_SIZE 8192
 static int ecm_state_dev_major_id = 0;			/* Major ID of registered char dev from which we can dump out state to userspace */
 
+/*
+ * Buffer sizes
+ */
+#define ECM_STATE_FILE_PREFIX_SIZE 128
+#define ECM_STATE_FILE_PREFIX_LEVELS_MAX 10
+#define ECM_STATE_FILE_BUFFER_SIZE 12288
+
+/*
+ * Output selection flags
+ */
 #define ECM_STATE_FILE_OUTPUT_CONNECTIONS 1
 #define ECM_STATE_FILE_OUTPUT_MAPPINGS 2
 #define ECM_STATE_FILE_OUTPUT_HOSTS 4
@@ -81,15 +91,6 @@ static int ecm_state_dev_major_id = 0;			/* Major ID of registered char dev from
 #define ECM_STATE_FILE_OUTPUT_PROTOCOL_COUNTS 1024
 #ifdef ECM_DB_CTA_TRACK_ENABLE
 #define ECM_STATE_FILE_OUTPUT_CLASSIFIER_TYPE_ASSIGNMENTS 2048
-#endif
-
-#ifdef ECM_DB_CTA_TRACK_ENABLE
-/*
- * Assistive flags for classifier connection type assignments
- */
-#define ECM_STATE_FILE_CTA_FLAG_ELEMENT_START_UNWRITTEN 1
-#define ECM_STATE_FILE_CTA_FLAG_CONTENT_UNWRITTEN 2
-#define ECM_STATE_FILE_CTA_FLAG_ELEMENT_END_UNWRITTEN 4
 #endif
 
 /*
@@ -106,8 +107,6 @@ struct ecm_state_file_instance {
 #ifdef ECM_DB_CTA_TRACK_ENABLE
 	struct ecm_db_connection_instance *classifier_type_assignments[ECM_CLASSIFIER_TYPES];
 							/* Classifier type connection assignments iterator, one for each classifier type */
-	int classifier_type_assignments_flags[ECM_CLASSIFIER_TYPES];
-							/* Classifier type connection assignments flags to assist the iteration */
 #endif
 	int connection_hash_index;			/* Connection hash table lengths iterator */
 	int mapping_hash_index;				/* Mapping hash table lengths iterator */
@@ -115,11 +114,15 @@ struct ecm_state_file_instance {
 	int node_hash_index;				/* Node hash table lengths iterator */
 	int iface_hash_index;				/* Interface hash table lengths iterator */
 	int protocol;					/* Protocol connection count iterator */
-	bool doc_start_written;				/* Has xml doc opening element been written? */
-	bool doc_end_written;				/* Has xml doc closing element been written? */
-	char msg_buffer[ECM_STATE_FILE_BUFFER_SIZE];	/* Used to hold the current state message being output */
-	char *msgp;					/* Points into the msg buffer as we output it piece by piece */
-	int msg_len;					/* Length of the buffer still to be written out */
+
+	char prefix[ECM_STATE_FILE_PREFIX_SIZE];	/* This is the prefix added to every message written */
+	int prefix_levels[ECM_STATE_FILE_PREFIX_LEVELS_MAX];
+							/* How many nested prefixes supported */
+	int prefix_level;				/* Prefix nest level */
+
+	char msg[ECM_STATE_FILE_BUFFER_SIZE];		/* The message written / being returned to the reader */
+	char *msgp;					/* Points into the msg buffer as we output it to the reader piece by piece */
+	int msg_len;					/* Length of the msg buffer still to be written out */
 #if (DEBUG_LEVEL > 0)
 	uint16_t magic;
 #endif
@@ -128,35 +131,166 @@ static int ecm_state_file_output_mask = ECM_STATE_FILE_OUTPUT_CONNECTIONS;
 							/* Bit mask specifies which data to output in the state file */
 
 /*
+ * ecm_state_write_reset()
+ *	Reset the msg buffer, specifying a new initial prefix
+ *
+ * Returns 0 on success
+ */
+int ecm_state_write_reset(struct ecm_state_file_instance *sfi, char *prefix)
+{
+	int result;
+
+	DEBUG_CHECK_MAGIC(sfi, ECM_STATE_FILE_INSTANCE_MAGIC, "%p: magic failed", sfi);
+	sfi->msgp = sfi->msg;
+	sfi->msg_len = 0;
+
+	result = snprintf(sfi->prefix, ECM_STATE_FILE_PREFIX_SIZE, "%s", prefix);
+	if ((result < 0) || (result >= ECM_STATE_FILE_PREFIX_SIZE)) {
+		return -1;
+	}
+	sfi->prefix_level = 0;
+	sfi->prefix_levels[sfi->prefix_level] = result;
+	return 0;
+}
+EXPORT_SYMBOL(ecm_state_write_reset);
+
+/*
+ * ecm_state_prefix_add()
+ *	Add another level to the prefix
+ *
+ * Returns 0 on success
+ */
+int ecm_state_prefix_add(struct ecm_state_file_instance *sfi, char *prefix)
+{
+	int pxsz;
+	int pxremain;
+	int result;
+
+	DEBUG_CHECK_MAGIC(sfi, ECM_STATE_FILE_INSTANCE_MAGIC, "%p: magic failed", sfi);
+
+	pxsz = sfi->prefix_levels[sfi->prefix_level];
+	pxremain = ECM_STATE_FILE_PREFIX_SIZE - pxsz;
+	result = snprintf(sfi->prefix + pxsz, pxremain, ".%s", prefix);
+	if ((result < 0) || (result >= pxremain)) {
+		return -1;
+	}
+
+	sfi->prefix_level++;
+	DEBUG_ASSERT(sfi->prefix_level < ECM_STATE_FILE_PREFIX_LEVELS_MAX, "Bad prefix handling\n");
+	sfi->prefix_levels[sfi->prefix_level] = pxsz + result;
+	return 0;
+}
+EXPORT_SYMBOL(ecm_state_prefix_add);
+
+/*
+ * ecm_state_prefix_index_add()
+ *	Add another level (numeric) to the prefix
+ *
+ * Returns 0 on success
+ */
+int ecm_state_prefix_index_add(struct ecm_state_file_instance *sfi, int index)
+{
+	int pxsz;
+	int pxremain;
+	int result;
+
+	DEBUG_CHECK_MAGIC(sfi, ECM_STATE_FILE_INSTANCE_MAGIC, "%p: magic failed", sfi);
+
+	pxsz = sfi->prefix_levels[sfi->prefix_level];
+	pxremain = ECM_STATE_FILE_PREFIX_SIZE - pxsz;
+	result = snprintf(sfi->prefix + pxsz, pxremain, ".%d", index);
+	if ((result < 0) || (result >= pxremain)) {
+		return -1;
+	}
+
+	sfi->prefix_level++;
+	DEBUG_ASSERT(sfi->prefix_level < ECM_STATE_FILE_PREFIX_LEVELS_MAX, "Bad prefix handling\n");
+	sfi->prefix_levels[sfi->prefix_level] = pxsz + result;
+	return 0;
+}
+EXPORT_SYMBOL(ecm_state_prefix_index_add);
+
+/*
+ * ecm_state_prefix_remove()
+ *	Remove level from the prefix
+ *
+ * Returns 0 on success
+ */
+int ecm_state_prefix_remove(struct ecm_state_file_instance *sfi)
+{
+	int pxsz;
+
+	DEBUG_CHECK_MAGIC(sfi, ECM_STATE_FILE_INSTANCE_MAGIC, "%p: magic failed", sfi);
+
+	sfi->prefix_level--;
+	DEBUG_ASSERT(sfi->prefix_level >= 0, "Bad prefix handling\n");
+	pxsz = sfi->prefix_levels[sfi->prefix_level];
+	sfi->prefix[pxsz] = 0;
+	return 0;
+}
+EXPORT_SYMBOL(ecm_state_prefix_remove);
+
+/*
+ * ecm_state_write()
+ *	Write out to the message buffer, prefix is added automatically.
+ *
+ * Returns 0 on success
+ */
+int ecm_state_write(struct ecm_state_file_instance *sfi, char *name, char *fmt, ...)
+{
+	int remain;
+	char *ptr;
+	int result;
+	va_list args;
+
+	DEBUG_CHECK_MAGIC(sfi, ECM_STATE_FILE_INSTANCE_MAGIC, "%p: magic failed", sfi);
+
+	remain = ECM_STATE_FILE_BUFFER_SIZE - sfi->msg_len;
+	ptr = sfi->msg + sfi->msg_len;
+	result = snprintf(ptr, remain, "%s.%s=", sfi->prefix, name);
+	if ((result < 0) || (result >= remain)) {
+		return -1;
+	}
+
+	sfi->msg_len += result;
+	remain -= result;
+	ptr += result;
+
+	va_start(args, fmt);
+	result = vsnprintf(ptr, remain, fmt, args);
+	va_end(args);
+	if ((result < 0) || (result >= remain)) {
+		return -2;
+	}
+
+	sfi->msg_len += result;
+	remain -= result;
+	ptr += result;
+
+	result = snprintf(ptr, remain, "\n");
+	if ((result < 0) || (result >= remain)) {
+		return -3;
+	}
+
+	sfi->msg_len += result;
+	return 0;
+}
+EXPORT_SYMBOL(ecm_state_write);
+
+/*
  * ecm_state_char_dev_conn_msg_prep()
  *	Prepare a connection message
  */
 static bool ecm_state_char_dev_conn_msg_prep(struct ecm_state_file_instance *sfi)
 {
-	int msg_len;
+	int result;
 
 	DEBUG_TRACE("%p: Prep conn msg for %p\n", sfi, sfi->ci);
 
-	/*
-	 * Use fresh buffer
-	 */
-	sfi->msgp = sfi->msg_buffer;
-
-	/*
-	 * Prep the message
-	 */
-	msg_len = ecm_db_connection_xml_state_get(sfi->ci, sfi->msgp, ECM_STATE_FILE_BUFFER_SIZE);
-
-	if ((msg_len <= 0) || (msg_len >= ECM_STATE_FILE_BUFFER_SIZE)) {
-		return false;
+	if ((result = ecm_state_write_reset(sfi, "conns"))) {
+		return result;
 	}
-
-	/*
-	 * Record the message length
-	 */
-	sfi->msg_len = msg_len;
-	DEBUG_TRACE("%p: Prepped msg %s\n", sfi, sfi->msgp);
-	return true;
+	return ecm_db_connection_state_get(sfi, sfi->ci);
 }
 
 /*
@@ -165,30 +299,14 @@ static bool ecm_state_char_dev_conn_msg_prep(struct ecm_state_file_instance *sfi
  */
 static bool ecm_state_char_dev_mapping_msg_prep(struct ecm_state_file_instance *sfi)
 {
-	int msg_len;
+	int result;
 
 	DEBUG_TRACE("%p: Prep mapping msg for %p\n", sfi, sfi->mi);
 
-	/*
-	 * Use fresh buffer
-	 */
-	sfi->msgp = sfi->msg_buffer;
-
-	/*
-	 * Prep the message
-	 */
-	msg_len = ecm_db_mapping_xml_state_get(sfi->mi, sfi->msgp, ECM_STATE_FILE_BUFFER_SIZE);
-
-	if ((msg_len <= 0) || (msg_len >= ECM_STATE_FILE_BUFFER_SIZE)) {
-		return false;
+	if ((result = ecm_state_write_reset(sfi, "mappings"))) {
+		return result;
 	}
-
-	/*
-	 * Record the message length
-	 */
-	sfi->msg_len = msg_len;
-	DEBUG_TRACE("%p: Prepped msg %s\n", sfi, sfi->msgp);
-	return true;
+	return ecm_db_mapping_state_get(sfi, sfi->mi);
 }
 
 /*
@@ -197,94 +315,48 @@ static bool ecm_state_char_dev_mapping_msg_prep(struct ecm_state_file_instance *
  */
 static bool ecm_state_char_dev_host_msg_prep(struct ecm_state_file_instance *sfi)
 {
-	int msg_len;
+	int result;
 
 	DEBUG_TRACE("%p: Prep host msg for %p\n", sfi, sfi->hi);
 
-	/*
-	 * Use fresh buffer
-	 */
-	sfi->msgp = sfi->msg_buffer;
-
-	/*
-	 * Prep the message
-	 */
-	msg_len = ecm_db_host_xml_state_get(sfi->hi, sfi->msgp, ECM_STATE_FILE_BUFFER_SIZE);
-
-	if ((msg_len <= 0) || (msg_len >= ECM_STATE_FILE_BUFFER_SIZE)) {
-		return false;
+	if ((result = ecm_state_write_reset(sfi, "hosts"))) {
+		return result;
 	}
 
-	/*
-	 * Record the message length
-	 */
-	sfi->msg_len = msg_len;
-	DEBUG_TRACE("%p: Prepped msg %s\n", sfi, sfi->msgp);
-	return true;
+	return ecm_db_host_state_get(sfi, sfi->hi);
 }
 
 /*
- * ecm_state_char_dev_nod__msg_prep()
+ * ecm_state_char_dev_node_msg_prep()
  *	Prepare a node message
  */
 static bool ecm_state_char_dev_node_msg_prep(struct ecm_state_file_instance *sfi)
 {
-	int msg_len;
+	int result;
 
 	DEBUG_TRACE("%p: Prep node msg for %p\n", sfi, sfi->ni);
 
-	/*
-	 * Use fresh buffer
-	 */
-	sfi->msgp = sfi->msg_buffer;
-
-	/*
-	 * Prep the message
-	 */
-	msg_len = ecm_db_node_xml_state_get(sfi->ni, sfi->msgp, ECM_STATE_FILE_BUFFER_SIZE);
-
-	if ((msg_len <= 0) || (msg_len >= ECM_STATE_FILE_BUFFER_SIZE)) {
-		return false;
+	if ((result = ecm_state_write_reset(sfi, "nodes"))) {
+		return result;
 	}
 
-	/*
-	 * Record the message length
-	 */
-	sfi->msg_len = msg_len;
-	DEBUG_TRACE("%p: Prepped msg %s\n", sfi, sfi->msgp);
-	return true;
+	return ecm_db_node_state_get(sfi, sfi->ni);
 }
 
 /*
  * ecm_state_char_dev_iface_msg_prep()
  *	Prepare an interface message
  */
-static bool ecm_state_char_dev_iface_msg_prep(struct ecm_state_file_instance *sfi)
+static int ecm_state_char_dev_iface_msg_prep(struct ecm_state_file_instance *sfi)
 {
-	int msg_len;
+	int result;
 
 	DEBUG_TRACE("%p: Prep iface msg for %p\n", sfi, sfi->ii);
 
-	/*
-	 * Use fresh buffer
-	 */
-	sfi->msgp = sfi->msg_buffer;
-
-	/*
-	 * Prep the message
-	 */
-	msg_len = ecm_db_iface_xml_state_get(sfi->ii, sfi->msgp, ECM_STATE_FILE_BUFFER_SIZE);
-
-	if ((msg_len <= 0) || (msg_len >= ECM_STATE_FILE_BUFFER_SIZE)) {
-		return false;
+	if ((result = ecm_state_write_reset(sfi, "ifaces"))) {
+		return result;
 	}
-
-	/*
-	 * Record the message length
-	 */
-	sfi->msg_len = msg_len;
-	DEBUG_TRACE("%p: Prepped msg %s\n", sfi, sfi->msgp);
-	return true;
+	return ecm_db_iface_state_get(sfi, sfi->ii);
 }
 
 /*
@@ -293,8 +365,8 @@ static bool ecm_state_char_dev_iface_msg_prep(struct ecm_state_file_instance *sf
  */
 static bool ecm_state_char_dev_conn_chain_msg_prep(struct ecm_state_file_instance *sfi)
 {
+	int result;
 	int chain_len;
-	int msg_len;
 	DEBUG_TRACE("%p: Prep conn chain msg\n", sfi);
 
 	/*
@@ -302,30 +374,13 @@ static bool ecm_state_char_dev_conn_chain_msg_prep(struct ecm_state_file_instanc
 	 */
 	chain_len = ecm_db_connection_hash_table_lengths_get(sfi->connection_hash_index);
 
-	/*
-	 * Use fresh buffer
-	 */
-	sfi->msgp = sfi->msg_buffer;
-
-	/*
-	 * Create a small xml stats block like:
-	 * <conn_chain hash_index="" chain_length=""/>
-	 */
-	msg_len = snprintf(sfi->msgp, ECM_STATE_FILE_BUFFER_SIZE,
-			"<conn_chain hash_index=\"%d\" chain_length=\"%d\"/>\n",
-			sfi->connection_hash_index,
-			chain_len);
-
-	if ((msg_len <= 0) || (msg_len >= ECM_STATE_FILE_BUFFER_SIZE)) {
-		return false;
+	if ((result = ecm_state_write_reset(sfi, "conn_chain"))) {
+		return result;
 	}
-
-	/*
-	 * Record the message length
-	 */
-	sfi->msg_len = msg_len;
-	DEBUG_TRACE("%p: Prepped msg %s\n", sfi, sfi->msgp);
-	return true;
+	if ((result = ecm_state_prefix_index_add(sfi, sfi->connection_hash_index))) {
+		return result;
+	}
+	return ecm_state_write(sfi, "length", "%d", chain_len);
 }
 
 /*
@@ -334,8 +389,8 @@ static bool ecm_state_char_dev_conn_chain_msg_prep(struct ecm_state_file_instanc
  */
 static bool ecm_state_char_dev_mapping_chain_msg_prep(struct ecm_state_file_instance *sfi)
 {
+	int result;
 	int chain_len;
-	int msg_len;
 	DEBUG_TRACE("%p: Prep mapping chain msg\n", sfi);
 
 	/*
@@ -343,30 +398,13 @@ static bool ecm_state_char_dev_mapping_chain_msg_prep(struct ecm_state_file_inst
 	 */
 	chain_len = ecm_db_mapping_hash_table_lengths_get(sfi->mapping_hash_index);
 
-	/*
-	 * Use fresh buffer
-	 */
-	sfi->msgp = sfi->msg_buffer;
-
-	/*
-	 * Create a small xml stats block like:
-	 * <mapping_chain hash_index="" chain_length=""/>
-	 */
-	msg_len = snprintf(sfi->msgp, ECM_STATE_FILE_BUFFER_SIZE,
-			"<mapping_chain hash_index=\"%d\" chain_length=\"%d\"/>\n",
-			sfi->mapping_hash_index,
-			chain_len);
-
-	if ((msg_len <= 0) || (msg_len >= ECM_STATE_FILE_BUFFER_SIZE)) {
-		return false;
+	if ((result = ecm_state_write_reset(sfi, "mapping_chain"))) {
+		return result;
 	}
-
-	/*
-	 * Record the message length
-	 */
-	sfi->msg_len = msg_len;
-	DEBUG_TRACE("%p: Prepped msg %s\n", sfi, sfi->msgp);
-	return true;
+	if ((result = ecm_state_prefix_index_add(sfi, sfi->mapping_hash_index))) {
+		return result;
+	}
+	return ecm_state_write(sfi, "length", "%d", chain_len);
 }
 
 /*
@@ -375,8 +413,8 @@ static bool ecm_state_char_dev_mapping_chain_msg_prep(struct ecm_state_file_inst
  */
 static bool ecm_state_char_dev_host_chain_msg_prep(struct ecm_state_file_instance *sfi)
 {
+	int result;
 	int chain_len;
-	int msg_len;
 	DEBUG_TRACE("%p: Prep host chain msg\n", sfi);
 
 	/*
@@ -384,30 +422,13 @@ static bool ecm_state_char_dev_host_chain_msg_prep(struct ecm_state_file_instanc
 	 */
 	chain_len = ecm_db_host_hash_table_lengths_get(sfi->host_hash_index);
 
-	/*
-	 * Use fresh buffer
-	 */
-	sfi->msgp = sfi->msg_buffer;
-
-	/*
-	 * Create a small xml stats block like:
-	 * <host_chain hash_index="" chain_length=""/>
-	 */
-	msg_len = snprintf(sfi->msgp, ECM_STATE_FILE_BUFFER_SIZE,
-			"<host_chain hash_index=\"%d\" chain_length=\"%d\"/>\n",
-			sfi->host_hash_index,
-			chain_len);
-
-	if ((msg_len <= 0) || (msg_len >= ECM_STATE_FILE_BUFFER_SIZE)) {
-		return false;
+	if ((result = ecm_state_write_reset(sfi, "host_chain"))) {
+		return result;
 	}
-
-	/*
-	 * Record the message length
-	 */
-	sfi->msg_len = msg_len;
-	DEBUG_TRACE("%p: Prepped msg %s\n", sfi, sfi->msgp);
-	return true;
+	if ((result = ecm_state_prefix_index_add(sfi, sfi->host_hash_index))) {
+		return result;
+	}
+	return ecm_state_write(sfi, "length", "%d", chain_len);
 }
 
 /*
@@ -416,8 +437,8 @@ static bool ecm_state_char_dev_host_chain_msg_prep(struct ecm_state_file_instanc
  */
 static bool ecm_state_char_dev_node_chain_msg_prep(struct ecm_state_file_instance *sfi)
 {
+	int result;
 	int chain_len;
-	int msg_len;
 	DEBUG_TRACE("%p: Prep node chain msg\n", sfi);
 
 	/*
@@ -425,30 +446,13 @@ static bool ecm_state_char_dev_node_chain_msg_prep(struct ecm_state_file_instanc
 	 */
 	chain_len = ecm_db_node_hash_table_lengths_get(sfi->node_hash_index);
 
-	/*
-	 * Use fresh buffer
-	 */
-	sfi->msgp = sfi->msg_buffer;
-
-	/*
-	 * Create a small xml stats block like:
-	 * <node_chain hash_index="" chain_length=""/>
-	 */
-	msg_len = snprintf(sfi->msgp, ECM_STATE_FILE_BUFFER_SIZE,
-			"<node_chain hash_index=\"%d\" chain_length=\"%d\"/>\n",
-			sfi->node_hash_index,
-			chain_len);
-
-	if ((msg_len <= 0) || (msg_len >= ECM_STATE_FILE_BUFFER_SIZE)) {
-		return false;
+	if ((result = ecm_state_write_reset(sfi, "node_chain"))) {
+		return result;
 	}
-
-	/*
-	 * Record the message length
-	 */
-	sfi->msg_len = msg_len;
-	DEBUG_TRACE("%p: Prepped msg %s\n", sfi, sfi->msgp);
-	return true;
+	if ((result = ecm_state_prefix_index_add(sfi, sfi->node_hash_index))) {
+		return result;
+	}
+	return ecm_state_write(sfi, "length", "%d", chain_len);
 }
 
 /*
@@ -457,8 +461,8 @@ static bool ecm_state_char_dev_node_chain_msg_prep(struct ecm_state_file_instanc
  */
 static bool ecm_state_char_dev_iface_chain_msg_prep(struct ecm_state_file_instance *sfi)
 {
+	int result;
 	int chain_len;
-	int msg_len;
 	DEBUG_TRACE("%p: Prep iface chain msg\n", sfi);
 
 	/*
@@ -466,30 +470,13 @@ static bool ecm_state_char_dev_iface_chain_msg_prep(struct ecm_state_file_instan
 	 */
 	chain_len = ecm_db_iface_hash_table_lengths_get(sfi->iface_hash_index);
 
-	/*
-	 * Use fresh buffer
-	 */
-	sfi->msgp = sfi->msg_buffer;
-
-	/*
-	 * Create a small xml stats block like:
-	 * <iface_chain hash_index="" chain_length=""/>
-	 */
-	msg_len = snprintf(sfi->msgp, ECM_STATE_FILE_BUFFER_SIZE,
-			"<iface_chain hash_index=\"%d\" chain_length=\"%d\"/>\n",
-			sfi->iface_hash_index,
-			chain_len);
-
-	if ((msg_len <= 0) || (msg_len >= ECM_STATE_FILE_BUFFER_SIZE)) {
-		return false;
+	if ((result = ecm_state_write_reset(sfi, "iface_chain"))) {
+		return result;
 	}
-
-	/*
-	 * Record the message length
-	 */
-	sfi->msg_len = msg_len;
-	DEBUG_TRACE("%p: Prepped msg %s\n", sfi, sfi->msgp);
-	return true;
+	if ((result = ecm_state_prefix_index_add(sfi, sfi->iface_hash_index))) {
+		return result;
+	}
+	return ecm_state_write(sfi, "length", "%d", chain_len);
 }
 
 /*
@@ -498,8 +485,8 @@ static bool ecm_state_char_dev_iface_chain_msg_prep(struct ecm_state_file_instan
  */
 static bool ecm_state_char_dev_protocol_count_msg_prep(struct ecm_state_file_instance *sfi)
 {
+	int result;
 	int count;
-	int msg_len;
 	DEBUG_TRACE("%p: Prep protocol msg\n", sfi);
 
 	/*
@@ -507,30 +494,13 @@ static bool ecm_state_char_dev_protocol_count_msg_prep(struct ecm_state_file_ins
 	 */
 	count = ecm_db_connection_count_by_protocol_get(sfi->protocol);
 
-	/*
-	 * Use fresh buffer
-	 */
-	sfi->msgp = sfi->msg_buffer;
-
-	/*
-	 * Create a small xml stats block like:
-	 * <conn_proto_count protocol="" count=""/>
-	 */
-	msg_len = snprintf(sfi->msgp, ECM_STATE_FILE_BUFFER_SIZE,
-			"<conn_proto_count protocol=\"%d\" count=\"%d\"/>\n",
-			sfi->protocol,
-			count);
-
-	if ((msg_len <= 0) || (msg_len >= ECM_STATE_FILE_BUFFER_SIZE)) {
-		return false;
+	if ((result = ecm_state_write_reset(sfi, "protocol"))) {
+		return result;
 	}
-
-	/*
-	 * Record the message length
-	 */
-	sfi->msg_len = msg_len;
-	DEBUG_TRACE("%p: Prepped msg %s\n", sfi, sfi->msgp);
-	return true;
+	if ((result = ecm_state_prefix_index_add(sfi, sfi->protocol))) {
+		return result;
+	}
+	return ecm_state_write(sfi, "connections", "%d", count);
 }
 
 #ifdef ECM_DB_CTA_TRACK_ENABLE
@@ -538,87 +508,34 @@ static bool ecm_state_char_dev_protocol_count_msg_prep(struct ecm_state_file_ins
  * ecm_state_char_dev_cta_msg_prep()
  *	Generate a classifier type assignment message
  */
-static bool ecm_state_char_dev_cta_msg_prep(struct ecm_state_file_instance *sfi, ecm_classifier_type_t ca_type)
+static int ecm_state_char_dev_cta_msg_prep(struct ecm_state_file_instance *sfi, ecm_classifier_type_t ca_type)
 {
-	int msg_len;
 	struct ecm_db_connection_instance *ci;
-	int flags;
+	int result;
 
 	DEBUG_TRACE("%p: Prep classifier type assignment msg: %d\n", sfi, ca_type);
 
-	/*
-	 * Use fresh buffer
-	 */
-	sfi->msgp = sfi->msg_buffer;
-
-	/*
-	 * Output message according to where we are with iteration.
-	 * Output element start?
-	 * We are producing an element like:
-	 * <classifier_conn_type_assignment ca_type="2">
-	 *	<connection serial="1625"/>
-	 *	...
-	 * </classifier_conn_type_assignment>
-	 */
-	flags = sfi->classifier_type_assignments_flags[ca_type];
-	if (flags & ECM_STATE_FILE_CTA_FLAG_ELEMENT_START_UNWRITTEN) {
-		msg_len = snprintf(sfi->msgp, ECM_STATE_FILE_BUFFER_SIZE,
-				"<classifier_conn_type_assignment ca_type=\"%d\">\n",
-				ca_type);
-		if ((msg_len <= 0) || (msg_len >= ECM_STATE_FILE_BUFFER_SIZE)) {
-			return false;
-		}
-		sfi->msg_len = msg_len;
-		DEBUG_TRACE("%p: Prepped msg %s\n", sfi, sfi->msgp);
-
-		sfi->classifier_type_assignments_flags[ca_type] &= ~ECM_STATE_FILE_CTA_FLAG_ELEMENT_START_UNWRITTEN;
-		return true;
-	}
-
-	/*
-	 * Output connection detail, if any further to output for this type.
-	 */
 	ci = sfi->classifier_type_assignments[ca_type];
-	if (ci) {
-		uint32_t serial;
+	if (!ci) {
+		return 0;
+	}
 
-		serial = ecm_db_connection_serial_get(ci);
-		msg_len = snprintf(sfi->msgp, ECM_STATE_FILE_BUFFER_SIZE,
-				"<connection serial=\"%u\"/>\n",
-				serial);
-		if ((msg_len <= 0) || (msg_len >= ECM_STATE_FILE_BUFFER_SIZE)) {
-			return false;
-		}
-		sfi->msg_len = msg_len;
-		DEBUG_TRACE("%p: Prepped msg %s\n", sfi, sfi->msgp);
-
-		/*
-		 * Prep next connection for when we are called again, releasing this one.
-		 */
-		if (!(sfi->classifier_type_assignments[ca_type] = ecm_db_connection_by_classifier_type_assignment_get_and_ref_next(ci, ca_type))) {
-			sfi->classifier_type_assignments_flags[ca_type] &= ~ECM_STATE_FILE_CTA_FLAG_CONTENT_UNWRITTEN;
-		}
-		ecm_db_connection_by_classifier_type_assignment_deref(ci, ca_type);
-		return true;
+	if ((result = ecm_state_write_reset(sfi, "cta"))) {
+		return result;
+	}
+	if ((result = ecm_state_prefix_index_add(sfi, ca_type))) {
+		return result;
+	}
+	if ((result = ecm_state_write(sfi, "conn.serial", "%u", ecm_db_connection_serial_get(ci)))) {
+		return result;
 	}
 
 	/*
-	 * Output closing element?
+	 * Prep next connection for when we are called again, releasing this one.
 	 */
-	if (flags & ECM_STATE_FILE_CTA_FLAG_ELEMENT_END_UNWRITTEN) {
-		msg_len = snprintf(sfi->msgp, ECM_STATE_FILE_BUFFER_SIZE,
-				"</classifier_conn_type_assignment>\n");
-		if ((msg_len <= 0) || (msg_len >= ECM_STATE_FILE_BUFFER_SIZE)) {
-			return false;
-		}
-		sfi->msg_len = msg_len;
-		DEBUG_TRACE("%p: Prepped msg %s\n", sfi, sfi->msgp);
-
-		sfi->classifier_type_assignments_flags[ca_type] &= ~ECM_STATE_FILE_CTA_FLAG_ELEMENT_END_UNWRITTEN;
-		return true;
-	}
-
-	return true;
+	sfi->classifier_type_assignments[ca_type] = ecm_db_connection_by_classifier_type_assignment_get_and_ref_next(ci, ca_type);
+	ecm_db_connection_by_classifier_type_assignment_deref(ci, ca_type);
+	return 0;
 }
 
 /*
@@ -709,14 +626,7 @@ static int ecm_state_char_device_open(struct inode *inode, struct file *file)
 		 * Hold the head of each list to start us off on our iterating process.
 		 */
 		for (ca_type = 0; ca_type < ECM_CLASSIFIER_TYPES; ++ca_type) {
-			if ((sfi->classifier_type_assignments[ca_type] = ecm_db_connection_by_classifier_type_assignment_get_and_ref_first(ca_type))) {
-				/*
-				 * There is some content to write for this ca_type
-				 */
-				sfi->classifier_type_assignments_flags[ca_type] =
-						ECM_STATE_FILE_CTA_FLAG_ELEMENT_START_UNWRITTEN | ECM_STATE_FILE_CTA_FLAG_CONTENT_UNWRITTEN | ECM_STATE_FILE_CTA_FLAG_ELEMENT_END_UNWRITTEN;
-
-			}
+			sfi->classifier_type_assignments[ca_type] = ecm_db_connection_by_classifier_type_assignment_get_and_ref_first(ca_type);
 		}
 	}
 #endif
@@ -792,16 +702,9 @@ static ssize_t ecm_state_char_device_read(struct file *file,	/* see include/linu
 		goto char_device_read_output;
 	}
 
-	if (!sfi->doc_start_written) {
-		sfi->msgp = sfi->msg_buffer;
-		sfi->msg_len = sprintf(sfi->msgp, "<ecm_state>\n");
-		sfi->doc_start_written = true;
-		goto char_device_read_output;
-	}
-
 	if (sfi->ci) {
 		struct ecm_db_connection_instance *cin;
-		if (!ecm_state_char_dev_conn_msg_prep(sfi)) {
+		if (ecm_state_char_dev_conn_msg_prep(sfi)) {
 			return -EIO;
 		}
 
@@ -817,7 +720,7 @@ static ssize_t ecm_state_char_device_read(struct file *file,	/* see include/linu
 
 	if (sfi->mi) {
 		struct ecm_db_mapping_instance *min;
-		if (!ecm_state_char_dev_mapping_msg_prep(sfi)) {
+		if (ecm_state_char_dev_mapping_msg_prep(sfi)) {
 			return -EIO;
 		}
 
@@ -833,7 +736,7 @@ static ssize_t ecm_state_char_device_read(struct file *file,	/* see include/linu
 
 	if (sfi->hi) {
 		struct ecm_db_host_instance *hin;
-		if (!ecm_state_char_dev_host_msg_prep(sfi)) {
+		if (ecm_state_char_dev_host_msg_prep(sfi)) {
 			return -EIO;
 		}
 
@@ -849,7 +752,7 @@ static ssize_t ecm_state_char_device_read(struct file *file,	/* see include/linu
 
 	if (sfi->ni) {
 		struct ecm_db_node_instance *nin;
-		if (!ecm_state_char_dev_node_msg_prep(sfi)) {
+		if (ecm_state_char_dev_node_msg_prep(sfi)) {
 			return -EIO;
 		}
 
@@ -865,7 +768,7 @@ static ssize_t ecm_state_char_device_read(struct file *file,	/* see include/linu
 
 	if (sfi->ii) {
 		struct ecm_db_iface_instance *iin;
-		if (!ecm_state_char_dev_iface_msg_prep(sfi)) {
+		if (ecm_state_char_dev_iface_msg_prep(sfi)) {
 			return -EIO;
 		}
 
@@ -880,7 +783,7 @@ static ssize_t ecm_state_char_device_read(struct file *file,	/* see include/linu
 	}
 
 	if ((sfi->output_mask & ECM_STATE_FILE_OUTPUT_CONNECTIONS_CHAIN) && (sfi->connection_hash_index >= 0)) {
-		if (!ecm_state_char_dev_conn_chain_msg_prep(sfi)) {
+		if (ecm_state_char_dev_conn_chain_msg_prep(sfi)) {
 			return -EIO;
 		}
 		sfi->connection_hash_index = ecm_db_connection_hash_index_get_next(sfi->connection_hash_index);
@@ -888,7 +791,7 @@ static ssize_t ecm_state_char_device_read(struct file *file,	/* see include/linu
 	}
 
 	if ((sfi->output_mask & ECM_STATE_FILE_OUTPUT_MAPPINGS_CHAIN) && (sfi->mapping_hash_index >= 0)) {
-		if (!ecm_state_char_dev_mapping_chain_msg_prep(sfi)) {
+		if (ecm_state_char_dev_mapping_chain_msg_prep(sfi)) {
 			return -EIO;
 		}
 		sfi->mapping_hash_index = ecm_db_mapping_hash_index_get_next(sfi->mapping_hash_index);
@@ -896,7 +799,7 @@ static ssize_t ecm_state_char_device_read(struct file *file,	/* see include/linu
 	}
 
 	if ((sfi->output_mask & ECM_STATE_FILE_OUTPUT_HOSTS_CHAIN) && (sfi->host_hash_index >= 0)) {
-		if (!ecm_state_char_dev_host_chain_msg_prep(sfi)) {
+		if (ecm_state_char_dev_host_chain_msg_prep(sfi)) {
 			return -EIO;
 		}
 		sfi->host_hash_index = ecm_db_host_hash_index_get_next(sfi->host_hash_index);
@@ -904,7 +807,7 @@ static ssize_t ecm_state_char_device_read(struct file *file,	/* see include/linu
 	}
 
 	if ((sfi->output_mask & ECM_STATE_FILE_OUTPUT_NODES_CHAIN) && (sfi->node_hash_index >= 0)) {
-		if (!ecm_state_char_dev_node_chain_msg_prep(sfi)) {
+		if (ecm_state_char_dev_node_chain_msg_prep(sfi)) {
 			return -EIO;
 		}
 		sfi->node_hash_index = ecm_db_node_hash_index_get_next(sfi->node_hash_index);
@@ -912,7 +815,7 @@ static ssize_t ecm_state_char_device_read(struct file *file,	/* see include/linu
 	}
 
 	if ((sfi->output_mask & ECM_STATE_FILE_OUTPUT_INTERFACES_CHAIN) && (sfi->iface_hash_index >= 0)) {
-		if (!ecm_state_char_dev_iface_chain_msg_prep(sfi)) {
+		if (ecm_state_char_dev_iface_chain_msg_prep(sfi)) {
 			return -EIO;
 		}
 		sfi->iface_hash_index = ecm_db_iface_hash_index_get_next(sfi->iface_hash_index);
@@ -920,7 +823,7 @@ static ssize_t ecm_state_char_device_read(struct file *file,	/* see include/linu
 	}
 
 	if ((sfi->output_mask & ECM_STATE_FILE_OUTPUT_PROTOCOL_COUNTS) && (sfi->protocol >= 0)) {
-		if (!ecm_state_char_dev_protocol_count_msg_prep(sfi)) {
+		if (ecm_state_char_dev_protocol_count_msg_prep(sfi)) {
 			return -EIO;
 		}
 		sfi->protocol = ecm_db_protocol_get_next(sfi->protocol);
@@ -929,29 +832,13 @@ static ssize_t ecm_state_char_device_read(struct file *file,	/* see include/linu
 
 #ifdef ECM_DB_CTA_TRACK_ENABLE
 	for (ca_type = 0; ca_type < ECM_CLASSIFIER_TYPES; ++ca_type) {
-		int flags;
-
-		flags = sfi->classifier_type_assignments_flags[ca_type];
-
-		if (!flags) {
-			/*
-			 * Nothing further to write out for this ca_type
-			 */
-			continue;
-		}
-		if (!ecm_state_char_dev_cta_msg_prep(sfi, ca_type)) {
+		if (!sfi->classifier_type_assignments[ca_type]) continue;
+		if (ecm_state_char_dev_cta_msg_prep(sfi, ca_type)) {
 			return -EIO;
 		}
 		goto char_device_read_output;
 	}
 #endif
-
-	if (!sfi->doc_end_written) {
-		sfi->msgp = sfi->msg_buffer;
-		sfi->msg_len = sprintf(sfi->msgp, "</ecm_state>\n");
-		sfi->doc_end_written = true;
-		goto char_device_read_output;
-	}
 
 	/*
 	 * EOF

@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2014, 2015, The Linux Foundation.  All rights reserved.
+ * Copyright (c) 2014-2015, The Linux Foundation.  All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -61,6 +61,7 @@
 
 #include "ecm_types.h"
 #include "ecm_db_types.h"
+#include "ecm_state.h"
 #include "ecm_tracker.h"
 #include "ecm_classifier.h"
 #include "ecm_front_end_types.h"
@@ -453,21 +454,24 @@ static struct ecm_tracker_instance *ecm_classifier_tracker_get_and_ref(struct ec
 
 #ifdef ECM_STATE_OUTPUT_ENABLE
 /*
- * ecm_classifier_default_xml_state_get()
- *	Return an XML state element
+ * ecm_classifier_default_state_get()
+ *	Return state
  */
-static int ecm_classifier_default_xml_state_get(struct ecm_classifier_instance *ci, char *buf, int buf_sz)
+static int ecm_classifier_default_state_get(struct ecm_classifier_instance *ci, struct ecm_state_file_instance *sfi)
 {
+	int result;
 	struct ecm_classifier_default_internal_instance *cdii;
 	struct ecm_classifier_process_response process_response;
 	ecm_db_timer_group_t timer_group;
 	ecm_tracker_sender_type_t ingress_sender;
 	ecm_tracker_sender_type_t egress_sender;
-	int count;
-	int total;
 
 	cdii = (struct ecm_classifier_default_internal_instance *)ci;
 	DEBUG_CHECK_MAGIC(cdii, ECM_CLASSIFIER_DEFAULT_INTERNAL_INSTANCE_MAGIC, "%p: magic failed", cdii);
+
+	if ((result = ecm_state_prefix_add(sfi, "default"))) {
+		return result;
+	}
 
 	spin_lock_bh(&ecm_classifier_default_lock);
 	egress_sender = cdii->egress_sender;
@@ -476,46 +480,39 @@ static int ecm_classifier_default_xml_state_get(struct ecm_classifier_instance *
 	process_response = cdii->process_response;
 	spin_unlock_bh(&ecm_classifier_default_lock);
 
-	count = snprintf(buf, buf_sz, "<ecm_classifier_default ingress_sender=\"%d\" egress_sender=\"%d\" "
-			"timer_group=\"%d\">\n",
-			ingress_sender,
-			egress_sender,
-			timer_group);
-	if ((count <= 0) || (count >= buf_sz)) {
-		return -1;
+	if ((result = ecm_state_write(sfi, "ingress_sender", "%d", ingress_sender))) {
+		return result;
 	}
-	total = count;
-	buf_sz -= count;
+	if ((result = ecm_state_write(sfi, "egress_sender", "%d", egress_sender))) {
+		return result;
+	}
+	if ((result = ecm_state_write(sfi, "timer_group", "%d", timer_group))) {
+		return result;
+	}
 
 	/*
 	 * Output our last process response
 	 */
-	count = ecm_classifier_process_response_xml_state_get(buf + total, buf_sz, &process_response);
-	if ((count <= 0) || (count >= buf_sz)) {
-		return -1;
+	if ((result = ecm_classifier_process_response_state_get(sfi, &process_response))) {
+		return result;
 	}
-	total += count;
-	buf_sz -= count;
+
+	if ((result = ecm_state_prefix_add(sfi, "trackers"))) {
+		return result;
+	}
 
 	/*
 	 * Output our tracker state
 	 */
-	count = cdii->ti->xml_state_get(cdii->ti, buf + total, buf_sz);
-	if ((count <= 0) || (count >= buf_sz)) {
-		return -1;
+	if ((result = cdii->ti->state_text_get(cdii->ti, sfi))) {
+		return result;
 	}
-	total += count;
-	buf_sz -= count;
 
-	/*
-	 * Output our terminal element
-	 */
-	count = snprintf(buf + total, buf_sz, "</ecm_classifier_default>\n");
-	if ((count <= 0) || (count >= buf_sz)) {
-		return -1;
+	if ((result = ecm_state_prefix_remove(sfi))) {
+		return result;
 	}
-	total += count;
-	return total;
+
+	return ecm_state_prefix_remove(sfi);
 }
 #endif
 
@@ -610,7 +607,7 @@ struct ecm_classifier_default_instance *ecm_classifier_default_instance_alloc(st
 	cdi->base.reclassify = ecm_classifier_default_reclassify;
 	cdi->base.last_process_response_get = ecm_classifier_default_last_process_response_get;
 #ifdef ECM_STATE_OUTPUT_ENABLE
-	cdi->base.xml_state_get = ecm_classifier_default_xml_state_get;
+	cdi->base.state_get = ecm_classifier_default_state_get;
 #endif
 	cdi->base.ref = ecm_classifier_default_ref;
 	cdi->base.deref = ecm_classifier_default_deref;

@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2014, 2015, The Linux Foundation.  All rights reserved.
+ * Copyright (c) 2014-2015, The Linux Foundation.  All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -62,6 +62,7 @@
 
 #include "ecm_types.h"
 #include "ecm_db_types.h"
+#include "ecm_state.h"
 #include "ecm_tracker.h"
 #include "ecm_classifier.h"
 #include "ecm_front_end_types.h"
@@ -822,49 +823,34 @@ static void ecm_classifier_nl_reclassify(struct ecm_classifier_instance *ci)
 
 #ifdef ECM_STATE_OUTPUT_ENABLE
 /*
- * ecm_classifier_nl_xml_state_get()
- *	Return an XML state element
+ * ecm_classifier_nl_state_get()
+ *	Return state
  */
-static int ecm_classifier_nl_xml_state_get(struct ecm_classifier_instance *ci, char *buf, int buf_sz)
+static int ecm_classifier_nl_state_get(struct ecm_classifier_instance *ci, struct ecm_state_file_instance *sfi)
 {
+	int result;
 	struct ecm_classifier_nl_instance *cnli;
 	struct ecm_classifier_process_response process_response;
-	int count;
-	int total;
 
 	cnli = (struct ecm_classifier_nl_instance *)ci;
 	DEBUG_CHECK_MAGIC(cnli, ECM_CLASSIFIER_NL_INSTANCE_MAGIC, "%p: magic failed", cnli);
+
+	if ((result = ecm_state_prefix_add(sfi, "nl"))) {
+		return result;
+	}
 
 	spin_lock_bh(&ecm_classifier_nl_lock);
 	process_response = cnli->process_response;
 	spin_unlock_bh(&ecm_classifier_nl_lock);
 
-	count = snprintf(buf, buf_sz, "<ecm_classifier_nl>\n");
-	if ((count <= 0) || (count == buf_sz)) {
-		return -1;
-	}
-	total = count;
-	buf_sz -= count;
-
 	/*
 	 * Output our last process response
 	 */
-	count = ecm_classifier_process_response_xml_state_get(buf + total, buf_sz, &process_response);
-	if ((count <= 0) || (count == buf_sz)) {
-		return -1;
+	if ((result = ecm_classifier_process_response_state_get(sfi, &process_response))) {
+		return result;
 	}
-	total += count;
-	buf_sz -= count;
 
-	/*
-	 * Output our terminal element
-	 */
-	count = snprintf(buf + total, buf_sz, "</ecm_classifier_nl>\n");
-	if ((count <= 0) || (count == buf_sz)) {
-		return -1;
-	}
-	total += count;
-	return total;
+	return ecm_state_prefix_remove(sfi);
 }
 #endif
 
@@ -1060,7 +1046,7 @@ struct ecm_classifier_nl_instance *ecm_classifier_nl_instance_alloc(struct ecm_d
 	cnli->base.reclassify_allowed = ecm_classifier_nl_reclassify_allowed;
 	cnli->base.reclassify = ecm_classifier_nl_reclassify;
 #ifdef ECM_STATE_OUTPUT_ENABLE
-	cnli->base.xml_state_get = ecm_classifier_nl_xml_state_get;
+	cnli->base.state_get = ecm_classifier_nl_state_get;
 #endif
 	cnli->base.ref = ecm_classifier_nl_ref;
 	cnli->base.deref = ecm_classifier_nl_deref;

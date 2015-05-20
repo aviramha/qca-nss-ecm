@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2014,2015 The Linux Foundation.  All rights reserved.
+ * Copyright (c) 2014-2015 The Linux Foundation.  All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -60,6 +60,7 @@
 
 #include "ecm_types.h"
 #include "ecm_db_types.h"
+#include "ecm_state.h"
 #include "ecm_tracker.h"
 #include "ecm_tracker_tcp.h"
 
@@ -1903,53 +1904,60 @@ static void ecm_tracker_tcp_state_get_callback(struct ecm_tracker_instance *ti, 
 
 #ifdef ECM_STATE_OUTPUT_ENABLE
 /*
- * ecm_tracker_tcp_sender_xml_state_get()
- *	Return an XML state element
+ * ecm_tracker_tcp_sender_state_get()
+ *	Return state
  */
-static int ecm_tracker_tcp_sender_xml_state_get(char *buf, int buf_sz, ecm_tracker_sender_type_t sender,
+static int ecm_tracker_tcp_sender_state_get(struct ecm_state_file_instance *sfi, ecm_tracker_sender_type_t sender,
 #ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
 						struct ecm_tracker_tcp_host_data *data,
 #endif
 						struct ecm_tracker_tcp_sender_state *state)
 {
-	return snprintf(buf, buf_sz, "<sender_%s"
+	int result;
+
+	if ((result = ecm_state_write(sfi, "state", "%s", ecm_tracker_sender_state_to_string(state->state)))) {
+		return result;
+	}
+	if ((result = ecm_state_write(sfi, "syn_seq", "%u", state->syn_seq))) {
+		return result;
+	}
+	if ((result = ecm_state_write(sfi, "fin_seq", "%u", state->fin_seq))) {
+		return result;
+	}
 #ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
-			" mss_seen=\"%s\""
-			" mss=\"%u\""
-			" seq_no=\"%u\""
-			" num_seqs=\"%u\""
-			" seq_valid=\"%s\""
-			" bytes_total=\"%d\""
-			" buffers_total=\"%d\""
+	if ((result = ecm_state_write(sfi, "mss_seen", "%s", (data->mss_seen)? "yes" : "no"))) {
+		return result;
+	}
+	if ((result = ecm_state_write(sfi, "mss", "%u", data->mss))) {
+		return result;
+	}
+	if ((result = ecm_state_write(sfi, "seq_no", "%u", data->seq_no))) {
+		return result;
+	}
+	if ((result = ecm_state_write(sfi, "num_seqs", "%u", data->num_seqs))) {
+		return result;
+	}
+	if ((result = ecm_state_write(sfi, "seq_valid", "%s", (data->seq_no_valid)? "yes" : "no"))) {
+		return result;
+	}
+	if ((result = ecm_state_write(sfi, "bytes_total", "%d", data->recvd_bytes_total))) {
+		return result;
+	}
+	if ((result = ecm_state_write(sfi, "buffers_total", "%d", data->recvd_count))) {
+		return result;
+	}
 #endif
-			" state=\"%s\""
-			" syn_seq=\"%u\""
-			" fin_seq=\"%u\""
-			"/>\n",
-			(sender == ECM_TRACKER_SENDER_TYPE_SRC)? "src" : "dest",
-#ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
-			(data->mss_seen)? "yes" : "no",
-			data->mss,
-			data->seq_no,
-			data->num_seqs,
-			(data->seq_no_valid)? "yes" : "no",
-			data->recvd_bytes_total,
-			data->recvd_count,
-#endif
-			ecm_tracker_sender_state_to_string(state->state),
-			state->syn_seq,
-			state->fin_seq);
+	return 0;
 }
 
 /*
- * ecm_tracker_tcp_xml_state_get_callback()
- *	Return an XML state element
+ * ecm_tracker_tcp_state_text_get_callback()
+ *	Return state
  */
-static int ecm_tracker_tcp_xml_state_get_callback(struct ecm_tracker_instance *ti, char *buf, int buf_sz)
+static int ecm_tracker_tcp_state_text_get_callback(struct ecm_tracker_instance *ti, struct ecm_state_file_instance *sfi)
 {
+	int result;
 	struct ecm_tracker_tcp_internal_instance *ttii = (struct ecm_tracker_tcp_internal_instance *)ti;
-	int count;
-	int total;
 	struct ecm_tracker_tcp_sender_state sender_states[ECM_TRACKER_SENDER_MAX];
 #ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
 	struct ecm_tracker_tcp_host_data sender_data[ECM_TRACKER_SENDER_MAX];
@@ -1957,6 +1965,10 @@ static int ecm_tracker_tcp_xml_state_get_callback(struct ecm_tracker_instance *t
 #endif
 	ecm_tracker_connection_state_t connection_state;
 	DEBUG_CHECK_MAGIC(ttii, ECM_TRACKER_TCP_INSTANCE_MAGIC, "%p: magic failed", ttii);
+
+	if ((result = ecm_state_prefix_add(sfi, "tracker_tcp"))) {
+		return result;
+	}
 
 	/*
 	 * Capture state
@@ -1972,67 +1984,60 @@ static int ecm_tracker_tcp_xml_state_get_callback(struct ecm_tracker_instance *t
 	spin_unlock_bh(&ttii->lock);
 	connection_state = ecm_tracker_tcp_connection_state_matrix[sender_states[ECM_TRACKER_SENDER_TYPE_SRC].state][sender_states[ECM_TRACKER_SENDER_TYPE_DEST].state];
 
-	/*
-	 * Output our opening element
-	 */
-	count = snprintf(buf, buf_sz, "<tcp_tracker"
-			" connection_state=\"%s\""
-#ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
-			" data_limit=\"%d\""
-#endif
-			">",
-			ecm_tracker_connection_state_to_string(connection_state)
-#ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
-			, data_limit
-#endif
-			);
-	if ((count <= 0) || (count >= buf_sz)) {
-		return -1;
+	if ((result = ecm_state_write(sfi, "connection_state", "%s", ecm_tracker_connection_state_to_string(connection_state)))) {
+		return result;
 	}
-	total = count;
-	buf_sz -= count;
+#ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
+	if ((result = ecm_state_write(sfi, "data_limit", "%d", data_limit))) {
+		return result;
+	}
+#endif
+
+	if ((result = ecm_state_prefix_add(sfi, "senders"))) {
+		return result;
+	}
 
 	/*
 	 * Output src sender
 	 */
-	count = ecm_tracker_tcp_sender_xml_state_get(buf + total,
-			buf_sz,
+	if ((result = ecm_state_prefix_add(sfi, "src"))) {
+		return result;
+	}
+	if ((result = ecm_tracker_tcp_sender_state_get(sfi,
 			ECM_TRACKER_SENDER_TYPE_SRC,
 #ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
 			&sender_data[ECM_TRACKER_SENDER_TYPE_SRC],
 #endif
-			&sender_states[ECM_TRACKER_SENDER_TYPE_SRC]);
-	if ((count <= 0) || (count >= buf_sz)) {
-		return -1;
+			&sender_states[ECM_TRACKER_SENDER_TYPE_SRC]))) {
+		return result;
 	}
-	total += count;
-	buf_sz -= count;
+	if ((result = ecm_state_prefix_remove(sfi))) {
+		return result;
+	}
 
 	/*
 	 * Output dest sender
 	 */
-	count = ecm_tracker_tcp_sender_xml_state_get(buf + total,
-			buf_sz,
+	if ((result = ecm_state_prefix_add(sfi, "dest"))) {
+		return result;
+	}
+	if ((result = ecm_tracker_tcp_sender_state_get(sfi,
 			ECM_TRACKER_SENDER_TYPE_DEST,
 #ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
 			&sender_data[ECM_TRACKER_SENDER_TYPE_DEST],
 #endif
-			&sender_states[ECM_TRACKER_SENDER_TYPE_DEST]);
-	if ((count <= 0) || (count >= buf_sz)) {
-		return -1;
+			&sender_states[ECM_TRACKER_SENDER_TYPE_DEST]))) {
+		return result;
 	}
-	total += count;
-	buf_sz -= count;
+	if ((result = ecm_state_prefix_remove(sfi))) {
+		return result;
+	}
 
-	/*
-	 * Output our terminal element
-	 */
-	count = snprintf(buf + total, buf_sz, "</tcp_tracker>\n");
-	if ((count <= 0) || (count >= buf_sz)) {
-		return -1;
+	if ((result = ecm_state_prefix_remove(sfi))) {
+		return result;
 	}
-	total += count;
-	return total;
+
+ 	return ecm_state_prefix_remove(sfi);
 }
 #endif
 
@@ -2090,7 +2095,7 @@ struct ecm_tracker_tcp_instance *ecm_tracker_tcp_alloc(void)
 	ttii->tcp_base.segment_add = ecm_tracker_tcp_segment_add_callback;
 #endif
 #ifdef ECM_STATE_OUTPUT_ENABLE
-	ttii->tcp_base.base.xml_state_get = ecm_tracker_tcp_xml_state_get_callback;
+	ttii->tcp_base.base.state_text_get = ecm_tracker_tcp_state_text_get_callback;
 #endif
 
 	spin_lock_init(&ttii->lock);

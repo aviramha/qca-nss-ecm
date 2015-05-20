@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2014, 2015, The Linux Foundation.  All rights reserved.
+ * Copyright (c) 2014-2015, The Linux Foundation.  All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -60,6 +60,7 @@
 
 #include "ecm_types.h"
 #include "ecm_db_types.h"
+#include "ecm_state.h"
 #include "ecm_tracker.h"
 #include "ecm_tracker_datagram.h"
 
@@ -641,11 +642,12 @@ static void ecm_tracker_datagram_state_get_callback(struct ecm_tracker_instance 
 
 #ifdef ECM_STATE_OUTPUT_ENABLE
 /*
- * ecm_tracker_datagram_xml_state_get_callback()
- *	Return an XML state element
+ * ecm_tracker_datagram_state_text_get_callback()
+ *	Return state
  */
-static int ecm_tracker_datagram_xml_state_get_callback(struct ecm_tracker_instance *ti, char *buf, int buf_sz)
+static int ecm_tracker_datagram_state_text_get_callback(struct ecm_tracker_instance *ti, struct ecm_state_file_instance *sfi)
 {
+	int result;
 	struct ecm_tracker_datagram_internal_instance *dtii = (struct ecm_tracker_datagram_internal_instance *)ti;
 #ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
 	int32_t src_count;
@@ -656,7 +658,12 @@ static int ecm_tracker_datagram_xml_state_get_callback(struct ecm_tracker_instan
 #endif
 	ecm_tracker_sender_state_t sender_state[ECM_TRACKER_SENDER_MAX];
 	ecm_tracker_connection_state_t connection_state;
+
 	DEBUG_CHECK_MAGIC(dtii, ECM_TRACKER_DATAGRAM_INSTANCE_MAGIC, "%p: magic failed", dtii);
+
+	if ((result = ecm_state_prefix_add(sfi, "tracker_datagram"))) {
+		return result;
+	}
 
 	/*
 	 * Capture state
@@ -672,32 +679,41 @@ static int ecm_tracker_datagram_xml_state_get_callback(struct ecm_tracker_instan
 	sender_state[ECM_TRACKER_SENDER_TYPE_SRC] = dtii->sender_state[ECM_TRACKER_SENDER_TYPE_SRC];
 	sender_state[ECM_TRACKER_SENDER_TYPE_DEST] = dtii->sender_state[ECM_TRACKER_SENDER_TYPE_DEST];
 	spin_unlock_bh(&dtii->lock);
-	connection_state = ecm_tracker_datagram_connection_state_matrix[sender_state[ECM_TRACKER_SENDER_TYPE_SRC]][sender_state[ECM_TRACKER_SENDER_TYPE_DEST]];
 
-	return snprintf(buf, buf_sz, "<datagram_tracker"
 #ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
-			" src_count=\"%d\""
-			" src_bytes_total=\"%d\""
-			" dest_count=\"%d\""
-			" dest_bytes_total=\"%d\""
-			" data_limit=\"%d\""
+	if ((result = ecm_state_write(sfi, "src_count", "%d", src_count))) {
+		return result;
+	}
+	if ((result = ecm_state_write(sfi, "src_bytes_total", "%d", src_bytes_total))) {
+		return result;
+	}
+	if ((result = ecm_state_write(sfi, "dest_count", "%d", dest_count))) {
+		return result;
+	}
+	if ((result = ecm_state_write(sfi, "dest_bytes_total", "%d", dest_bytes_total))) {
+		return result;
+	}
+	if ((result = ecm_state_write(sfi, "data_limit", "%d", data_limit))) {
+		return result;
+	}
 #endif
-			" timer_group=\"%d\""
-			" src_sender_state=\"%s\""
-			" dest_sender_state=\"%s\""
-			" connection_state=\"%s\""
-			"/>\n",
-#ifdef ECM_TRACKER_DPI_SUPPORT_ENABLE
-			src_count,
-			src_bytes_total,
-			dest_count,
-			dest_bytes_total,
-			data_limit,
-#endif
-			ECM_DB_TIMER_GROUPS_CONNECTION_GENERIC_TIMEOUT,
-			ecm_tracker_sender_state_to_string(sender_state[ECM_TRACKER_SENDER_TYPE_SRC]),
-			ecm_tracker_sender_state_to_string(sender_state[ECM_TRACKER_SENDER_TYPE_DEST]),
-			ecm_tracker_connection_state_to_string(connection_state));
+
+	connection_state = ecm_tracker_datagram_connection_state_matrix[sender_state[ECM_TRACKER_SENDER_TYPE_SRC]][sender_state[ECM_TRACKER_SENDER_TYPE_DEST]];
+	if ((result = ecm_state_write(sfi, "timer_group", "%d", ECM_DB_TIMER_GROUPS_CONNECTION_GENERIC_TIMEOUT))) {
+		return result;
+	}
+	if ((result = ecm_state_write(sfi, "src_sender_state", "%s", ecm_tracker_sender_state_to_string(sender_state[ECM_TRACKER_SENDER_TYPE_SRC])))) {
+		return result;
+	}
+	if ((result = ecm_state_write(sfi, "dest_sender_state", "%s", ecm_tracker_sender_state_to_string(sender_state[ECM_TRACKER_SENDER_TYPE_DEST])))) {
+		return result;
+	}
+	if ((result = ecm_state_write(sfi, "connection_state", "%s", ecm_tracker_connection_state_to_string(connection_state)))) {
+		return result;
+	}
+
+ 	return ecm_state_prefix_remove(sfi);
+
 }
 #endif
 
@@ -748,7 +764,7 @@ struct ecm_tracker_datagram_instance *ecm_tracker_datagram_alloc(void)
 	dtii->datagram_base.base.data_limit_set = ecm_tracker_datagram_data_limit_set_callback;
 #endif
 #ifdef ECM_STATE_OUTPUT_ENABLE
-	dtii->datagram_base.base.xml_state_get = ecm_tracker_datagram_xml_state_get_callback;
+	dtii->datagram_base.base.state_text_get = ecm_tracker_datagram_state_text_get_callback;
 #endif
 
 	// GGG TODO IMPLEMENT METHODS SPECIFIC TO WORKING WITH datagram e.g. reading without worrying about the datagram header content

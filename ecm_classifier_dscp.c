@@ -62,6 +62,7 @@
 
 #include "ecm_types.h"
 #include "ecm_db_types.h"
+#include "ecm_state.h"
 #include "ecm_tracker.h"
 #include "ecm_classifier.h"
 #include "ecm_front_end_types.h"
@@ -531,49 +532,34 @@ static void ecm_classifier_dscp_reclassify(struct ecm_classifier_instance *ci)
 
 #ifdef ECM_STATE_OUTPUT_ENABLE
 /*
- * ecm_classifier_dscp_xml_state_get()
- *	Return an XML state element
+ * ecm_classifier_dscp_state_get()
+ *	Return state
  */
-static int ecm_classifier_dscp_xml_state_get(struct ecm_classifier_instance *ci, char *buf, int buf_sz)
+static int ecm_classifier_dscp_state_get(struct ecm_classifier_instance *ci, struct ecm_state_file_instance *sfi)
 {
+	int result;
 	struct ecm_classifier_dscp_instance *cdscpi;
 	struct ecm_classifier_process_response process_response;
-	int count;
-	int total;
 
 	cdscpi = (struct ecm_classifier_dscp_instance *)ci;
 	DEBUG_CHECK_MAGIC(cdscpi, ECM_CLASSIFIER_DSCP_INSTANCE_MAGIC, "%p: magic failed", cdscpi);
+
+	if ((result = ecm_state_prefix_add(sfi, "dscp"))) {
+		return result;
+	}
 
 	spin_lock_bh(&ecm_classifier_dscp_lock);
 	process_response = cdscpi->process_response;
 	spin_unlock_bh(&ecm_classifier_dscp_lock);
 
-	count = snprintf(buf, buf_sz, "<ecm_classifier_dscp>\n");
-	if ((count <= 0) || (count >= buf_sz)) {
-		return -1;
-	}
-	total = count;
-	buf_sz -= count;
-
 	/*
 	 * Output our last process response
 	 */
-	count = ecm_classifier_process_response_xml_state_get(buf + total, buf_sz, &process_response);
-	if ((count <= 0) || (count >= buf_sz)) {
-		return -1;
+	if ((result = ecm_classifier_process_response_state_get(sfi, &process_response))) {
+		return result;
 	}
-	total += count;
-	buf_sz -= count;
 
-	/*
-	 * Output our terminal element
-	 */
-	count = snprintf(buf + total, buf_sz, "</ecm_classifier_dscp>\n");
-	if ((count <= 0) || (count >= buf_sz)) {
-		return -1;
-	}
-	total += count;
-	return total;
+	return ecm_state_prefix_remove(sfi);
 }
 #endif
 
@@ -606,7 +592,7 @@ struct ecm_classifier_dscp_instance *ecm_classifier_dscp_instance_alloc(struct e
 	cdscpi->base.reclassify_allowed = ecm_classifier_dscp_reclassify_allowed;
 	cdscpi->base.reclassify = ecm_classifier_dscp_reclassify;
 #ifdef ECM_STATE_OUTPUT_ENABLE
-	cdscpi->base.xml_state_get = ecm_classifier_dscp_xml_state_get;
+	cdscpi->base.state_get = ecm_classifier_dscp_state_get;
 #endif
 	cdscpi->base.ref = ecm_classifier_dscp_ref;
 	cdscpi->base.deref = ecm_classifier_dscp_deref;

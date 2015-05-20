@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2014,2015, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2015, The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -23,7 +23,7 @@
 
 uint32_t ecm_db_time_get(void);
 void ecm_db_connection_defunct_all(void);
-#if defined(ECM_DB_XREF_ENABLE) && defined(ECM_BAND_STEERING_ENABLE)
+#ifdef ECM_DB_XREF_ENABLE
 void ecm_db_traverse_node_from_connection_list_and_decelerate(struct ecm_db_node_instance *node);
 void ecm_db_traverse_node_to_connection_list_and_decelerate(struct ecm_db_node_instance *node);
 void ecm_db_traverse_node_from_nat_connection_list_and_decelerate(struct ecm_db_node_instance *node);
@@ -298,11 +298,11 @@ int ecm_db_node_deref(struct ecm_db_node_instance *ni);
 int ecm_db_connection_count_by_protocol_get(int protocol);
 
 #ifdef ECM_STATE_OUTPUT_ENABLE
-int ecm_db_connection_xml_state_get(struct ecm_db_connection_instance *ci, char *buf, int buf_sz);
-int ecm_db_mapping_xml_state_get(struct ecm_db_mapping_instance *mi, char *buf, int buf_sz);
-int ecm_db_host_xml_state_get(struct ecm_db_host_instance *hi, char *buf, int buf_sz);
-int ecm_db_node_xml_state_get(struct ecm_db_node_instance *ni, char *buf, int buf_sz);
-int ecm_db_iface_xml_state_get(struct ecm_db_iface_instance *ii, char *buf, int buf_sz);
+int ecm_db_connection_state_get(struct ecm_state_file_instance *sfi, struct ecm_db_connection_instance *ci);
+int ecm_db_mapping_state_get(struct ecm_state_file_instance *sfi, struct ecm_db_mapping_instance *mi);
+int ecm_db_host_state_get(struct ecm_state_file_instance *sfi, struct ecm_db_host_instance *hi);
+int ecm_db_node_state_get(struct ecm_state_file_instance *sfi, struct ecm_db_node_instance *ni);
+int ecm_db_iface_state_get(struct ecm_state_file_instance *sfi, struct ecm_db_iface_instance *ii);
 int ecm_db_connection_hash_table_lengths_get(int index);
 int ecm_db_connection_hash_index_get_next(int index);
 int ecm_db_connection_hash_index_get_first(void);

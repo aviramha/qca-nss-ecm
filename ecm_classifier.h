@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2014,2015 The Linux Foundation.  All rights reserved.
+ * Copyright (c) 2014-2015 The Linux Foundation.  All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -123,11 +123,8 @@ typedef void (*ecm_classifier_reclassify_callback_t)(struct ecm_classifier_insta
 typedef void (*ecm_classifier_last_process_response_get_callback_t)(struct ecm_classifier_instance *ci, struct ecm_classifier_process_response *process_response);
 											/* Get last process response */
 #ifdef ECM_STATE_OUTPUT_ENABLE
-typedef int (*ecm_classifier_xml_state_get_callback_t)(struct ecm_classifier_instance *ci, char *buf, int buf_sz);
-											/* Get XML state output, buf has buf_sz bytes available.  Returns number of bytes written.
-											 * Function has failed if the return is (<= 0) || (return value == buf_sz).
-											 * The return code is compatible with snprintf().
-											 */
+typedef int (*ecm_classifier_state_get_callback_t)(struct ecm_classifier_instance *ci, struct ecm_state_file_instance *sfi);
+											/* Get state output.  Returns 0 upon success. */
 #endif
 
 /*
@@ -152,8 +149,8 @@ struct ecm_classifier_instance {
 	ecm_classifier_last_process_response_get_callback_t last_process_response_get;
 							/* Return last process response */
 #ifdef ECM_STATE_OUTPUT_ENABLE
-	ecm_classifier_xml_state_get_callback_t xml_state_get;
-							/* Return an XML element containing its state */
+	ecm_classifier_state_get_callback_t state_get;
+							/* Return its state */
 #endif
 	ecm_classifier_ref_method_t ref;
 	ecm_classifier_deref_callback_t deref;
@@ -161,74 +158,86 @@ struct ecm_classifier_instance {
 
 #ifdef ECM_STATE_OUTPUT_ENABLE
 /*
- * ecm_classifier_process_response_xml_state_get()
- *	Output an XML block for the process response
+ * ecm_classifier_process_response_state_get()
+ *	Output detail for the process response
  *
- * This function writes an XML element into the given buffer.
- * It will write no more than buf_sz, even if that truncates the output.
- * It will return <= 0 or buf_sz (truncation) if there is a failure.
- * The return code is compatible with snprintf()
+ * Returns 0 on success.
  */
-static inline int ecm_classifier_process_response_xml_state_get(char *buf, int buf_sz, struct ecm_classifier_process_response *pr)
+static inline int ecm_classifier_process_response_state_get(struct ecm_state_file_instance *sfi, struct ecm_classifier_process_response *pr)
 {
-	char *drop_str = "";
-	char *accel_mode_str = "";
-	char timer_group_str[50] = "";
-	char qos_tag_str[60] = "";
-	char dscp_str[50] = "";
-	char *relevance_str = "";
+	int result;
+
+	if ((result = ecm_state_prefix_add(sfi, "pr"))) {
+		return result;
+	}
 
 	if (pr->relevance == ECM_CLASSIFIER_RELEVANCE_NO) {
-		return 	snprintf(buf, buf_sz, "<pr relevant=\"no\"/>\n");
+		return ecm_state_write(sfi, "relevant", "%s", "no");
 	}
 
 	if (pr->process_actions & ECM_CLASSIFIER_PROCESS_ACTION_DROP) {
 		if (pr->drop) {
-			drop_str = " drop=\"yes\"";
+			if ((result = ecm_state_write(sfi, "drop", "yes"))) {
+				return result;
+			}
 		} else {
-			drop_str = " drop=\"no\"";
+			if ((result = ecm_state_write(sfi, "drop", "no"))) {
+				return result;
+			}
 		}
-	}
-
-	if (pr->process_actions & ECM_CLASSIFIER_PROCESS_ACTION_ACCEL_MODE) {
-		if (pr->accel_mode == ECM_CLASSIFIER_ACCELERATION_MODE_ACCEL) {
-			accel_mode_str = " accel=\"wanted\"";
-		}
-		else if (pr->accel_mode == ECM_CLASSIFIER_ACCELERATION_MODE_NO) {
-			accel_mode_str = " accel=\"denied\"";
-		}
-		/* Else don't care */
-	}
-
-	if (pr->process_actions & ECM_CLASSIFIER_PROCESS_ACTION_QOS_TAG) {
-		snprintf(qos_tag_str, sizeof(qos_tag_str), " flow_qos_tag=\"%u\" return_qos_tag=\"%u\"",
-				pr->flow_qos_tag, pr->return_qos_tag);
-	}
-#ifdef ECM_CLASSIFIER_DSCP_ENABLE
-	if (pr->process_actions & ECM_CLASSIFIER_PROCESS_ACTION_DSCP) {
-		snprintf(dscp_str, sizeof(dscp_str), " flow_dscp=\"%u\" return_dscp=\"%u\"",
-				pr->flow_dscp, pr->return_dscp);
-	}
-#endif
-	if (pr->process_actions & ECM_CLASSIFIER_PROCESS_ACTION_TIMER_GROUP) {
-		snprintf(timer_group_str, sizeof(timer_group_str), " timer_group=\"%d\"", pr->timer_group);
 	}
 
 	if (pr->relevance == ECM_CLASSIFIER_RELEVANCE_MAYBE) {
-		accel_mode_str = " accel=\"denied\"";
-		relevance_str = " relevant=\"maybe\"";
+		if ((result = ecm_state_write(sfi, "accel", "denied"))) {
+			return result;
+		}
+		if ((result = ecm_state_write(sfi, "relevant", "maybe"))) {
+			return result;
+		}
 	} else {
-		relevance_str = " relevant=\"yes\"";
+		if ((result = ecm_state_write(sfi, "relevant", "yes"))) {
+			return result;
+		}
+		if (pr->process_actions & ECM_CLASSIFIER_PROCESS_ACTION_ACCEL_MODE) {
+			if (pr->accel_mode == ECM_CLASSIFIER_ACCELERATION_MODE_ACCEL) {
+				if ((result = ecm_state_write(sfi, "accel", "wanted"))) {
+					return result;
+				}
+			}
+			else if (pr->accel_mode == ECM_CLASSIFIER_ACCELERATION_MODE_NO) {
+				if ((result = ecm_state_write(sfi, "accel", "denied"))) {
+					return result;
+				}
+			}
+			/* Else don't care */
+		}
 	}
 
-	return snprintf(buf, buf_sz, "<pr %s became_relevant=\"%u\"%s%s%s%s%s/>\n",
-			relevance_str,
-			pr->became_relevant,
-			drop_str,
-			qos_tag_str,
-			timer_group_str,
-			accel_mode_str,
-			dscp_str);
+	if (pr->process_actions & ECM_CLASSIFIER_PROCESS_ACTION_QOS_TAG) {
+		if ((result = ecm_state_write(sfi, "flow_qos_tag", "%u", pr->flow_qos_tag))) {
+			return result;
+		}
+		if ((result = ecm_state_write(sfi, "return_qos_tag", "%u", pr->return_qos_tag))) {
+			return result;
+		}
+	}
+#ifdef ECM_CLASSIFIER_DSCP_ENABLE
+	if (pr->process_actions & ECM_CLASSIFIER_PROCESS_ACTION_DSCP) {
+		if ((result = ecm_state_write(sfi, "flow_dscp", "%u", pr->flow_dscp))) {
+			return result;
+		}
+		if ((result = ecm_state_write(sfi, "return_dscp", "%u", pr->return_dscp))) {
+			return result;
+		}
+	}
+#endif
+	if (pr->process_actions & ECM_CLASSIFIER_PROCESS_ACTION_TIMER_GROUP) {
+		if ((result = ecm_state_write(sfi, "timer_group", "%d", pr->timer_group))) {
+			return result;
+		}
+	}
+
+	return ecm_state_prefix_remove(sfi);
 }
 #endif
 
