@@ -84,6 +84,12 @@ static inline void ecm_nss_type_check_nss_ipv6(uint32_t ip6[4]){}
 		__ECM_IP_ADDR_COPY_NO_CHECK(d,s); \
 	}
 
+#define ECM_IP_ADDR_HASH(h, a) \
+	{ \
+		ecm_nss_type_check_ecm_ip_addr(a); \
+		h = a[0] ^ a[1] ^ a[2] ^ a[3]; \
+	}
+
 /*
  * This macro converts from Linux IPv4 address (network order) to ECM ip_addr_t
  */
