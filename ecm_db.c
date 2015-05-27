@@ -9566,7 +9566,7 @@ static void ecm_db_timer_callback(unsigned long data)
 	}
 	add_timer(&ecm_db_timer);
 }
-
+#if defined(ECM_DB_XREF_ENABLE) && defined(ECM_BAND_STEERING_ENABLE)
 /*
  * ecm_db_node_from_connections_get_and_ref_first()
  *	Obtain a ref to the first connection instance of "from list" of node, if any
@@ -9828,7 +9828,7 @@ void ecm_db_traverse_node_to_nat_connection_list_and_decelerate(struct ecm_db_no
 	}
 	DEBUG_INFO("%p: Defuncting to node's nat connection list complete\n", node);
 }
-
+#endif
 /*
  * ecm_db_init()
  */

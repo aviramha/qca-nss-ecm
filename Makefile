@@ -152,6 +152,13 @@ ECM_DB_CLASSIFIER_TYPE_ASSIGNMENTS_TRACK_ENABLE=y
 ccflags-$(ECM_DB_CLASSIFIER_TYPE_ASSIGNMENTS_TRACK_ENABLE) += -DECM_DB_CTA_TRACK_ENABLE
 
 # #############################################################################
+# Define ECM_BAND_STEERING_ENABLE=y in order to enable
+# band steering feature.
+# #############################################################################
+ECM_BAND_STEERING_ENABLE=y
+ccflags-$(ECM_BAND_STEERING_ENABLE) += -DECM_BAND_STEERING_ENABLE
+
+# #############################################################################
 # Debug flags, set these to = 0 if you want to disable all debugging for that
 # file.
 # By turning off debugs you gain maximum ECM performance.

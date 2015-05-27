@@ -23,12 +23,12 @@
 
 uint32_t ecm_db_time_get(void);
 void ecm_db_connection_defunct_all(void);
-
+#if defined(ECM_DB_XREF_ENABLE) && defined(ECM_BAND_STEERING_ENABLE)
 void ecm_db_traverse_node_from_connection_list_and_decelerate(struct ecm_db_node_instance *node);
 void ecm_db_traverse_node_to_connection_list_and_decelerate(struct ecm_db_node_instance *node);
 void ecm_db_traverse_node_from_nat_connection_list_and_decelerate(struct ecm_db_node_instance *node);
 void ecm_db_traverse_node_to_nat_connection_list_and_decelerate(struct ecm_db_node_instance *node);
-
+#endif
 int ecm_db_connection_count_get(void);
 
 void ecm_db_connection_data_totals_update_dropped(struct ecm_db_connection_instance *ci, bool is_from, uint64_t size, uint64_t packets);

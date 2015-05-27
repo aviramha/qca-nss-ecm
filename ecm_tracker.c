@@ -68,8 +68,8 @@ int ecm_tracker_data_buffer_total = 0;			/* Data buffer total allocated for all 
 int ecm_tracker_data_limit = ECM_TRACKER_GLOBAL_DATA_LIMIT_DEFAULT;
 int ecm_tracker_data_buffer_limit = ECM_TRACKER_GLOBAL_DATA_BUFFER_LIMIT_DEFAULT;
 							/* Tracked limit for data across all instances */
+static DEFINE_SPINLOCK(ecm_tracker_lock);		/* Global lock for the tracker globals */
 #endif
-static DEFINE_SPINLOCK(ecm_tracker_lock);				/* Global lock for the tracker globals */
 
 struct ecm_tracker_ip_protocols;
 

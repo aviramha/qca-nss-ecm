@@ -38,9 +38,9 @@
 #include <linux/in.h>
 #include <linux/udp.h>
 #include <linux/tcp.h>
+#if defined(ECM_DB_XREF_ENABLE) && defined(ECM_BAND_STEERING_ENABLE)
 #include <linux/if_bridge.h>
-
-
+#endif
 #include <linux/inetdevice.h>
 #if defined(ECM_INTERFACE_TUNIPIP6_ENABLE) || defined(ECM_INTERFACE_SIT_ENABLE)
 #include <net/ipip.h>
@@ -2435,7 +2435,7 @@ static int ecm_interface_netdev_notifier_callback(struct notifier_block *this, u
 static struct notifier_block ecm_interface_netdev_notifier __read_mostly = {
 	.notifier_call		= ecm_interface_netdev_notifier_callback,
 };
-
+#if defined(ECM_DB_XREF_ENABLE) && defined(ECM_BAND_STEERING_ENABLE)
 /*
  * ecm_interfae_node_br_fdb_notify_event()
  *	This is a call back for "bridge fdb update event/ageing timer expire
@@ -2476,7 +2476,7 @@ static int ecm_interface_node_br_fdb_notify_event(struct notifier_block *nb,
 static struct notifier_block ecm_interface_node_br_fdb_update_nb = {
 	.notifier_call = ecm_interface_node_br_fdb_notify_event,
 };
-
+#endif
 /*
  * ecm_interface_init()
  */
@@ -2490,12 +2490,12 @@ int ecm_interface_init(void)
 		DEBUG_ERROR("Failed to register netdevice notifier %d\n", result);
 		return result;
 	}
-
+#if defined(ECM_DB_XREF_ENABLE) && defined(ECM_BAND_STEERING_ENABLE)
 	/*
 	 * register for bridge fdb database modificationevents
 	 */
         br_fdb_update_register_notify(&ecm_interface_node_br_fdb_update_nb);
-
+#endif
 	return 0;
 }
 EXPORT_SYMBOL(ecm_interface_init);
@@ -2512,10 +2512,11 @@ void ecm_interface_exit(void)
 	spin_unlock_bh(&ecm_interface_lock);
 
 	unregister_netdevice_notifier(&ecm_interface_netdev_notifier);
-
+#if defined(ECM_DB_XREF_ENABLE) && defined(ECM_BAND_STEERING_ENABLE)
 	/*
 	 * unregister for bridge fdb update events
 	 */
         br_fdb_update_unregister_notify(&ecm_interface_node_br_fdb_update_nb);
+#endif
 }
 EXPORT_SYMBOL(ecm_interface_exit);
