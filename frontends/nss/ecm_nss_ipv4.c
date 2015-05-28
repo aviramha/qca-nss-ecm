@@ -35,6 +35,7 @@
 #include <linux/in.h>
 #include <linux/udp.h>
 #include <linux/tcp.h>
+#include <linux/ppp_defs.h>
 
 #include <linux/inetdevice.h>
 #include <linux/if_arp.h>
@@ -93,6 +94,8 @@
 #ifdef ECM_NON_PORTED_SUPPORT_ENABLE
 #include "ecm_nss_non_ported_ipv4.h"
 #endif
+
+#include "ecm_front_end_common.h"
 
 int ecm_nss_ipv4_no_action_limit_default = 250;		/* Default no-action limit. */
 int ecm_nss_ipv4_driver_fail_limit_default = 250;		/* Default driver fail limit. */
@@ -805,7 +808,7 @@ ecm_ipv4_retry_regen:
  */
 static unsigned int ecm_nss_ipv4_ip_process(struct net_device *out_dev, struct net_device *in_dev,
 							uint8_t *src_node_addr, uint8_t *dest_node_addr,
-							bool can_accel, bool is_routed, struct sk_buff *skb)
+							bool can_accel, bool is_routed, bool is_l2_encap, struct sk_buff *skb)
 {
 	struct ecm_tracker_ip_header ip_hdr;
         struct nf_conn *ct;
@@ -1185,7 +1188,7 @@ static unsigned int ecm_nss_ipv4_ip_process(struct net_device *out_dev, struct n
 				in_dev, in_dev_nat,
 				src_node_addr, src_node_addr_nat,
 				dest_node_addr, dest_node_addr_nat,
-				can_accel, is_routed, skb,
+				can_accel, is_routed, is_l2_encap, skb,
 				&ip_hdr,
 				ct, sender, ecm_dir,
 				&orig_tuple, &reply_tuple,
@@ -1196,7 +1199,7 @@ static unsigned int ecm_nss_ipv4_ip_process(struct net_device *out_dev, struct n
 				in_dev, in_dev_nat,
 				src_node_addr, src_node_addr_nat,
 				dest_node_addr, dest_node_addr_nat,
-				can_accel, is_routed, skb,
+				can_accel, is_routed, is_l2_encap, skb,
 				&ip_hdr,
 				ct, sender, ecm_dir,
 				&orig_tuple, &reply_tuple,
@@ -1276,8 +1279,43 @@ static unsigned int ecm_nss_ipv4_post_routing_hook(const struct nf_hook_ops *ops
 
 	DEBUG_TRACE("Post routing process skb %p, out: %p (%s), in: %p (%s)\n", skb, out, out->name, in, in->name);
 	result = ecm_nss_ipv4_ip_process((struct net_device *)out, in, NULL, NULL,
-							can_accel, true, skb);
+							can_accel, true, false, skb);
 	dev_put(in);
+	return result;
+}
+
+/*
+ * ecm_front_end_ipv4_pppoe_bridge_process()
+ *	Called for PPPoE session packets that are going
+ *	out to one of the bridge physical interfaces.
+ */
+static unsigned int ecm_front_end_ipv4_pppoe_bridge_process(struct net_device *out,
+						     struct net_device *in,
+						     struct ethhdr *skb_eth_hdr,
+						     bool can_accel,
+						     struct sk_buff *skb)
+{
+	unsigned int result = NF_ACCEPT;
+	struct pppoe_hdr *ph = pppoe_hdr(skb);
+	uint16_t ppp_proto = *(uint16_t *)ph->tag;
+	uint32_t encap_header_len = 0;
+
+	ppp_proto = ntohs(ppp_proto);
+	if (ppp_proto != PPP_IP) {
+		return NF_ACCEPT;
+	}
+
+	encap_header_len = ecm_front_end_l2_encap_header_len(skb);
+	ecm_front_end_pull_l2_encap_header(skb, encap_header_len);
+	skb->protocol = htons(ETH_P_IP);
+
+	result = ecm_nss_ipv4_ip_process(out, in, skb_eth_hdr->h_source,
+					 skb_eth_hdr->h_dest, can_accel,
+					 false, true, skb);
+
+	ecm_front_end_push_l2_encap_header(skb, encap_header_len);
+	skb->protocol = htons(ETH_P_PPP_SES);
+
 	return result;
 }
 
@@ -1353,8 +1391,8 @@ static unsigned int ecm_nss_ipv4_bridge_post_routing_hook(const struct nf_hook_o
 		return NF_ACCEPT;
 	}
 	eth_type = ntohs(skb_eth_hdr->h_proto);
-	if (unlikely(eth_type != 0x0800)) {
-		DEBUG_TRACE("%p: Not IP\n", skb);
+	if (unlikely((eth_type != 0x0800) && (eth_type != ETH_P_PPP_SES))) {
+		DEBUG_TRACE("%p: Not IP/PPPoE session\n", skb);
 		return NF_ACCEPT;
 	}
 
@@ -1431,8 +1469,18 @@ static unsigned int ecm_nss_ipv4_bridge_post_routing_hook(const struct nf_hook_o
 
 	DEBUG_TRACE("Bridge process skb: %p, bridge: %p (%s), In: %p (%s), Out: %p (%s)\n",
 			skb, bridge, bridge->name, in, in->name, out, out->name);
+
+	if (unlikely(eth_type != 0x0800)) {
+		result = ecm_front_end_ipv4_pppoe_bridge_process((struct net_device *)out, in, skb_eth_hdr, can_accel, skb);
+		dev_put(in);
+		dev_put(bridge);
+		return result;
+	}
+
 	result = ecm_nss_ipv4_ip_process((struct net_device *)out, in,
-				skb_eth_hdr->h_source, skb_eth_hdr->h_dest, can_accel, false, skb);
+				skb_eth_hdr->h_source, skb_eth_hdr->h_dest, can_accel, false, false, skb);
+
+
 	dev_put(in);
 	dev_put(bridge);
 	return result;

@@ -411,6 +411,7 @@ bool ecm_tracker_ip_check_header_and_read(struct ecm_tracker_ip_header *ip_hdr, 
 #ifdef ECM_IPV6_ENABLE
 	struct ipv6hdr *v6_hdr = NULL;
 	int16_t this_header;
+	int16_t prev_header;
 	uint32_t offset;
 #endif
 
@@ -553,6 +554,7 @@ version_check_done:
 	 */
 	offset = 40;
 	this_header = (int16_t)v6_hdr->nexthdr;
+	prev_header = this_header;
 	while ((remain > 0) && (this_header >= 0) && (this_header != 59)) {
 		struct ecm_tracker_ip_protocols *etip;
 		struct ecm_tracker_ip_protocol_header *etiph;
@@ -589,13 +591,14 @@ version_check_done:
 		DEBUG_ASSERT(remain >= etiph->size, "v6 remain: %u goes negative after header size: %u", remain, etiph->size);
 		remain -= etiph->size;
 
+		prev_header = this_header;
 		this_header = next_header;
 	}
 
 	/*
 	 * Generally the last protocol seen is the upper layer protocol
 	 */
-	ip_hdr->protocol = (int)this_header;
+	ip_hdr->protocol = (int)prev_header;
 
 	return true;
 #endif
