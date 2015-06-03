@@ -237,34 +237,15 @@ struct ecm_db_node_instance *ecm_nss_ipv4_node_establish_and_ref(struct net_devi
 		case ECM_DB_IFACE_TYPE_BRIDGE:
 		case ECM_DB_IFACE_TYPE_IPSEC_TUNNEL:
 			if (!ecm_interface_mac_addr_get(addr, node_addr, &on_link, gw_addr)) {
-				__be32 ipv4_addr;
-				__be32 src_ip;
 				DEBUG_TRACE("failed to obtain node address for host " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(addr));
-				/*
-				 * Issue an ARP request for it, select the src_ip from which to issue the request.
-				 */
-				ECM_IP_ADDR_TO_NIN4_ADDR(ipv4_addr, addr);
-				src_ip = inet_select_addr(dev, ipv4_addr, RT_SCOPE_LINK);
-				if (!src_ip) {
-					DEBUG_TRACE("failed to lookup IP for %pI4\n", &ipv4_addr);
-					return NULL;
-				}
-
-				/*
-				 * If we have a GW for this address, then we have to send ARP request to the GW
-				 */
-				if (!on_link && !ECM_IP_ADDR_IS_NULL(gw_addr)) {
-					ECM_IP_ADDR_TO_NIN4_ADDR(ipv4_addr, gw_addr);
-				}
-
-				DEBUG_TRACE("Send ARP for %pI4 using src_ip as %pI4\n", &ipv4_addr, &src_ip);
-				arp_send(ARPOP_REQUEST, ETH_P_ARP, ipv4_addr, dev, src_ip, NULL, NULL, NULL);
+				ecm_interface_send_arp_request(dev, addr, on_link, gw_addr);
 
 				/*
 				 * Unable to get node address at this time.
 				 */
 				return NULL;
 			}
+
 			if (is_multicast_ether_addr(node_addr)) {
 				DEBUG_TRACE("multicast node address for host " ECM_IP_ADDR_DOT_FMT ", node_addr: %pM\n", ECM_IP_ADDR_TO_DOT(addr), node_addr);
 				return NULL;
@@ -732,7 +713,7 @@ bool ecm_nss_ipv4_connection_regenerate(struct ecm_db_connection_instance *ci, e
 
 
 	DEBUG_TRACE("%p: Update the 'from' interface heirarchy list\n", ci);
-	from_list_first = ecm_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, protocol, in_dev, is_routed, in_dev, src_node_addr, dest_node_addr);
+	from_list_first = ecm_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, 4, protocol, in_dev, is_routed, in_dev, src_node_addr, dest_node_addr);
 	if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 		goto ecm_ipv4_retry_regen;
 	}
@@ -741,7 +722,7 @@ bool ecm_nss_ipv4_connection_regenerate(struct ecm_db_connection_instance *ci, e
 	ecm_db_connection_interfaces_deref(from_list, from_list_first);
 
 	DEBUG_TRACE("%p: Update the 'from NAT' interface heirarchy list\n", ci);
-	from_nat_list_first = ecm_interface_heirarchy_construct(from_nat_list, ip_dest_addr, ip_src_addr_nat, protocol, in_dev_nat, is_routed, in_dev_nat, src_node_addr_nat, dest_node_addr_nat);
+	from_nat_list_first = ecm_interface_heirarchy_construct(from_nat_list, ip_dest_addr, ip_src_addr_nat, 4, protocol, in_dev_nat, is_routed, in_dev_nat, src_node_addr_nat, dest_node_addr_nat);
 	if (from_nat_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 		goto ecm_ipv4_retry_regen;
 	}
@@ -750,7 +731,7 @@ bool ecm_nss_ipv4_connection_regenerate(struct ecm_db_connection_instance *ci, e
 	ecm_db_connection_interfaces_deref(from_nat_list, from_nat_list_first);
 
 	DEBUG_TRACE("%p: Update the 'to' interface heirarchy list\n", ci);
-	to_list_first = ecm_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, protocol, out_dev, is_routed, in_dev, dest_node_addr, src_node_addr);
+	to_list_first = ecm_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, 4, protocol, out_dev, is_routed, in_dev, dest_node_addr, src_node_addr);
 	if (to_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 		goto ecm_ipv4_retry_regen;
 	}
@@ -759,7 +740,7 @@ bool ecm_nss_ipv4_connection_regenerate(struct ecm_db_connection_instance *ci, e
 	ecm_db_connection_interfaces_deref(to_list, to_list_first);
 
 	DEBUG_TRACE("%p: Update the 'to NAT' interface heirarchy list\n", ci);
-	to_nat_list_first = ecm_interface_heirarchy_construct(to_nat_list, ip_src_addr, ip_dest_addr_nat, protocol, out_dev_nat, is_routed, in_dev, dest_node_addr_nat, src_node_addr_nat);
+	to_nat_list_first = ecm_interface_heirarchy_construct(to_nat_list, ip_src_addr, ip_dest_addr_nat, 4, protocol, out_dev_nat, is_routed, in_dev, dest_node_addr_nat, src_node_addr_nat);
 	if (to_nat_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 		goto ecm_ipv4_retry_regen;
 	}
