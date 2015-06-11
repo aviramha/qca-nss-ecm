@@ -15,7 +15,7 @@
  */
 
 /*
- * ecm_bond_notifier.c
+ * ecm_nss_bond_notifier.c
  * 	Bonding notifier functionality.
  */
 
@@ -90,34 +90,34 @@
 /*
  * Locking of the classifier - concurrency control
  */
-static DEFINE_SPINLOCK(ecm_bond_notifier_lock);			/* Protect against SMP access between netfilter, events and private threaded function. */
+static DEFINE_SPINLOCK(ecm_nss_bond_notifier_lock);			/* Protect against SMP access between netfilter, events and private threaded function. */
 
 /*
  * Debugfs dentry object.
  */
-static struct dentry *ecm_bond_notifier_dentry;
+static struct dentry *ecm_nss_bond_notifier_dentry;
 
 /*
  * General operational control
  */
-static int ecm_bond_notifier_stopped = 0;			/* When non-zero further traffic will not be processed */
+static int ecm_nss_bond_notifier_stopped = 0;			/* When non-zero further traffic will not be processed */
 
 /*
- * ecm_bond_notifier_bond_cb
+ * ecm_nss_bond_notifier_bond_cb
  *	Bond driver notifier
  */
-static struct bond_cb ecm_bond_notifier_bond_cb;
+static struct bond_cb ecm_nss_bond_notifier_bond_cb;
 
 /*
  * NSS Context for LAG function
  */
-static void *ecm_bond_notifier_nss_context = NULL;		/* Registration for LAG */
+static void *ecm_nss_bond_notifier_nss_context = NULL;		/* Registration for LAG */
 
 /*
- * ecm_bond_notifier_send_lag_state()
+ * ecm_nss_bond_notifier_send_lag_state()
  *	Send the currnet LAG state of a physical interface that has changed state in the bonding driver.
  */
-static nss_tx_status_t ecm_bond_notifier_send_lag_state(struct nss_ctx_instance *nss_ctx, struct net_device *slave, enum nss_lag_state_change_ev slave_state)
+static nss_tx_status_t ecm_nss_bond_notifier_send_lag_state(struct nss_ctx_instance *nss_ctx, struct net_device *slave, enum nss_lag_state_change_ev slave_state)
 {
 	int32_t lagid = 0;
 	int32_t bondid = 0;
@@ -173,63 +173,63 @@ static nss_tx_status_t ecm_bond_notifier_send_lag_state(struct nss_ctx_instance 
 }
 
 /*
- * ecm_bond_notifier_bond_release()
+ * ecm_nss_bond_notifier_bond_release()
  *	Callback when a slave device is released from slavedom and no longer a part of a bonded interface.
  */
-static void ecm_bond_notifier_bond_release(struct net_device *slave_dev)
+static void ecm_nss_bond_notifier_bond_release(struct net_device *slave_dev)
 {
 	/*
 	 * If operations have stopped then do not process event
 	 */
 	DEBUG_INFO("Bond slave release: %p (%s)\n", slave_dev, slave_dev->name);
-	spin_lock_bh(&ecm_bond_notifier_lock);
-	if (unlikely(ecm_bond_notifier_stopped)) {
+	spin_lock_bh(&ecm_nss_bond_notifier_lock);
+	if (unlikely(ecm_nss_bond_notifier_stopped)) {
 		DEBUG_WARN("Ignoring bond release event - stopped\n");
-		spin_unlock_bh(&ecm_bond_notifier_lock);
+		spin_unlock_bh(&ecm_nss_bond_notifier_lock);
 		return;
 	}
-	spin_unlock_bh(&ecm_bond_notifier_lock);
-	ecm_bond_notifier_send_lag_state(ecm_bond_notifier_nss_context, slave_dev, NSS_LAG_RELEASE);
+	spin_unlock_bh(&ecm_nss_bond_notifier_lock);
+	ecm_nss_bond_notifier_send_lag_state(ecm_nss_bond_notifier_nss_context, slave_dev, NSS_LAG_RELEASE);
 }
 
 /*
- * ecm_bond_notifier_bond_enslave()
+ * ecm_nss_bond_notifier_bond_enslave()
  *	Callback when a device is enslaved by a LAG master device
  */
-static void ecm_bond_notifier_bond_enslave(struct net_device *slave_dev)
+static void ecm_nss_bond_notifier_bond_enslave(struct net_device *slave_dev)
 {
 	/*
 	 * If operations have stopped then do not process event
 	 */
 	DEBUG_INFO("Bond slave enslave: %p (%s)\n", slave_dev, slave_dev->name);
-	spin_lock_bh(&ecm_bond_notifier_lock);
-	if (unlikely(ecm_bond_notifier_stopped)) {
+	spin_lock_bh(&ecm_nss_bond_notifier_lock);
+	if (unlikely(ecm_nss_bond_notifier_stopped)) {
 		DEBUG_WARN("Ignoring bond enslave event - stopped\n");
-		spin_unlock_bh(&ecm_bond_notifier_lock);
+		spin_unlock_bh(&ecm_nss_bond_notifier_lock);
 		return;
 	}
-	spin_unlock_bh(&ecm_bond_notifier_lock);
-	ecm_bond_notifier_send_lag_state(ecm_bond_notifier_nss_context, slave_dev, NSS_LAG_ENSLAVE);
+	spin_unlock_bh(&ecm_nss_bond_notifier_lock);
+	ecm_nss_bond_notifier_send_lag_state(ecm_nss_bond_notifier_nss_context, slave_dev, NSS_LAG_ENSLAVE);
 }
 
 /*
- * ecm_bond_notifier_bond_link_down()
+ * ecm_nss_bond_notifier_bond_link_down()
  *	Callback when a link goes down on a LAG slave
  */
-static void ecm_bond_notifier_bond_link_down(struct net_device *slave_dev)
+static void ecm_nss_bond_notifier_bond_link_down(struct net_device *slave_dev)
 {
 	struct net_device *master;
 
 	/*
 	 * If operations have stopped then do not process event
 	 */
-	spin_lock_bh(&ecm_bond_notifier_lock);
-	if (unlikely(ecm_bond_notifier_stopped)) {
+	spin_lock_bh(&ecm_nss_bond_notifier_lock);
+	if (unlikely(ecm_nss_bond_notifier_stopped)) {
 		DEBUG_WARN("Ignoring bond link down event - stopped\n");
-		spin_unlock_bh(&ecm_bond_notifier_lock);
+		spin_unlock_bh(&ecm_nss_bond_notifier_lock);
 		return;
 	}
-	spin_unlock_bh(&ecm_bond_notifier_lock);
+	spin_unlock_bh(&ecm_nss_bond_notifier_lock);
 
 	/*
 	 * A net device that is a LAG slave has lost link.
@@ -248,20 +248,20 @@ static void ecm_bond_notifier_bond_link_down(struct net_device *slave_dev)
  * ecm_bond_notifier_bond_link_up()
  *	Callback when a device is enslaved by a LAG master device
  */
-static void ecm_bond_notifier_bond_link_up(struct net_device *slave_dev)
+static void ecm_nss_bond_notifier_bond_link_up(struct net_device *slave_dev)
 {
 	struct net_device *master;
 
 	/*
 	 * If operations have stopped then do not process event
 	 */
-	spin_lock_bh(&ecm_bond_notifier_lock);
-	if (unlikely(ecm_bond_notifier_stopped)) {
+	spin_lock_bh(&ecm_nss_bond_notifier_lock);
+	if (unlikely(ecm_nss_bond_notifier_stopped)) {
 		DEBUG_WARN("Ignoring bond enslave event - stopped\n");
-		spin_unlock_bh(&ecm_bond_notifier_lock);
+		spin_unlock_bh(&ecm_nss_bond_notifier_lock);
 		return;
 	}
-	spin_unlock_bh(&ecm_bond_notifier_lock);
+	spin_unlock_bh(&ecm_nss_bond_notifier_lock);
 
 	/*
 	 * Tricky to handle, this one.
@@ -277,21 +277,21 @@ static void ecm_bond_notifier_bond_link_up(struct net_device *slave_dev)
 }
 
 /*
- * ecm_bond_notifier_lag_event_cb()
+ * ecm_nss_bond_notifier_lag_event_cb()
  *	Handle LAG event from the NSS driver
  */
-static void ecm_bond_notifier_lag_event_cb(void *if_ctx, struct nss_lag_msg *msg)
+static void ecm_nss_bond_notifier_lag_event_cb(void *if_ctx, struct nss_lag_msg *msg)
 {
 	/*
 	 * If operations have stopped then do not process event
 	 */
-	spin_lock_bh(&ecm_bond_notifier_lock);
-	if (unlikely(ecm_bond_notifier_stopped)) {
+	spin_lock_bh(&ecm_nss_bond_notifier_lock);
+	if (unlikely(ecm_nss_bond_notifier_stopped)) {
 		DEBUG_WARN("Ignoring LAG event event - stopped\n");
-		spin_unlock_bh(&ecm_bond_notifier_lock);
+		spin_unlock_bh(&ecm_nss_bond_notifier_lock);
 		return;
 	}
-	spin_unlock_bh(&ecm_bond_notifier_lock);
+	spin_unlock_bh(&ecm_nss_bond_notifier_lock);
 
 	/*
 	 * GGG TODO Figure out if there is anything we need to do here, the old CM did nothing..
@@ -304,55 +304,55 @@ static void ecm_bond_notifier_lag_event_cb(void *if_ctx, struct nss_lag_msg *msg
 	}
 }
 
-void ecm_bond_notifier_stop(int num)
+void ecm_nss_bond_notifier_stop(int num)
 {
-	ecm_bond_notifier_stopped = num;
+	ecm_nss_bond_notifier_stopped = num;
 }
-EXPORT_SYMBOL(ecm_bond_notifier_stop);
+EXPORT_SYMBOL(ecm_nss_bond_notifier_stop);
 
 /*
- * ecm_bond_notifier_init()
+ * ecm_nss_bond_notifier_init()
  */
-int ecm_bond_notifier_init(struct dentry *dentry)
+int ecm_nss_bond_notifier_init(struct dentry *dentry)
 {
 	DEBUG_INFO("ECM Bonding Notifier init\n");
 
-	ecm_bond_notifier_dentry = debugfs_create_dir("ecm_bond_notifier", dentry);
-	if (!ecm_bond_notifier_dentry) {
+	ecm_nss_bond_notifier_dentry = debugfs_create_dir("ecm_nss_bond_notifier", dentry);
+	if (!ecm_nss_bond_notifier_dentry) {
 		DEBUG_ERROR("Failed to create ecm bond notifier directory in debugfs\n");
 		return -1;
 	}
 
-	if (!debugfs_create_u32("stop", S_IRUGO | S_IWUSR, ecm_bond_notifier_dentry,
-					(u32 *)&ecm_bond_notifier_stopped)) {
+	if (!debugfs_create_u32("stop", S_IRUGO | S_IWUSR, ecm_nss_bond_notifier_dentry,
+					(u32 *)&ecm_nss_bond_notifier_stopped)) {
 		DEBUG_ERROR("Failed to create ecm bond notifier stopped file in debugfs\n");
-		debugfs_remove_recursive(ecm_bond_notifier_dentry);
+		debugfs_remove_recursive(ecm_nss_bond_notifier_dentry);
 		return -1;
 	}
 
 	/*
 	 * Register Link Aggregation interfaces with NSS driver
 	 */
-	ecm_bond_notifier_nss_context = nss_register_lag_if(NSS_LAG0_INTERFACE_NUM, NULL, ecm_bond_notifier_lag_event_cb, NULL);
-	ecm_bond_notifier_nss_context = nss_register_lag_if(NSS_LAG1_INTERFACE_NUM, NULL, ecm_bond_notifier_lag_event_cb, NULL);
+	ecm_nss_bond_notifier_nss_context = nss_register_lag_if(NSS_LAG0_INTERFACE_NUM, NULL, ecm_nss_bond_notifier_lag_event_cb, NULL);
+	ecm_nss_bond_notifier_nss_context = nss_register_lag_if(NSS_LAG1_INTERFACE_NUM, NULL, ecm_nss_bond_notifier_lag_event_cb, NULL);
 
 	/*
 	 * Register Link Aggregation callbacks with the bonding driver
 	 */
-	ecm_bond_notifier_bond_cb.bond_cb_link_up = ecm_bond_notifier_bond_link_up;
-	ecm_bond_notifier_bond_cb.bond_cb_link_down = ecm_bond_notifier_bond_link_down;
-	ecm_bond_notifier_bond_cb.bond_cb_release = ecm_bond_notifier_bond_release;
-	ecm_bond_notifier_bond_cb.bond_cb_enslave = ecm_bond_notifier_bond_enslave;
-	bond_register_cb(&ecm_bond_notifier_bond_cb);
+	ecm_nss_bond_notifier_bond_cb.bond_cb_link_up = ecm_nss_bond_notifier_bond_link_up;
+	ecm_nss_bond_notifier_bond_cb.bond_cb_link_down = ecm_nss_bond_notifier_bond_link_down;
+	ecm_nss_bond_notifier_bond_cb.bond_cb_release = ecm_nss_bond_notifier_bond_release;
+	ecm_nss_bond_notifier_bond_cb.bond_cb_enslave = ecm_nss_bond_notifier_bond_enslave;
+	bond_register_cb(&ecm_nss_bond_notifier_bond_cb);
 
 	return 0;
 }
-EXPORT_SYMBOL(ecm_bond_notifier_init);
+EXPORT_SYMBOL(ecm_nss_bond_notifier_init);
 
 /*
- * ecm_bond_notifier_exit()
+ * ecm_nss_bond_notifier_exit()
  */
-void ecm_bond_notifier_exit(void)
+void ecm_nss_bond_notifier_exit(void)
 {
 	DEBUG_INFO("ECM Bonding Notifier exit\n");
 
@@ -370,8 +370,8 @@ void ecm_bond_notifier_exit(void)
 	/*
 	 * Remove the debugfs files recursively.
 	 */
-	if (ecm_bond_notifier_dentry) {
-		debugfs_remove_recursive(ecm_bond_notifier_dentry);
+	if (ecm_nss_bond_notifier_dentry) {
+		debugfs_remove_recursive(ecm_nss_bond_notifier_dentry);
 	}
 }
-EXPORT_SYMBOL(ecm_bond_notifier_exit);
+EXPORT_SYMBOL(ecm_nss_bond_notifier_exit);

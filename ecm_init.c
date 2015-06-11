@@ -67,12 +67,6 @@ extern void ecm_classifier_hyfi_rules_exit(void);
 extern int ecm_interface_init(void);
 extern void ecm_interface_exit(void);
 
-#ifdef ECM_INTERFACE_BOND_ENABLE
-extern int ecm_bond_notifier_init(struct dentry *dentry);
-extern void ecm_bond_notifier_stop(int);
-extern void ecm_bond_notifier_exit(void);
-#endif
-
 #ifdef ECM_CLASSIFIER_DSCP_ENABLE
 extern int ecm_classifier_dscp_init(struct dentry *dentry);
 extern void ecm_classifier_dscp_exit(void);
@@ -156,7 +150,7 @@ static int __init ecm_init(void)
 	}
 
 #ifdef ECM_INTERFACE_BOND_ENABLE
-	ret = ecm_bond_notifier_init(ecm_dentry);
+	ret = ecm_front_end_bond_notifier_init(ecm_dentry);
 	if (0 != ret) {
 		goto err_bond;
 	}
@@ -201,7 +195,7 @@ err_fe_ipv6:
 	ecm_front_end_ipv4_exit();
 err_fe_ipv4:
 #ifdef ECM_INTERFACE_BOND_ENABLE
-	ecm_bond_notifier_exit();
+	ecm_front_end_bond_notifier_exit();
 err_bond:
 #endif
 	ecm_interface_exit();
@@ -261,7 +255,7 @@ static void __exit ecm_exit(void)
 #endif
 #ifdef ECM_INTERFACE_BOND_ENABLE
 	DEBUG_INFO("stop bond notifier\n");
-	ecm_bond_notifier_stop(1);
+	ecm_front_end_bond_notifier_stop(1);
 #endif
 	DEBUG_INFO("defunct all db connections\n");
 	ecm_db_connection_defunct_all();
@@ -281,7 +275,7 @@ static void __exit ecm_exit(void)
 #endif
 #ifdef ECM_INTERFACE_BOND_ENABLE
 	DEBUG_INFO("exit bond notifier\n");
-	ecm_bond_notifier_exit();
+	ecm_front_end_bond_notifier_exit();
 #endif
 	DEBUG_INFO("exit interface\n");
 	ecm_interface_exit();

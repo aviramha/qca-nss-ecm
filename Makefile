@@ -41,7 +41,7 @@ ecm-y := \
 ifneq ($(findstring 3.4, $(KERNELVERSION)),)
 ECM_INTERFACE_BOND_ENABLE=y
 endif
-ecm-$(ECM_INTERFACE_BOND_ENABLE) += ecm_bond_notifier.o
+ecm-$(ECM_INTERFACE_BOND_ENABLE) += frontends/nss/ecm_nss_bond_notifier.o
 ccflags-$(ECM_INTERFACE_BOND_ENABLE) += -DECM_INTERFACE_BOND_ENABLE
 
 # #############################################################################

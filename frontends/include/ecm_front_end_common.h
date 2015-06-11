@@ -16,6 +16,7 @@
 
 #include <linux/if_pppox.h>
 #include "ecm_nss_conntrack_notifier.h"
+#include "ecm_nss_bond_notifier.h"
 
 /*
  * ecm_front_end_l2_encap_header_len()
@@ -54,3 +55,7 @@ static inline void ecm_front_end_push_l2_encap_header(struct sk_buff *skb, uint3
 extern void ecm_front_end_conntrack_notifier_stop(int num);
 extern int ecm_front_end_conntrack_notifier_init(struct dentry *dentry);
 extern void ecm_front_end_conntrack_notifier_exit(void);
+
+extern void ecm_front_end_bond_notifier_stop(int num);
+extern int ecm_front_end_bond_notifier_init(struct dentry *dentry);
+extern void ecm_front_end_bond_notifier_exit(void);

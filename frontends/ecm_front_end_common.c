@@ -46,7 +46,7 @@
 #include "ecm_tracker_udp.h"
 #include "ecm_tracker_tcp.h"
 #include "ecm_db.h"
-#include "ecm_nss_conntrack_notifier.h"
+#include "ecm_front_end_common.h"
 
 /*
  * ecm_front_end_conntrack_notifier_stop()
@@ -109,5 +109,69 @@ void ecm_front_end_conntrack_notifier_exit(void)
 	}
 #endif
 	ecm_nss_conntrack_notifier_exit();
+}
+
+
+/*
+ * ecm_front_end_bond_notifier_stop()
+ */
+void ecm_front_end_bond_notifier_stop(int num)
+{
+	/*
+	 * If the device tree is used, check which accel engine's bond notifier
+	 * will be stopped.
+	 * For ipq8064 platforms, we will stop NSS version.
+	 */
+#ifdef CONFIG_OF
+	/*
+	 * Check the other platforms and use the correct APIs for those platforms.
+	 */
+	if (!of_machine_is_compatible("qcom,ipq8064")) {
+		return;
+	}
+#endif
+	ecm_nss_bond_notifier_stop(num);
+}
+
+/*
+ * ecm_front_end_bond_notifier_init()
+ */
+int ecm_front_end_bond_notifier_init(struct dentry *dentry)
+{
+	/*
+	 * If the device tree is used, check which accel engine's bond notifier
+	 * can be used.
+	 * For ipq8064 platform, we will use NSS.
+	 */
+#ifdef CONFIG_OF
+	/*
+	 * Check the other platforms and use the correct APIs for those platforms.
+	 */
+	if (!of_machine_is_compatible("qcom,ipq8064")) {
+		return -1;
+	}
+#endif
+	return ecm_nss_bond_notifier_init(dentry);
+}
+
+/*
+ * ecm_front_end_bond_notifier_exit()
+ */
+void ecm_front_end_bond_notifier_exit(void)
+{
+	/*
+	 * If the device tree is used, check which accel engine's conntack notifier
+	 * will be exited.
+	 * For ipq8064 platforms, we will exit NSS.
+	 */
+#ifdef CONFIG_OF
+	/*
+	 * Check the other platforms and use the correct APIs for those platforms.
+	 */
+	if (!of_machine_is_compatible("qcom,ipq8064")) {
+		return;
+	}
+#endif
+	ecm_nss_bond_notifier_exit();
 }
 
