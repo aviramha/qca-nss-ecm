@@ -25,11 +25,12 @@ ecm-y := \
 	 ecm_tracker.o \
 	 frontends/ecm_front_end_ipv4.o \
 	 frontends/ecm_front_end_ipv6.o \
+	 frontends/ecm_front_end_common.o \
 	 frontends/nss/ecm_nss_ipv4.o \
 	 frontends/nss/ecm_nss_ported_ipv4.o \
 	 ecm_db.o \
 	 ecm_classifier_default.o \
-	 ecm_conntrack_notifier.o \
+	 frontends/nss/ecm_nss_conntrack_notifier.o \
 	 ecm_interface.o \
 	 ecm_init.o
 
@@ -195,6 +196,7 @@ ccflags-y += -DECM_DB_DEBUG_LEVEL=1
 ccflags-y += -DECM_INIT_DEBUG_LEVEL=3
 ccflags-y += -DECM_FRONT_END_IPV4_DEBUG_LEVEL=1
 ccflags-y += -DECM_FRONT_END_IPV6_DEBUG_LEVEL=1
+ccflags-y += -DECM_FRONT_END_COMMON_DEBUG_LEVEL=1
 ccflags-y += -DECM_NSS_IPV4_DEBUG_LEVEL=1
 ccflags-y += -DECM_NSS_PORTED_IPV4_DEBUG_LEVEL=1
 ccflags-y += -DECM_NSS_NON_PORTED_IPV4_DEBUG_LEVEL=1

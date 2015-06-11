@@ -15,7 +15,7 @@
  */
 
 /*
- * ecm_conntrack_notifier.c
+ * ecm_nss_conntrack_notifier.c
  * 	Conntrack notifier functionality.
  */
 
@@ -79,35 +79,35 @@
 #include "ecm_tracker_tcp.h"
 #include "ecm_tracker_datagram.h"
 #include "ecm_db.h"
-#include "ecm_front_end_ipv4.h"
+#include "ecm_nss_ipv4.h"
 #ifdef ECM_IPV6_ENABLE
-#include "ecm_front_end_ipv6.h"
+#include "ecm_nss_ipv6.h"
 #endif
 
 /*
  * Locking of the classifier - concurrency control
  */
-static DEFINE_SPINLOCK(ecm_conntrack_notifier_lock);				/* Protect against SMP access between netfilter, events and private threaded function. */
+static DEFINE_SPINLOCK(ecm_nss_conntrack_notifier_lock);				/* Protect against SMP access between netfilter, events and private threaded function. */
 
 /*
  * Debugfs dentry object.
  */
-static struct dentry *ecm_conntrack_notifier_dentry;
+static struct dentry *ecm_nss_conntrack_notifier_dentry;
 
 /*
  * General operational control
  */
-static int ecm_conntrack_notifier_stopped = 0;				/* When non-zero further traffic will not be processed */
+static int ecm_nss_conntrack_notifier_stopped = 0;				/* When non-zero further traffic will not be processed */
 
 #ifdef CONFIG_NF_CONNTRACK_EVENTS
 /*
- * ecm_conntrack_event()
+ * ecm_nss_conntrack_event()
  *	Callback event invoked when conntrack connection state changes, currently we handle destroy events to quickly release state
  */
 #ifdef CONFIG_NF_CONNTRACK_CHAIN_EVENTS
-static int ecm_conntrack_event(struct notifier_block *this, unsigned long events, void *ptr)
+static int ecm_nss_conntrack_event(struct notifier_block *this, unsigned long events, void *ptr)
 #else
-static int ecm_conntrack_event(unsigned int events, struct nf_ct_event *item)
+static int ecm_nss_conntrack_event(unsigned int events, struct nf_ct_event *item)
 #endif
 {
 #ifdef CONFIG_NF_CONNTRACK_CHAIN_EVENTS
@@ -118,13 +118,13 @@ static int ecm_conntrack_event(unsigned int events, struct nf_ct_event *item)
 	/*
 	 * If operations have stopped then do not process event
 	 */
-	spin_lock_bh(&ecm_conntrack_notifier_lock);
-	if (unlikely(ecm_conntrack_notifier_stopped)) {
+	spin_lock_bh(&ecm_nss_conntrack_notifier_lock);
+	if (unlikely(ecm_nss_conntrack_notifier_stopped)) {
 		DEBUG_WARN("Ignoring event - stopped\n");
-		spin_unlock_bh(&ecm_conntrack_notifier_lock);
+		spin_unlock_bh(&ecm_nss_conntrack_notifier_lock);
 		return NOTIFY_DONE;
 	}
-	spin_unlock_bh(&ecm_conntrack_notifier_lock);
+	spin_unlock_bh(&ecm_nss_conntrack_notifier_lock);
 
 	if (!ct) {
 		DEBUG_WARN("Error: no ct\n");
@@ -155,50 +155,50 @@ static int ecm_conntrack_event(unsigned int events, struct nf_ct_event *item)
 
 #ifdef CONFIG_NF_CONNTRACK_CHAIN_EVENTS
 /*
- * struct notifier_block ecm_conntrack_notifier
+ * struct notifier_block ecm_nss_conntrack_notifier
  *	Netfilter conntrack event system to monitor connection tracking changes
  */
-static struct notifier_block ecm_conntrack_notifier = {
-	.notifier_call	= ecm_conntrack_event,
+static struct notifier_block ecm_nss_conntrack_notifier = {
+	.notifier_call	= ecm_nss_conntrack_event,
 };
 #else
 /*
- * struct nf_ct_event_notifier ecm_conntrack_notifier
+ * struct nf_ct_event_notifier ecm_nss_conntrack_notifier
  *	Netfilter conntrack event system to monitor connection tracking changes
  */
-static struct nf_ct_event_notifier ecm_conntrack_notifier = {
-	.fcn	= ecm_conntrack_event,
+static struct nf_ct_event_notifier ecm_nss_conntrack_notifier = {
+	.fcn	= ecm_nss_conntrack_event,
 };
 #endif
 #endif
 
 /*
- * ecm_conntrack_notifier_stop()
+ * ecm_nss_conntrack_notifier_stop()
  */
-void ecm_conntrack_notifier_stop(int num)
+void ecm_nss_conntrack_notifier_stop(int num)
 {
-	ecm_conntrack_notifier_stopped = num;
+	ecm_nss_conntrack_notifier_stopped = num;
 }
-EXPORT_SYMBOL(ecm_conntrack_notifier_stop);
+EXPORT_SYMBOL(ecm_nss_conntrack_notifier_stop);
 
 /*
- * ecm_conntrack_notifier_init()
+ * ecm_nss_conntrack_notifier_init()
  */
-int ecm_conntrack_notifier_init(struct dentry *dentry)
+int ecm_nss_conntrack_notifier_init(struct dentry *dentry)
 {
 	int result;
 	DEBUG_INFO("ECM Conntrack Notifier init\n");
 
-	ecm_conntrack_notifier_dentry = debugfs_create_dir("ecm_conntrack_notifier", dentry);
-	if (!ecm_conntrack_notifier_dentry) {
+	ecm_nss_conntrack_notifier_dentry = debugfs_create_dir("ecm_nss_conntrack_notifier", dentry);
+	if (!ecm_nss_conntrack_notifier_dentry) {
 		DEBUG_ERROR("Failed to create ecm conntrack notifier directory in debugfs\n");
 		return -1;
 	}
 
-	if (!debugfs_create_u32("stop", S_IRUGO | S_IWUSR, ecm_conntrack_notifier_dentry,
-					(u32 *)&ecm_conntrack_notifier_stopped)) {
+	if (!debugfs_create_u32("stop", S_IRUGO | S_IWUSR, ecm_nss_conntrack_notifier_dentry,
+					(u32 *)&ecm_nss_conntrack_notifier_stopped)) {
 		DEBUG_ERROR("Failed to create ecm conntrack notifier stopped file in debugfs\n");
-		debugfs_remove_recursive(ecm_conntrack_notifier_dentry);
+		debugfs_remove_recursive(ecm_nss_conntrack_notifier_dentry);
 		return -1;
 	}
 
@@ -206,32 +206,32 @@ int ecm_conntrack_notifier_init(struct dentry *dentry)
 	/*
 	 * Eventing subsystem is available so we register a notifier hook to get fast notifications of expired connections
 	 */
-	result = nf_conntrack_register_notifier(&init_net, &ecm_conntrack_notifier);
+	result = nf_conntrack_register_notifier(&init_net, &ecm_nss_conntrack_notifier);
 	if (result < 0) {
 		DEBUG_ERROR("Can't register nf notifier hook.\n");
-		debugfs_remove_recursive(ecm_conntrack_notifier_dentry);
+		debugfs_remove_recursive(ecm_nss_conntrack_notifier_dentry);
 		return result;
 	}
 #endif
 
 	return 0;
 }
-EXPORT_SYMBOL(ecm_conntrack_notifier_init);
+EXPORT_SYMBOL(ecm_nss_conntrack_notifier_init);
 
 /*
- * ecm_conntrack_notifier_exit()
+ * ecm_nss_conntrack_notifier_exit()
  */
-void ecm_conntrack_notifier_exit(void)
+void ecm_nss_conntrack_notifier_exit(void)
 {
 	DEBUG_INFO("ECM Conntrack Notifier exit\n");
 #ifdef CONFIG_NF_CONNTRACK_EVENTS
-	nf_conntrack_unregister_notifier(&init_net, &ecm_conntrack_notifier);
+	nf_conntrack_unregister_notifier(&init_net, &ecm_nss_conntrack_notifier);
 #endif
 	/*
 	 * Remove the debugfs files recursively.
 	 */
-	if (ecm_conntrack_notifier_dentry) {
-		debugfs_remove_recursive(ecm_conntrack_notifier_dentry);
+	if (ecm_nss_conntrack_notifier_dentry) {
+		debugfs_remove_recursive(ecm_nss_conntrack_notifier_dentry);
 	}
 }
-EXPORT_SYMBOL(ecm_conntrack_notifier_exit);
+EXPORT_SYMBOL(ecm_nss_conntrack_notifier_exit);

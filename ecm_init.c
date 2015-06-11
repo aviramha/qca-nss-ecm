@@ -43,6 +43,7 @@
 #ifdef ECM_IPV6_ENABLE
 #include "ecm_front_end_ipv6.h"
 #endif
+#include "ecm_front_end_common.h"
 
 struct dentry *ecm_dentry;	/* Dentry object for top level ecm debugfs directory */
 
@@ -71,10 +72,6 @@ extern int ecm_bond_notifier_init(struct dentry *dentry);
 extern void ecm_bond_notifier_stop(int);
 extern void ecm_bond_notifier_exit(void);
 #endif
-
-extern int ecm_conntrack_notifier_init(struct dentry *dentry);
-extern void ecm_conntrack_notifier_stop(int);
-extern void ecm_conntrack_notifier_exit(void);
 
 #ifdef ECM_CLASSIFIER_DSCP_ENABLE
 extern int ecm_classifier_dscp_init(struct dentry *dentry);
@@ -177,7 +174,7 @@ static int __init ecm_init(void)
 	}
 #endif
 
-	ret = ecm_conntrack_notifier_init(ecm_dentry);
+	ret = ecm_front_end_conntrack_notifier_init(ecm_dentry);
 	if (0 != ret) {
 		goto err_ct;
 	}
@@ -194,7 +191,7 @@ static int __init ecm_init(void)
 
 #ifdef ECM_STATE_OUTPUT_ENABLE
 err_state:
-	ecm_conntrack_notifier_exit();
+	ecm_front_end_conntrack_notifier_exit();
 #endif
 err_ct:
 #ifdef ECM_IPV6_ENABLE
@@ -255,7 +252,7 @@ static void __exit ecm_exit(void)
 
 	/* call stop on anything that requires a prepare-to-exit signal */
 	DEBUG_INFO("stop conntrack notifier\n");
-	ecm_conntrack_notifier_stop(1);
+	ecm_front_end_conntrack_notifier_stop(1);
 	DEBUG_INFO("stop front_end_ipv4\n");
 	ecm_front_end_ipv4_stop(1);
 #ifdef ECM_IPV6_ENABLE
@@ -275,7 +272,7 @@ static void __exit ecm_exit(void)
 	ecm_state_exit();
 #endif
 	DEBUG_INFO("exit conntrack notifier\n");
-	ecm_conntrack_notifier_exit();
+	ecm_front_end_conntrack_notifier_exit();
 	DEBUG_INFO("exit front_end_ipv4\n");
 	ecm_front_end_ipv4_exit();
 #ifdef ECM_IPV6_ENABLE

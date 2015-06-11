@@ -14,8 +14,8 @@
  **************************************************************************
  */
 
-#ifndef _ECM_FRONT_END_COMMON_
-#define _ECM_FRONT_END_COMMON_
+#include <linux/if_pppox.h>
+#include "ecm_nss_conntrack_notifier.h"
 
 /*
  * ecm_front_end_l2_encap_header_len()
@@ -35,7 +35,7 @@ static inline uint32_t ecm_front_end_l2_encap_header_len(struct sk_buff *skb)
  * ecm_front_end_pull_l2_encap_header()
  *      Pull encapsulating L2 header
  */
-static void ecm_front_end_pull_l2_encap_header(struct sk_buff *skb, uint32_t len)
+static inline void ecm_front_end_pull_l2_encap_header(struct sk_buff *skb, uint32_t len)
 {
 	skb->data += len;
 	skb->network_header += len;
@@ -45,10 +45,12 @@ static void ecm_front_end_pull_l2_encap_header(struct sk_buff *skb, uint32_t len
  * ecm_front_end_push_l2_encap_header()
  *      Push encapsulating L2 header
  */
-static void ecm_front_end_push_l2_encap_header(struct sk_buff *skb, uint32_t len)
+static inline void ecm_front_end_push_l2_encap_header(struct sk_buff *skb, uint32_t len)
 {
 	skb->data -= len;
 	skb->network_header -= len;
 }
 
-#endif
+extern void ecm_front_end_conntrack_notifier_stop(int num);
+extern int ecm_front_end_conntrack_notifier_init(struct dentry *dentry);
+extern void ecm_front_end_conntrack_notifier_exit(void);
