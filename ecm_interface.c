@@ -1878,7 +1878,7 @@ int32_t ecm_interface_multicast_heirarchy_construct_routed(struct ecm_db_iface_i
 	uint32_t *interface_first;
 	uint32_t br_if;
 	uint32_t valid_if;
-        uint32_t if_num;
+	int32_t if_num;
 	int32_t dest_dev_type;
 	int if_index;
 	int ii_cnt;
@@ -1963,6 +1963,11 @@ int32_t ecm_interface_multicast_heirarchy_construct_routed(struct ecm_db_iface_i
 				ECM_IP_ADDR_TO_NIN6_ADDR(origin6, packet_src_addr);
 				ECM_IP_ADDR_TO_NIN6_ADDR(group6, packet_dest_addr);
 				if_num = mc_bridge_ipv6_get_if(dest_dev, &origin6, &group6, mc_max_dst, mc_dst_if_index);
+			}
+
+			if ((if_num <= 0) || (if_num > ECM_DB_MULTICAST_IF_MAX)) {
+				dev_put(dest_dev);
+				return 0;
 			}
 
 			for (br_if = 0; br_if < if_num; br_if++) {
