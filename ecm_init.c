@@ -13,11 +13,36 @@
  * OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  **************************************************************************
  */
+#include <linux/version.h>
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/debugfs.h>
+#include <linux/inet.h>
+#include <linux/etherdevice.h>
+#include <net/netfilter/nf_conntrack.h>
+#include <net/ip.h>
+#include <net/ipv6.h>
+/*
+ * Debug output levels
+ * 0 = OFF
+ * 1 = ASSERTS / ERRORS
+ * 2 = 1 + WARN
+ * 3 = 2 + INFO
+ * 4 = 3 + TRACE
+ */
+#define DEBUG_LEVEL ECM_INIT_DEBUG_LEVEL
 
+#include <nss_api_if.h>
+#include "ecm_types.h"
+#include "ecm_db_types.h"
+#include "ecm_state.h"
+#include "ecm_tracker.h"
+#include "ecm_classifier.h"
+#include "ecm_front_end_types.h"
 #include "ecm_front_end_ipv4.h"
+#ifdef ECM_IPV6_ENABLE
+#include "ecm_front_end_ipv6.h"
+#endif
 
 struct dentry *ecm_dentry;	/* Dentry object for top level ecm debugfs directory */
 
@@ -45,16 +70,6 @@ extern void ecm_interface_exit(void);
 extern int ecm_bond_notifier_init(struct dentry *dentry);
 extern void ecm_bond_notifier_stop(int);
 extern void ecm_bond_notifier_exit(void);
-#endif
-
-extern int ecm_front_end_ipv4_init(struct dentry *dentry);
-extern void ecm_front_end_ipv4_stop(int);
-extern void ecm_front_end_ipv4_exit(void);
-
-#ifdef ECM_IPV6_ENABLE
-extern int ecm_front_end_ipv6_init(struct dentry *dentry);
-extern void ecm_front_end_ipv6_stop(int);
-extern void ecm_front_end_ipv6_exit(void);
 #endif
 
 extern int ecm_conntrack_notifier_init(struct dentry *dentry);
@@ -88,7 +103,7 @@ static int __init ecm_init(void)
 	 */
 #ifdef CONFIG_OF
 	if (!of_machine_is_compatible("qcom,ipq8064")) {
-		printk(KERN_WARNING "Not compatible platform for ECM\n");
+		DEBUG_WARN("Not compatible platform for ECM\n");
 		return 0;
 	}
 #endif
@@ -96,7 +111,7 @@ static int __init ecm_init(void)
 
 	ecm_dentry = debugfs_create_dir("ecm", NULL);
 	if (!ecm_dentry) {
-		printk("Failed to create ecm directory in debugfs\n");
+		DEBUG_ERROR("Failed to create ecm directory in debugfs\n");
 		return -1;
 	}
 
@@ -239,64 +254,64 @@ static void __exit ecm_exit(void)
 #endif
 
 	/* call stop on anything that requires a prepare-to-exit signal */
-	printk(KERN_INFO "stop conntrack notifier\n");
+	DEBUG_INFO("stop conntrack notifier\n");
 	ecm_conntrack_notifier_stop(1);
-	printk(KERN_INFO "stop front_end_ipv4\n");
+	DEBUG_INFO("stop front_end_ipv4\n");
 	ecm_front_end_ipv4_stop(1);
 #ifdef ECM_IPV6_ENABLE
-	printk(KERN_INFO "stop front_end_ipv6\n");
+	DEBUG_INFO("stop front_end_ipv6\n");
 	ecm_front_end_ipv6_stop(1);
 #endif
 #ifdef ECM_INTERFACE_BOND_ENABLE
-	printk(KERN_INFO "stop bond notifier\n");
+	DEBUG_INFO("stop bond notifier\n");
 	ecm_bond_notifier_stop(1);
 #endif
-	printk(KERN_INFO "defunct all db connections\n");
+	DEBUG_INFO("defunct all db connections\n");
 	ecm_db_connection_defunct_all();
 
 	/* now call exit on each module */
 #ifdef ECM_STATE_OUTPUT_ENABLE
-	printk(KERN_INFO "stop state\n");
+	DEBUG_INFO("stop state\n");
 	ecm_state_exit();
 #endif
-	printk(KERN_INFO "exit conntrack notifier\n");
+	DEBUG_INFO("exit conntrack notifier\n");
 	ecm_conntrack_notifier_exit();
-	printk(KERN_INFO "exit front_end_ipv4\n");
+	DEBUG_INFO("exit front_end_ipv4\n");
 	ecm_front_end_ipv4_exit();
 #ifdef ECM_IPV6_ENABLE
-	printk(KERN_INFO "exit front_end_ipv6\n");
+	DEBUG_INFO("exit front_end_ipv6\n");
 	ecm_front_end_ipv6_exit();
 #endif
 #ifdef ECM_INTERFACE_BOND_ENABLE
-	printk(KERN_INFO "exit bond notifier\n");
+	DEBUG_INFO("exit bond notifier\n");
 	ecm_bond_notifier_exit();
 #endif
-	printk(KERN_INFO "exit interface\n");
+	DEBUG_INFO("exit interface\n");
 	ecm_interface_exit();
 
 #ifdef ECM_CLASSIFIER_PCC_ENABLE
-	printk(KERN_INFO "exit pcc classifier\n");
+	DEBUG_INFO("exit pcc classifier\n");
 	ecm_classifier_pcc_exit();
 #endif
 #ifdef ECM_CLASSIFIER_DSCP_ENABLE
-	printk(KERN_INFO "exit dscp classifier\n");
+	DEBUG_INFO("exit dscp classifier\n");
 	ecm_classifier_dscp_exit();
 #endif
 #ifdef ECM_CLASSIFIER_HYFI_ENABLE
-	printk(KERN_INFO "exit hyfi classifier\n");
+	DEBUG_INFO("exit hyfi classifier\n");
 	ecm_classifier_hyfi_rules_exit();
 #endif
 #ifdef ECM_CLASSIFIER_NL_ENABLE
-	printk(KERN_INFO "exit nl classifier\n");
+	DEBUG_INFO("exit nl classifier\n");
 	ecm_classifier_nl_rules_exit();
 #endif
-	printk(KERN_INFO "exit default classifier\n");
+	DEBUG_INFO("exit default classifier\n");
 	ecm_classifier_default_exit();
-	printk(KERN_INFO "exit db\n");
+	DEBUG_INFO("exit db\n");
 	ecm_db_exit();
 
 	if (ecm_dentry != NULL) {
-		printk("remove ecm debugfs\n");
+		DEBUG_INFO("remove ecm debugfs\n");
 		debugfs_remove_recursive(ecm_dentry);
 	}
 

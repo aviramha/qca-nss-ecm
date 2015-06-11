@@ -79,8 +79,6 @@
 #include "ecm_tracker_tcp.h"
 #include "ecm_tracker_datagram.h"
 #include "ecm_db.h"
-#include "ecm_classifier_default.h"
-#include "ecm_nss_ipv4.h"
 #include "ecm_front_end_ipv4.h"
 #ifdef ECM_IPV6_ENABLE
 #include "ecm_front_end_ipv6.h"
@@ -149,7 +147,7 @@ static int ecm_conntrack_event(unsigned int events, struct nf_ct_event *item)
 	}
 #ifdef ECM_IPV6_ENABLE
 	if (nf_ct_l3num(ct) == AF_INET6) {
-		return ecm_front_end_ipv6_conntrack_event(events, ct);
+		return ecm_nss_ipv6_conntrack_event(events, ct);
 	}
 #endif
 	return NOTIFY_DONE;

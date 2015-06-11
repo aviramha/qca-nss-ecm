@@ -64,7 +64,7 @@
  * 3 = 2 + INFO
  * 4 = 3 + TRACE
  */
-#define DEBUG_LEVEL ECM_FRONT_END_IPV4_DEBUG_LEVEL
+#define DEBUG_LEVEL ECM_NSS_PORTED_IPV4_DEBUG_LEVEL
 
 #include <nss_api_if.h>
 
@@ -79,15 +79,6 @@
 #include "ecm_tracker_tcp.h"
 #include "ecm_db.h"
 #include "ecm_classifier_default.h"
-#ifdef ECM_CLASSIFIER_NL_ENABLE
-#include "ecm_classifier_nl.h"
-#endif
-#ifdef ECM_CLASSIFIER_HYFI_ENABLE
-#include "ecm_classifier_hyfi.h"
-#endif
-#ifdef ECM_CLASSIFIER_DSCP_ENABLE
-#include "ecm_classifier_dscp.h"
-#endif
 #include "ecm_interface.h"
 #include "ecm_nss_ported_ipv4.h"
 #include "ecm_nss_ipv4.h"

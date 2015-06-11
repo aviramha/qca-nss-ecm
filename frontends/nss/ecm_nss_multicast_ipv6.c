@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2014,2015 The Linux Foundation.  All rights reserved.
+ * Copyright (c) 2014-2015 The Linux Foundation.  All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -21,27 +21,29 @@
 #include <linux/module.h>
 #include <linux/skbuff.h>
 #include <linux/icmp.h>
-#include <linux/sysctl.h>
-#include <linux/kthread.h>
-#include <linux/device.h>
-#include <linux/fs.h>
-#include <linux/pkt_sched.h>
 #include <linux/debugfs.h>
+#include <linux/kthread.h>
+#include <linux/pkt_sched.h>
 #include <linux/string.h>
-#include <net/route.h>
-#include <net/ip.h>
+#include <net/ip6_route.h>
+#include <net/ip6_fib.h>
+#include <net/addrconf.h>
+#include <net/ipv6.h>
+#include <net/tcp.h>
 #include <asm/unaligned.h>
 #include <asm/uaccess.h>	/* for put_user */
 #include <net/ipv6.h>
 #include <linux/inet.h>
-#include <linux/in.h>
+#include <linux/in6.h>
 #include <linux/udp.h>
-#include <linux/mroute.h>
+#include <linux/tcp.h>
+#include <linux/ppp_defs.h>
+#include <linux/mroute6.h>
 #include <linux/vmalloc.h>
 
 #include <linux/inetdevice.h>
 #include <linux/if_arp.h>
-#include <linux/netfilter_ipv4.h>
+#include <linux/netfilter_ipv6.h>
 #include <linux/netfilter_bridge.h>
 #include <linux/if_bridge.h>
 #include <net/arp.h>
@@ -52,8 +54,8 @@
 #include <net/netfilter/nf_conntrack_l3proto.h>
 #include <net/netfilter/nf_conntrack_zones.h>
 #include <net/netfilter/nf_conntrack_core.h>
-#include <net/netfilter/ipv4/nf_conntrack_ipv4.h>
-#include <net/netfilter/ipv4/nf_defrag_ipv4.h>
+#include <net/netfilter/ipv6/nf_conntrack_ipv6.h>
+#include <net/netfilter/ipv6/nf_defrag_ipv6.h>
 #ifdef ECM_INTERFACE_VLAN_ENABLE
 #include <linux/../../net/8021q/vlan.h>
 #include <linux/if_vlan.h>
@@ -67,7 +69,7 @@
  * 3 = 2 + INFO
  * 4 = 3 + TRACE
  */
-#define DEBUG_LEVEL ECM_NSS_MULTICAST_IPV4_DEBUG_LEVEL
+#define DEBUG_LEVEL ECM_NSS_MULTICAST_IPV6_DEBUG_LEVEL
 
 #include <nss_api_if.h>
 #include <mc_ecm.h>
@@ -84,57 +86,59 @@
 #include "ecm_db.h"
 #include "ecm_classifier_default.h"
 #include "ecm_interface.h"
-#include "ecm_nss_ipv4.h"
-#include "ecm_nss_multicast_ipv4.h"
+#include "ecm_nss_ipv6.h"
+#include "ecm_nss_multicast_ipv6.h"
 
 /*
  * Magic numbers
  */
-#define ECM_NSS_MULTICAST_IPV4_CONNECTION_INSTANCE_MAGIC 0xED12
+#define ECM_NSS_MULTICAST_IPV6_CONNECTION_INSTANCE_MAGIC 0xED13
 
 /*
- * struct ecm_nss_ipv4_multicast_connection_instance
+ * struct ecm_nss_ipv6_multicast_connection_instance
  *	A connection specific front end instance for MULTICAST connections
  */
-struct ecm_nss_multicast_ipv4_connection_instance {
+struct ecm_nss_multicast_ipv6_connection_instance {
 	struct ecm_front_end_connection_instance base;		/* Base class */
 #if (DEBUG_LEVEL > 0)
 	uint16_t magic;
 #endif
 };
 
-static int ecm_nss_multicast_ipv4_accelerated_count = 0;
-						/* Array of Number of TCP and UDP connections currently offloaded */
+static int ecm_nss_multicast_ipv6_accelerated_count = 0;
+						/* Number of IPv6 multicast connections currently offloaded */
 
 /*
- * ecm_nss_multicast_connection_to_interface_heirarchy_construct()
- * 	Create destination interface heirarchy for a routed/bridge multicast connection
+ * ecm_nss_multicast_ipv6_interface_heirarchy_construct()
+ *   Create destination multicast interface heirachy for Route/Bridge connection flow
  */
-static int32_t ecm_nss_multicast_connection_to_interface_heirarchy_construct(struct ecm_db_iface_instance *interfaces, ip_addr_t ip_src_addr, ip_addr_t ip_dest_addr,
-								      struct net_device *in_dev, struct net_device *brdev, uint8_t max_if, uint32_t *dst_dev,
-								      uint32_t *to_list_first, bool is_routed)
+static int ecm_nss_multicast_ipv6_interface_heirarchy_construct(struct ecm_db_iface_instance *interfaces, struct net_device *in_dev,
+								  struct net_device *brdev, ip_addr_t packet_src_addr, ip_addr_t packet_dest_addr, uint8_t max_if,
+								  uint32_t *dst_dev, int32_t *to_interface_first, bool is_routed)
 {
-	int interface_instance_cnt;
-	if (is_routed) {
-		interface_instance_cnt = ecm_interface_multicast_heirarchy_construct_routed(interfaces, in_dev, ip_src_addr, ip_dest_addr, max_if, dst_dev, to_list_first);
-	} else {
-		interface_instance_cnt = ecm_interface_multicast_heirarchy_construct_bridged(interfaces, brdev, ip_src_addr, ip_dest_addr, max_if, dst_dev, to_list_first);
-	}
+	int32_t iface_instance_cnt;
 
-	return interface_instance_cnt;
+	if (is_routed) {
+		iface_instance_cnt = ecm_interface_multicast_heirarchy_construct_routed(interfaces, in_dev, packet_src_addr, packet_dest_addr, max_if, dst_dev, to_interface_first);
+	} else {
+		iface_instance_cnt = ecm_interface_multicast_heirarchy_construct_bridged(interfaces, brdev, packet_src_addr, packet_dest_addr, max_if, dst_dev, to_interface_first);
+	}
+	return iface_instance_cnt;
 }
 
 /*
- * ecm_nss_multicast_ipv4_connection_update_callback()
- * 	Callback for handling Ack/Nack for update accelerate rules
+ * ecm_nss_multicast_ipv6_connection_update_callback()
+ * 	Callback for handling Ack/Nack for update accelerate rules.
  */
-static void ecm_nss_multicast_ipv4_connection_update_callback(void *app_data, struct nss_ipv4_msg *nim)
+static void ecm_nss_multicast_ipv6_connection_update_callback(void *app_data, struct nss_ipv6_msg *nim)
 {
-	struct nss_ipv4_mc_rule_create_msg *nircm = &nim->msg.mc_rule_create;
+	struct nss_ipv6_mc_rule_create_msg *nircm = &nim->msg.mc_rule_create;
 	uint32_t serial = (uint32_t)app_data;
 	struct ecm_db_connection_instance *ci;
 	struct ecm_front_end_connection_instance *feci;
-	struct ecm_nss_multicast_ipv4_connection_instance *nmci;
+	struct ecm_nss_multicast_ipv6_connection_instance *nmci;
+	ip_addr_t flow_ip;
+	ip_addr_t return_ip;
 
 	/*TODO: If the response is NACK then decelerate the flow and flushes all rules */
 	DEBUG_TRACE("%p: update callback, response received from FW : %u\n", nim, nim->cm.response);
@@ -142,7 +146,7 @@ static void ecm_nss_multicast_ipv4_connection_update_callback(void *app_data, st
 	/*
 	 * Is this a response to a create message?
 	 */
-	if (nim->cm.type != NSS_IPV4_TX_CREATE_MC_RULE_MSG) {
+	if (nim->cm.type != NSS_IPV6_TX_CREATE_MC_RULE_MSG) {
 		DEBUG_ERROR("%p: multicast update callback with improper type: %d, serial: %u\n", nim, nim->cm.type, serial);
 		return;
 	}
@@ -150,7 +154,7 @@ static void ecm_nss_multicast_ipv4_connection_update_callback(void *app_data, st
 	/*
 	 * Is this a response to a update rule message?
 	 */
-	if ( !(nircm->rule_flags & NSS_IPV4_MC_RULE_CREATE_FLAG_MC_UPDATE)) {
+	if ( !(nircm->rule_flags & NSS_IPV6_MC_RULE_CREATE_FLAG_MC_UPDATE)) {
 		DEBUG_ERROR("%p: multicast update callback with improper type: %d, serial: %u\n", nim, nim->cm.type, serial);
 		return;
 	}
@@ -175,16 +179,16 @@ static void ecm_nss_multicast_ipv4_connection_update_callback(void *app_data, st
 	 * Get the front end instance
 	 */
 	feci = ecm_db_connection_front_end_get_and_ref(ci);
-	nmci = (struct ecm_nss_multicast_ipv4_connection_instance *)feci;
-	DEBUG_CHECK_MAGIC(nmci, ECM_NSS_MULTICAST_IPV4_CONNECTION_INSTANCE_MAGIC, "%p: magic failed", nmci);
+	nmci = (struct ecm_nss_multicast_ipv6_connection_instance *)feci;
+	DEBUG_CHECK_MAGIC(nmci, ECM_NSS_MULTICAST_IPV6_CONNECTION_INSTANCE_MAGIC, "%p: magic failed", nmci);
 
 	/*
 	 * Dump some useful trace information.
 	 */
 	DEBUG_TRACE("%p: Update accelerate response for connection: %p, serial: %u\n", nmci, feci->ci, serial);
 	DEBUG_TRACE("%p: valid_flags: %x\n", nmci, nircm->valid_flags);
-	DEBUG_TRACE("%p: flow_ip: %pI4h:%d\n", nmci, &nircm->tuple.flow_ip, nircm->tuple.flow_ident);
-	DEBUG_TRACE("%p: return_ip: %pI4h:%d\n", nmci, &nircm->tuple.return_ip, nircm->tuple.return_ident);
+	DEBUG_TRACE("%p: flow_ip: " ECM_IP_ADDR_OCTAL_FMT ":%d\n", nmci, ECM_IP_ADDR_TO_OCTAL(flow_ip), nircm->tuple.flow_ident);
+	DEBUG_TRACE("%p: return_ip: " ECM_IP_ADDR_OCTAL_FMT ":%d\n", nmci, ECM_IP_ADDR_TO_OCTAL(return_ip), nircm->tuple.return_ident);
 	DEBUG_TRACE("%p: protocol: %d\n", nmci, nircm->tuple.protocol);
 
 	/*
@@ -196,21 +200,23 @@ static void ecm_nss_multicast_ipv4_connection_update_callback(void *app_data, st
 }
 
 /*
- * ecm_nss_multicast_ipv4_connection_create_callback()
+ * ecm_nss_multicast_ipv6_connection_create_callback()
  * 	callback for handling create ack/nack calls for multicast create commands.
  */
-static void ecm_nss_multicast_ipv4_connection_create_callback(void *app_data, struct nss_ipv4_msg *nim)
+static void ecm_nss_multicast_ipv6_connection_create_callback(void *app_data, struct nss_ipv6_msg *nim)
 {
-	struct nss_ipv4_mc_rule_create_msg *__attribute__((unused))nircm = &nim->msg.mc_rule_create;
+	struct nss_ipv6_mc_rule_create_msg *__attribute__((unused))nircm = &nim->msg.mc_rule_create;
 	uint32_t serial = (uint32_t)app_data;
 	struct ecm_db_connection_instance *ci;
 	struct ecm_front_end_connection_instance *feci;
-	struct ecm_nss_multicast_ipv4_connection_instance *nmci;
+	struct ecm_nss_multicast_ipv6_connection_instance *nmci;
+	ip_addr_t flow_ip;
+	ip_addr_t return_ip;
 
 	/*
 	 * Is this a response to a create message?
 	 */
-	if (nim->cm.type != NSS_IPV4_TX_CREATE_MC_RULE_MSG) {
+	if (nim->cm.type != NSS_IPV6_TX_CREATE_MC_RULE_MSG) {
 		DEBUG_ERROR("%p: udp create callback with improper type: %d, serial: %u\n", nim, nim->cm.type, serial);
 		return;
 	}
@@ -235,16 +241,19 @@ static void ecm_nss_multicast_ipv4_connection_create_callback(void *app_data, st
 	 * Get the front end instance
 	 */
 	feci = ecm_db_connection_front_end_get_and_ref(ci);
-	nmci = (struct ecm_nss_multicast_ipv4_connection_instance *)feci;
-	DEBUG_CHECK_MAGIC(nmci, ECM_NSS_MULTICAST_IPV4_CONNECTION_INSTANCE_MAGIC, "%p: magic failed", nmci);
+	nmci = (struct ecm_nss_multicast_ipv6_connection_instance *)feci;
+	DEBUG_CHECK_MAGIC(nmci, ECM_NSS_MULTICAST_IPV6_CONNECTION_INSTANCE_MAGIC, "%p: magic failed", nmci);
+
+	ECM_NSS_IPV6_ADDR_TO_IP_ADDR(flow_ip, nircm->tuple.flow_ip);
+	ECM_NSS_IPV6_ADDR_TO_IP_ADDR(return_ip, nircm->tuple.return_ip);
 
 	/*
 	 * Dump some useful trace information.
 	 */
 	DEBUG_TRACE("%p: accelerate response for connection: %p, serial: %u\n", nmci, feci->ci, serial);
-	DEBUG_TRACE("%p: valid_flags: %x\n", nmci, nircm->valid_flags);
-	DEBUG_TRACE("%p: flow_ip: %pI4h:%d\n", nmci, &nircm->tuple.flow_ip, nircm->tuple.flow_ident);
-	DEBUG_TRACE("%p: return_ip: %pI4h:%d\n", nmci, &nircm->tuple.return_ip, nircm->tuple.return_ident);
+	DEBUG_TRACE("%p: rule_flags: %x, valid_flags: %x\n", nmci, nircm->rule_flags, nircm->valid_flags);
+	DEBUG_TRACE("%p: flow_ip: " ECM_IP_ADDR_OCTAL_FMT ":%d\n", nmci, ECM_IP_ADDR_TO_OCTAL(flow_ip), nircm->tuple.flow_ident);
+	DEBUG_TRACE("%p: return_ip: " ECM_IP_ADDR_OCTAL_FMT ":%d\n", nmci, ECM_IP_ADDR_TO_OCTAL(return_ip), nircm->tuple.return_ident);
 	DEBUG_TRACE("%p: protocol: %d\n", nmci, nircm->tuple.protocol);
 
 	/*
@@ -258,8 +267,8 @@ static void ecm_nss_multicast_ipv4_connection_create_callback(void *app_data, st
 		DEBUG_TRACE("%p: accel nack: %d\n", nmci, nim->cm.error);
 		spin_lock_bh(&feci->lock);
 		DEBUG_ASSERT(feci->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING, "%p: Unexpected mode: %d\n", ci, feci->accel_mode);
-		nmci->base.stats.nss_nack++;
-		nmci->base.stats.nss_nack_total++;
+		feci->stats.nss_nack++;
+		feci->stats.nss_nack_total++;
 		if (nmci->base.stats.nss_nack >= nmci->base.stats.nss_nack_limit) {
 			/*
 			 * Too many NSS rejections
@@ -331,10 +340,10 @@ static void ecm_nss_multicast_ipv4_connection_create_callback(void *app_data, st
 	/*
 	 * Create succeeded, declare that we are accelerated.
 	 */
-	spin_lock_bh(&ecm_nss_ipv4_lock);
-	ecm_nss_multicast_ipv4_accelerated_count++;	/* Protocol specific counter */
-	ecm_nss_ipv4_accelerated_count++;		/* General running counter */
-	spin_unlock_bh(&ecm_nss_ipv4_lock);
+	spin_lock_bh(&ecm_nss_ipv6_lock);
+	ecm_nss_multicast_ipv6_accelerated_count++;	/* Protocol specific counter */
+	ecm_nss_ipv6_accelerated_count++;		/* General running counter */
+	spin_unlock_bh(&ecm_nss_ipv6_lock);
 
 	/*
 	 * Clear any nack count
@@ -346,6 +355,7 @@ static void ecm_nss_multicast_ipv4_connection_create_callback(void *app_data, st
 	 * If decelerate is pending then we need to begin deceleration :-(
 	 */
 	if (!nmci->base.stats.decelerate_pending) {
+
 		/*
 		 * Increement the no-action counter, this is reset if offload action is seen
 		 */
@@ -375,30 +385,29 @@ static void ecm_nss_multicast_ipv4_connection_create_callback(void *app_data, st
 }
 
 /*
- * ecm_nss_multicast_ipv4_connection_update_accelerate()
+ * ecm_nss_multicast_ipv6_connection_update_accelerate()
  * 	Push destination interface list updates for a multicast connection
  * 	to NSS
  *
  * 	This function receives a list of interfaces that have either left or joined the connection,
  * 	and sends a 'multicast update' command to NSS to inform about these interface state changes.
  */
-static int ecm_nss_multicast_ipv4_connection_update_accelerate(struct ecm_front_end_connection_instance *feci,
+static int ecm_nss_multicast_ipv6_connection_update_accelerate(struct ecm_front_end_connection_instance *feci,
 							       struct ecm_multicast_if_update *rp, bool is_br_flow)
 {
-	struct ecm_nss_multicast_ipv4_connection_instance *nmci = (struct ecm_nss_multicast_ipv4_connection_instance *)feci;
+	struct ecm_nss_multicast_ipv6_connection_instance *nmci = (struct ecm_nss_multicast_ipv6_connection_instance *)feci;
 	struct ecm_db_iface_instance *to_ifaces;
 	struct ecm_db_iface_instance *ii_temp;
 	struct ecm_db_iface_instance *ii_single;
 	struct ecm_db_iface_instance **ifaces;
 	struct ecm_db_iface_instance *from_ifaces[ECM_DB_IFACE_HEIRARCHY_MAX];
 	struct ecm_db_iface_instance *from_nss_iface;
-	struct nss_ipv4_mc_rule_create_msg *create;
-	struct nss_ipv4_msg *nim;
-	ip_addr_t addr;
 	int32_t *to_ifaces_first;
 	int32_t *to_ii_first;
-	int32_t vif;
-	int32_t ret;
+	struct nss_ipv6_msg *nim;
+	struct nss_ipv6_mc_rule_create_msg *create;
+	ip_addr_t addr;
+	int32_t ret, vif;
 	int32_t valid_vif_idx = 0;
 	int32_t from_ifaces_first;
 	int32_t to_nss_iface_id = 0;
@@ -411,16 +420,16 @@ static int ecm_nss_multicast_ipv4_connection_update_accelerate(struct ecm_front_
 	bool rule_invalid;
 	uint8_t dest_mac[ETH_ALEN];
 
-	DEBUG_INFO("%p: Accel conn: %p\n", nmci, feci->ci);
+	DEBUG_INFO("%p: UPDATE Accel conn: %p\n", nmci, feci->ci);
 
-	nim = (struct nss_ipv4_msg *)vzalloc(sizeof(struct nss_ipv4_msg));
+	nim = (struct nss_ipv6_msg *)vzalloc(sizeof(struct nss_ipv6_msg));
 	if (!nim) {
 		return -1;
 	}
 
-	nss_cmn_msg_init(&nim->cm, NSS_IPV4_RX_INTERFACE, NSS_IPV4_TX_CREATE_MC_RULE_MSG,
-			sizeof(struct nss_ipv4_mc_rule_create_msg),
-			ecm_nss_multicast_ipv4_connection_update_callback,
+	nss_cmn_msg_init(&nim->cm, NSS_IPV6_RX_INTERFACE, NSS_IPV6_TX_CREATE_MC_RULE_MSG,
+			sizeof(struct nss_ipv6_mc_rule_create_msg),
+			ecm_nss_multicast_ipv6_connection_update_callback,
 			(void *)ecm_db_connection_serial_get(feci->ci));
 
 	create = &nim->msg.mc_rule_create;
@@ -443,8 +452,8 @@ static int ecm_nss_multicast_ipv4_connection_update_accelerate(struct ecm_front_
 		return -1;
 	}
 
-	create->ingress_vlan_tag[0] =   ECM_NSS_CONNMGR_VLAN_ID_NOT_CONFIGURED;
-	create->ingress_vlan_tag[1] =   ECM_NSS_CONNMGR_VLAN_ID_NOT_CONFIGURED;
+	create->ingress_vlan_tag[0] = ECM_NSS_CONNMGR_VLAN_ID_NOT_CONFIGURED;
+	create->ingress_vlan_tag[1] = ECM_NSS_CONNMGR_VLAN_ID_NOT_CONFIGURED;
 
 	/*
 	 * Set the source NSS interface identifier
@@ -453,11 +462,6 @@ static int ecm_nss_multicast_ipv4_connection_update_accelerate(struct ecm_front_
 	from_nss_iface_id = ecm_db_iface_nss_interface_identifier_get(from_nss_iface);
 	if (from_nss_iface_id < 0) {
                 DEBUG_TRACE("%p: from_nss_iface_id: %d\n", nmci, from_nss_iface_id);
-		spin_lock_bh(&feci->lock);
-		if (feci->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL) {
-			feci->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_NO_ACTION;
-		}
-		spin_unlock_bh(&feci->lock);
 		ecm_db_connection_interfaces_deref(from_ifaces, from_ifaces_first);
 		ecm_db_multicast_connection_to_interfaces_deref_all(to_ifaces, to_ifaces_first);
 		vfree(nim);
@@ -465,6 +469,7 @@ static int ecm_nss_multicast_ipv4_connection_update_accelerate(struct ecm_front_
         }
 
 	create->src_interface_num = from_nss_iface_id;
+
 	ecm_db_connection_interfaces_deref(from_ifaces, from_ifaces_first);
 
 	/*
@@ -482,7 +487,6 @@ static int ecm_nss_multicast_ipv4_connection_update_accelerate(struct ecm_front_
 		create->if_rule[vif].egress_vlan_tag[0] = ECM_NSS_CONNMGR_VLAN_ID_NOT_CONFIGURED;
 		create->if_rule[vif].egress_vlan_tag[1] = ECM_NSS_CONNMGR_VLAN_ID_NOT_CONFIGURED;
 #endif
-
 		/*
 		 * If there is no state change for an interface at this index,
 		 * then ignore
@@ -527,7 +531,6 @@ static int ecm_nss_multicast_ipv4_connection_update_accelerate(struct ecm_front_
 			case ECM_DB_IFACE_TYPE_BRIDGE:
 				DEBUG_TRACE("%p: Bridge\n", nmci);
 				if (interface_type_counts[ii_type] != 0) {
-
 					/*
 					 * Cannot cascade bridges
 					 */
@@ -541,10 +544,11 @@ static int ecm_nss_multicast_ipv4_connection_update_accelerate(struct ecm_front_
 			case ECM_DB_IFACE_TYPE_ETHERNET:
 				 DEBUG_TRACE("%p: Ethernet\n", nmci);
 				if (interface_type_counts[ii_type] != 0) {
+
 					/*
 					 * Ignore additional mac addresses, these are usually as a result of address propagation
-					 * from bridges down to ports etc.
-					 */
+					 * from bridges down to ports etc. */
+
 					DEBUG_TRACE("%p: Ethernet - ignore additional\n", nmci);
 					break;
 				}
@@ -584,6 +588,7 @@ static int ecm_nss_multicast_ipv4_connection_update_accelerate(struct ecm_front_
 
 				DEBUG_TRACE("%p: PPPoE - session: %x, mac: %pM\n", nmci, create->if_rule[valid_vif_idx].pppoe_session_id, create->if_rule[valid_vif_idx].pppoe_remote_mac);
 #else
+				DEBUG_TRACE("%p: PPPoE - unsupported\n", nmci);
 				rule_invalid = true;
 #endif
 				break;
@@ -591,6 +596,7 @@ static int ecm_nss_multicast_ipv4_connection_update_accelerate(struct ecm_front_
 #ifdef ECM_INTERFACE_VLAN_ENABLE
 				DEBUG_TRACE("%p: VLAN\n", nmci);
 				if (interface_type_counts[ii_type] > 1) {
+
 					/*
 					 * Can only support two vlans
 					 */
@@ -609,7 +615,7 @@ static int ecm_nss_multicast_ipv4_connection_update_accelerate(struct ecm_front_
 					interface_type_counts[ECM_DB_IFACE_TYPE_ETHERNET]++;
 					DEBUG_TRACE("%p: VLAN use mac: %pM\n", nmci, to_nss_iface_address);
 				}
-				create->if_rule[valid_vif_idx].valid_flags |= NSS_IPV4_MC_RULE_CREATE_IF_FLAG_VLAN_VALID;
+				create->if_rule[valid_vif_idx].valid_flags |= NSS_IPV6_MC_RULE_CREATE_IF_FLAG_VLAN_VALID;
 				DEBUG_TRACE("%p: vlan tag: %x\n", nmci, create->if_rule[valid_vif_idx].egress_vlan_tag[interface_type_counts[ii_type]]);
 #else
 				rule_invalid = true;
@@ -643,24 +649,26 @@ static int ecm_nss_multicast_ipv4_connection_update_accelerate(struct ecm_front_
 			create->if_rule[valid_vif_idx].if_mtu = to_mtu;
 
 			if (rp->if_join_idx[vif]) {
+
 				/*
 				 * The interface has joined the group
 				 */
-				create->if_rule[valid_vif_idx].rule_flags |= NSS_IPV4_MC_RULE_CREATE_IF_FLAG_JOIN;
+				create->if_rule[valid_vif_idx].rule_flags |= NSS_IPV6_MC_RULE_CREATE_IF_FLAG_JOIN;
 			} else if (rp->if_leave_idx[vif]) {
+
 				/*
 				 * The interface has left the group
 				 */
-				create->if_rule[valid_vif_idx].rule_flags |= NSS_IPV4_MC_RULE_CREATE_IF_FLAG_LEAVE;
+				create->if_rule[valid_vif_idx].rule_flags |= NSS_IPV6_MC_RULE_CREATE_IF_FLAG_LEAVE;
 			}
 
 			/*
-			 * Do not set the ROUTED flag for pure bridged interfaces
+			 * TODO: Do not set the ROUTED flag for pure bridged interfaces
 			 */
 			if (is_br_flow) {
-				create->if_rule[valid_vif_idx].rule_flags |= NSS_IPV4_MC_RULE_CREATE_IF_FLAG_BRIDGE_FLOW;
+				create->if_rule[valid_vif_idx].rule_flags |= NSS_IPV6_MC_RULE_CREATE_IF_FLAG_BRIDGE_FLOW;
 			} else {
-				create->if_rule[valid_vif_idx].rule_flags |= NSS_IPV4_MC_RULE_CREATE_IF_FLAG_ROUTED_FLOW;
+				create->if_rule[valid_vif_idx].rule_flags |= NSS_IPV6_MC_RULE_CREATE_IF_FLAG_ROUTED_FLOW;
 			}
 
 			valid_vif_idx++;
@@ -675,7 +683,7 @@ static int ecm_nss_multicast_ipv4_connection_update_accelerate(struct ecm_front_
 	/*
 	 * Set the UPDATE flag
 	 */
-	create->rule_flags |= NSS_IPV4_MC_RULE_CREATE_FLAG_MC_UPDATE;
+	create->rule_flags |= NSS_IPV6_MC_RULE_CREATE_FLAG_MC_UPDATE;
 
 	/*
 	 * Set protocol
@@ -686,14 +694,15 @@ static int ecm_nss_multicast_ipv4_connection_update_accelerate(struct ecm_front_
 	 * The src_ip is where the connection established from
 	 */
 	ecm_db_connection_from_address_get(feci->ci, addr);
-	ECM_IP_ADDR_TO_HIN4_ADDR(create->tuple.flow_ip, addr);
+	ECM_IP_ADDR_TO_NSS_IPV6_ADDR(create->tuple.flow_ip, addr);
+
 
 	/*
 	 * The destination address is what the destination IP is translated to as it is forwarded to the next interface.
 	 * For egress this would yield the normal wan host and for ingress this would correctly NAT back to the LAN host
 	 */
 	ecm_db_connection_to_address_get(feci->ci, addr);
-	ECM_IP_ADDR_TO_HIN4_ADDR(create->tuple.return_ip, addr);
+	ECM_IP_ADDR_TO_NSS_IPV6_ADDR(create->tuple.return_ip, addr);
 
 	/*
 	 * Same approach as above for port information
@@ -714,9 +723,9 @@ static int ecm_nss_multicast_ipv4_connection_update_accelerate(struct ecm_front_
 				"Rule flag: %x\n"
 				"Vif: %d\n"
 				"Protocol: %d\n"
+				"from_ip: " ECM_IP_ADDR_OCTAL_FMT ":%d\n"
+				"to_ip: " ECM_IP_ADDR_OCTAL_FMT ":%d\n"
 				"to_mtu: %u\n"
-				"from_ip: %pI4h:%d\n"
-				"to_ip: %pI4h:%d\n"
 				"to_mac: %pM\n"
 				"dest_iface_num: %u\n"
 				"out_vlan[0] %x\n"
@@ -726,9 +735,9 @@ static int ecm_nss_multicast_ipv4_connection_update_accelerate(struct ecm_front_
 				create->if_rule[vif].rule_flags,
 				vif,
 				create->tuple.protocol,
+				ECM_IP_ADDR_TO_OCTAL(create->tuple.flow_ip), create->tuple.flow_ident,
+				ECM_IP_ADDR_TO_OCTAL(create->tuple.return_ip), create->tuple.return_ident,
 				create->if_rule[vif].if_mtu,
-				&create->tuple.flow_ip, create->tuple.flow_ident,
-				&create->tuple.return_ip, create->tuple.return_ident,
 				create->if_rule[vif].if_mac,
 				create->if_rule[vif].if_num,
 				create->if_rule[vif].egress_vlan_tag[0],
@@ -754,7 +763,7 @@ static int ecm_nss_multicast_ipv4_connection_update_accelerate(struct ecm_front_
 	/*
 	 * Call the rule create function
 	 */
-	nss_tx_status = nss_ipv4_tx(ecm_nss_ipv4_nss_ipv4_mgr, nim);
+	nss_tx_status = nss_ipv6_tx(ecm_nss_ipv6_nss_ipv6_mgr, nim);
 	if (nss_tx_status == NSS_TX_SUCCESS) {
 		spin_lock_bh(&feci->lock);
 		nmci->base.stats.driver_fail = 0;		/* Reset */
@@ -779,8 +788,8 @@ static int ecm_nss_multicast_ipv4_connection_update_accelerate(struct ecm_front_
 	 * TX failed
 	 */
 	spin_lock_bh(&feci->lock);
-	nmci->base.stats.driver_fail_total++;
-	nmci->base.stats.driver_fail++;
+	feci->stats.driver_fail_total++;
+	feci->stats.driver_fail++;
 	if (nmci->base.stats.driver_fail >= nmci->base.stats.driver_fail_limit) {
 		DEBUG_WARN("%p: Accel failed - driver fail limit\n", nmci);
 		feci->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DRIVER;
@@ -790,35 +799,31 @@ static int ecm_nss_multicast_ipv4_connection_update_accelerate(struct ecm_front_
 }
 
 /*
- * ecm_nss_multicast_ipv4_connection_accelerate()
+ * ecm_nss_multicast_ipv6_connection_accelerate()
  * 	Accelerate a multicast UDP connection
  */
-static void ecm_nss_multicast_ipv4_connection_accelerate(struct ecm_front_end_connection_instance *feci,
+static void ecm_nss_multicast_ipv6_connection_accelerate(struct ecm_front_end_connection_instance *feci,
 									struct ecm_classifier_process_response *pr)
 {
-	struct ecm_nss_multicast_ipv4_connection_instance *nmci = (struct ecm_nss_multicast_ipv4_connection_instance *)feci;
+	struct ecm_nss_multicast_ipv6_connection_instance *nmci = (struct ecm_nss_multicast_ipv6_connection_instance *)feci;
+	struct ecm_db_iface_instance *from_ifaces[ECM_DB_IFACE_HEIRARCHY_MAX];
+	struct ecm_db_iface_instance *from_nss_iface;
+	int32_t from_ifaces_first;
 	struct ecm_db_iface_instance *to_ifaces;
 	struct ecm_db_iface_instance *ii_temp;
 	struct ecm_db_iface_instance *ii_single;
 	struct ecm_db_iface_instance **ifaces;
-	struct ecm_db_iface_instance *from_ifaces[ECM_DB_IFACE_HEIRARCHY_MAX];
-	struct ecm_db_iface_instance *from_nss_iface;
-	struct ecm_db_iface_instance *from_nat_ifaces[ECM_DB_IFACE_HEIRARCHY_MAX];
-	struct nss_ipv4_mc_rule_create_msg *create;
-	struct nss_ipv4_msg *nim;
-	struct ecm_classifier_instance *assignments[ECM_CLASSIFIER_TYPES];
+	struct nss_ipv6_msg *nim;
 	int32_t *to_ifaces_first;
 	int32_t *to_ii_first;
-	int32_t from_ifaces_first;
 	int32_t from_nss_iface_id;
-	uint32_t from_nat_ifaces_first;
 	int32_t to_nss_iface_id;
-	int32_t from_nat_ifaces_identifier = 0;
 	uint8_t to_nss_iface_address[ETH_ALEN];
 	ip_addr_t addr;
+	struct nss_ipv6_mc_rule_create_msg *create;
+	struct ecm_classifier_instance *assignments[ECM_CLASSIFIER_TYPES];
 	int aci_index;
-	int vif;
-	int ret;
+	int32_t vif, ret;
 	int assignment_count;
 	nss_tx_status_t nss_tx_status;
 	int32_t list_index;
@@ -828,7 +833,7 @@ static void ecm_nss_multicast_ipv4_connection_accelerate(struct ecm_front_end_co
 	bool rule_invalid;
 	ecm_front_end_acceleration_mode_t result_mode;
 
-	DEBUG_CHECK_MAGIC(nmci, ECM_NSS_MULTICAST_IPV4_CONNECTION_INSTANCE_MAGIC, "%p: magic failed", nmci);
+	DEBUG_CHECK_MAGIC(nmci, ECM_NSS_MULTICAST_IPV6_CONNECTION_INSTANCE_MAGIC, "%p: magic failed", nmci);
 
 	/*
 	 * Can this connection be accelerated at all?
@@ -843,6 +848,7 @@ static void ecm_nss_multicast_ipv4_connection_accelerate(struct ecm_front_end_co
 
 	/*
 	 * If acceleration mode is anything other than "not accelerated" then ignore.
+	 *
 	 */
 	if (feci->accel_mode != ECM_FRONT_END_ACCELERATION_MODE_DECEL) {
 		spin_unlock_bh(&feci->lock);
@@ -859,14 +865,14 @@ static void ecm_nss_multicast_ipv4_connection_accelerate(struct ecm_front_end_co
 	 * NOTE: We leverage the app_data void pointer to be our 32 bit connection serial number.
 	 * When we get it back we re-cast it to a uint32 and do a faster connection lookup.
 	 */
-	nim = (struct nss_ipv4_msg *)kzalloc(sizeof(struct nss_ipv4_msg), GFP_ATOMIC | __GFP_NOWARN);
+	nim = (struct nss_ipv6_msg *)kzalloc(sizeof(struct nss_ipv6_msg), GFP_ATOMIC | __GFP_NOWARN);
 	if (!nim) {
 		return;
 	}
 
-	nss_cmn_msg_init(&nim->cm, NSS_IPV4_RX_INTERFACE, NSS_IPV4_TX_CREATE_MC_RULE_MSG,
-			sizeof(struct nss_ipv4_mc_rule_create_msg),
-			 (nss_ipv4_msg_callback_t *)ecm_nss_multicast_ipv4_connection_create_callback,
+	nss_cmn_msg_init(&nim->cm, NSS_IPV6_RX_INTERFACE, NSS_IPV6_TX_CREATE_MC_RULE_MSG,
+			sizeof(struct nss_ipv6_mc_rule_create_msg),
+			 (nss_ipv6_msg_callback_t *)ecm_nss_multicast_ipv6_connection_create_callback,
 			(void *)ecm_db_connection_serial_get(feci->ci));
 
 	create = &nim->msg.mc_rule_create;
@@ -885,12 +891,13 @@ static void ecm_nss_multicast_ipv4_connection_accelerate(struct ecm_front_end_co
 	create->ingress_vlan_tag[1] = ECM_NSS_CONNMGR_VLAN_ID_NOT_CONFIGURED;
 	from_nss_iface = from_ifaces[from_ifaces_first];
 	from_nss_iface_id = ecm_db_iface_nss_interface_identifier_get(from_nss_iface);
+
 	if (from_nss_iface_id < 0) {
-                DEBUG_TRACE("%p: from_nss_iface_id: %d\n", nmci, from_nss_iface_id);
+		DEBUG_TRACE("%p: from_nss_iface_id: %d\n", nmci, from_nss_iface_id);
 		ecm_db_connection_interfaces_deref(from_ifaces, from_ifaces_first);
 		kfree(nim);
 		return;
-        }
+	}
 
 	memset(interface_type_counts, 0, sizeof(interface_type_counts));
 	rule_invalid = false;
@@ -912,13 +919,11 @@ static void ecm_nss_multicast_ipv4_connection_accelerate(struct ecm_front_end_co
 #ifdef ECM_INTERFACE_VLAN_ENABLE
 			struct ecm_db_interface_info_vlan vlan_info;
 #endif
-#ifdef ECM_INTERFACE_PPP_ENABLE
-			struct ecm_db_interface_info_pppoe pppoe_info;
-#endif
 		case ECM_DB_IFACE_TYPE_VLAN:
 #ifdef ECM_INTERFACE_VLAN_ENABLE
 			DEBUG_TRACE("%p: VLAN\n", nmci);
 			if (interface_type_counts[ii_type] > 1) {
+
 				/*
 				 * Can only support two vlans
 				 */
@@ -928,34 +933,11 @@ static void ecm_nss_multicast_ipv4_connection_accelerate(struct ecm_front_end_co
 			}
 			ecm_db_iface_vlan_info_get(ii, &vlan_info);
 			create->ingress_vlan_tag[interface_type_counts[ii_type]] = ((vlan_info.vlan_tpid << 16) | vlan_info.vlan_tag);
-			create->valid_flags |= NSS_IPV4_MC_RULE_CREATE_FLAG_INGRESS_VLAN_VALID;
+			create->valid_flags |= NSS_IPV6_MC_RULE_CREATE_FLAG_INGRESS_VLAN_VALID;
 			DEBUG_TRACE("%p: vlan tag: %x\n", nmci, create->ingress_vlan_tag[interface_type_counts[ii_type]]);
 #else
 			rule_invalid = true;
 			DEBUG_TRACE("%p: VLAN - unsupported\n", nmci);
-#endif
-			break;
-		case ECM_DB_IFACE_TYPE_PPPOE:
-#ifdef ECM_INTERFACE_PPP_ENABLE
-			/*
-			 * More than one PPPoE in the list is not valid!
-			 */
-			if (interface_type_counts[ii_type] != 0) {
-				DEBUG_TRACE("%p: PPPoE - additional unsupported\n", nmci);
-				rule_invalid = true;
-				break;
-			}
-
-			/*
-			 * Copy pppoe session info to the creation structure.
-			 */
-			ecm_db_iface_pppoe_session_info_get(ii, &pppoe_info);
-			create->ingress_pppoe_session_id = pppoe_info.pppoe_session_id;
-			memcpy(create->ingress_pppoe_remote_mac, pppoe_info.remote_mac, ETH_ALEN);
-			create->valid_flags |= NSS_IPV4_MC_RULE_CREATE_FLAG_INGRESS_PPPOE;
-			DEBUG_TRACE("%p: PPPoE - session: %x, mac: %pM\n", nmci, create->ingress_pppoe_session_id, create->ingress_pppoe_remote_mac);
-#else
-			rule_invalid = true;
 #endif
 			break;
 		default:
@@ -974,22 +956,19 @@ static void ecm_nss_multicast_ipv4_connection_accelerate(struct ecm_front_end_co
 	}
 
 
-	from_nat_ifaces_first = ecm_db_connection_from_nat_interfaces_get_and_ref(feci->ci, from_nat_ifaces);
-	ecm_db_connection_interfaces_deref(from_nat_ifaces, from_nat_ifaces_first);
-	rule_invalid = false;
-
 	/*
 	 * Now examine the TO / DEST heirarchy list to construct the destination part of the rule
 	 */
 	DEBUG_TRACE("%p: Examine to/dest heirarchy list\n", nmci);
+	rule_invalid = false;
 	for (vif = 0; vif < ECM_DB_MULTICAST_IF_MAX; vif++) {
-		int32_t found_ii_match = 0;
 		int32_t to_mtu = 0;
-
 		to_nss_iface_id = -1;
 
+#ifdef ECM_INTERFACE_VLAN_ENABLE
 		create->if_rule[vif].egress_vlan_tag[0] = ECM_NSS_CONNMGR_VLAN_ID_NOT_CONFIGURED;
 		create->if_rule[vif].egress_vlan_tag[1] = ECM_NSS_CONNMGR_VLAN_ID_NOT_CONFIGURED;
+#endif
 
 		ii_temp = ecm_db_multicast_if_heirarchy_get(to_ifaces, vif);
 		to_ii_first = ecm_db_multicast_if_first_get_at_index(to_ifaces_first, vif);
@@ -997,7 +976,6 @@ static void ecm_nss_multicast_ipv4_connection_accelerate(struct ecm_front_end_co
 
 		for (list_index = *to_ii_first; !rule_invalid && (list_index < ECM_DB_IFACE_HEIRARCHY_MAX); list_index++) {
 			struct ecm_db_iface_instance *ii;
-			int32_t ii_identifier;
 			ecm_db_iface_type_t ii_type;
 			char *ii_name;
 
@@ -1006,10 +984,7 @@ static void ecm_nss_multicast_ipv4_connection_accelerate(struct ecm_front_end_co
 			ii = *ifaces;
 			ii_type = ecm_db_connection_iface_type_get(ii);
 			ii_name = ecm_db_interface_type_to_string(ii_type);
-			ii_identifier = ecm_db_iface_interface_identifier_get(ii);
-			if (ii_identifier == from_nat_ifaces_identifier) {
-				found_ii_match = 1;
-			}
+
 			DEBUG_TRACE("%p: list_index: %d, ii: %p, type: %d (%s)\n", nmci, list_index, ii, ii_type, ii_name);
 
 			/*
@@ -1032,6 +1007,7 @@ static void ecm_nss_multicast_ipv4_connection_accelerate(struct ecm_front_end_co
 				 */
 				DEBUG_TRACE("%p: Bridge\n", nmci);
 				if (interface_type_counts[ii_type] != 0) {
+
 					/*
 					 * Cannot cascade bridges
 					 */
@@ -1045,6 +1021,7 @@ static void ecm_nss_multicast_ipv4_connection_accelerate(struct ecm_front_end_co
 			case ECM_DB_IFACE_TYPE_ETHERNET:
 				DEBUG_TRACE("%p: Ethernet\n", nmci);
 				if (interface_type_counts[ii_type] != 0) {
+
 					/*
 					 * Ignore additional mac addresses, these are usually as a result of address propagation
 					 * from bridges down to ports etc.
@@ -1066,7 +1043,7 @@ static void ecm_nss_multicast_ipv4_connection_accelerate(struct ecm_front_end_co
 					return;
 			        }
 
-				DEBUG_TRACE("%p: Ethernet - mac: %pM, mtu %d\n", nmci, to_nss_iface_address, to_mtu);
+				DEBUG_TRACE("%p: Ethernet - mac: %pM\n", nmci, to_nss_iface_address);
 				break;
 			case ECM_DB_IFACE_TYPE_PPPOE:
 #ifdef ECM_INTERFACE_PPP_ENABLE
@@ -1085,9 +1062,10 @@ static void ecm_nss_multicast_ipv4_connection_accelerate(struct ecm_front_end_co
 				ecm_db_iface_pppoe_session_info_get(ii, &pppoe_info);
 				create->if_rule[valid_vif_idx].pppoe_session_id = pppoe_info.pppoe_session_id;
 				memcpy(create->if_rule[valid_vif_idx].pppoe_remote_mac, pppoe_info.remote_mac, ETH_ALEN);
-				create->if_rule[valid_vif_idx].valid_flags |= NSS_IPV4_MC_RULE_CREATE_IF_FLAG_PPPOE_VALID;
+				create->if_rule[valid_vif_idx].valid_flags |= NSS_IPV6_MC_RULE_CREATE_IF_FLAG_PPPOE_VALID;
 				DEBUG_TRACE("%p: PPPoE - session: %x, mac: %pM\n", nmci, create->if_rule[valid_vif_idx].pppoe_session_id, create->if_rule[valid_vif_idx].pppoe_remote_mac);
 #else
+				DEBUG_TRACE("%p: PPPoE - unsupported\n", nmci);
 				rule_invalid = true;
 #endif
 				break;
@@ -1122,7 +1100,7 @@ static void ecm_nss_multicast_ipv4_connection_accelerate(struct ecm_front_end_co
 					interface_type_counts[ECM_DB_IFACE_TYPE_ETHERNET]++;
 					DEBUG_TRACE("%p: VLAN use mac: %pM\n", nmci, to_nss_iface_address);
 				}
-				create->if_rule[valid_vif_idx].valid_flags |= NSS_IPV4_MC_RULE_CREATE_IF_FLAG_VLAN_VALID;
+				create->if_rule[valid_vif_idx].valid_flags |= NSS_IPV6_MC_RULE_CREATE_IF_FLAG_VLAN_VALID;
 				DEBUG_TRACE("%p: vlan tag: %x\n", nmci, create->if_rule[vif].egress_vlan_tag[interface_type_counts[ii_type]]);
 #else
 				rule_invalid = true;
@@ -1151,25 +1129,12 @@ static void ecm_nss_multicast_ipv4_connection_accelerate(struct ecm_front_end_co
 		 * interface list.
 		 */
 		if (to_nss_iface_id != -1) {
-			uint32_t xlate_src_ip, src_ip;
-			ecm_db_connection_from_address_nat_get(feci->ci, addr);
-			ECM_IP_ADDR_TO_HIN4_ADDR(xlate_src_ip, addr);
-			ecm_db_connection_from_address_get(feci->ci, addr);
-			ECM_IP_ADDR_TO_HIN4_ADDR(src_ip, addr);
 
-			if (found_ii_match && (xlate_src_ip != src_ip)) {
-				create->if_rule[valid_vif_idx].xlate_src_ip = xlate_src_ip;
-				create->if_rule[valid_vif_idx].xlate_src_ident = ecm_db_connection_from_port_nat_get(feci->ci);
-				create->if_rule[valid_vif_idx].valid_flags |= NSS_IPV4_MC_RULE_CREATE_IF_FLAG_NAT_VALID;
-			} else {
-				create->if_rule[valid_vif_idx].xlate_src_ip = src_ip;
-				create->if_rule[valid_vif_idx].xlate_src_ident = ecm_db_connection_from_port_get(feci->ci);
-			}
-			create->if_rule[valid_vif_idx].rule_flags |= NSS_IPV4_MC_RULE_CREATE_IF_FLAG_JOIN;
+			create->if_rule[valid_vif_idx].rule_flags |= NSS_IPV6_MC_RULE_CREATE_IF_FLAG_JOIN;
 			create->if_rule[valid_vif_idx].if_num = to_nss_iface_id;
 			memcpy(create->if_rule[valid_vif_idx].if_mac, to_nss_iface_address, ETH_ALEN);
 			create->if_rule[valid_vif_idx].if_mtu = to_mtu;
-			create->if_rule[valid_vif_idx].rule_flags |= NSS_IPV4_MC_RULE_CREATE_IF_FLAG_ROUTED_FLOW;
+			create->if_rule[valid_vif_idx].rule_flags |= NSS_IPV6_MC_RULE_CREATE_IF_FLAG_ROUTED_FLOW;
 			valid_vif_idx++;
 		}
 	}
@@ -1187,7 +1152,7 @@ static void ecm_nss_multicast_ipv4_connection_accelerate(struct ecm_front_end_co
 	 */
 	if (pr->process_actions & ECM_CLASSIFIER_PROCESS_ACTION_DSCP) {
 			create->egress_dscp = pr->flow_dscp;
-			create->valid_flags |= NSS_IPV4_MC_RULE_CREATE_FLAG_DSCP_MARKING_VALID;
+			create->valid_flags |= NSS_IPV6_MC_RULE_CREATE_FLAG_DSCP_MARKING_VALID;
 	}
 
 	ecm_db_connection_to_node_address_get(feci->ci, dest_mac);
@@ -1202,14 +1167,15 @@ static void ecm_nss_multicast_ipv4_connection_accelerate(struct ecm_front_end_co
 	 * The src_ip is where the connection established from
 	 */
 	ecm_db_connection_from_address_get(feci->ci, addr);
-	ECM_IP_ADDR_TO_HIN4_ADDR(create->tuple.flow_ip, addr);
+	ECM_IP_ADDR_TO_NSS_IPV6_ADDR(create->tuple.flow_ip, addr);
+
 
 	/*
 	 * The destination address is what the destination IP is translated to as it is forwarded to the next interface.
 	 * For egress this would yield the normal wan host and for ingress this would correctly NAT back to the LAN host
 	 */
 	ecm_db_connection_to_address_get(feci->ci, addr);
-	ECM_IP_ADDR_TO_HIN4_ADDR(create->tuple.return_ip, addr);
+	ECM_IP_ADDR_TO_NSS_IPV6_ADDR(create->tuple.return_ip, addr);
 
 	/*
 	 * Same approach as above for port information
@@ -1229,7 +1195,7 @@ static void ecm_nss_multicast_ipv4_connection_accelerate(struct ecm_front_end_co
 
 		aci = assignments[aci_index];
 		DEBUG_TRACE("%p: sync from: %p, type: %d\n", nmci, aci, aci->type_get(aci));
-		aci->sync_from_v4(aci, (struct nss_ipv4_rule_create_msg *)&create);
+		aci->sync_from_v6(aci, (struct nss_ipv6_rule_create_msg *)&create);
 	}
 	ecm_db_connection_assignments_release(assignment_count, assignments);
 
@@ -1238,18 +1204,15 @@ static void ecm_nss_multicast_ipv4_connection_accelerate(struct ecm_front_end_co
 	 */
 	ecm_db_multicast_connection_to_interfaces_deref_all(to_ifaces, to_ifaces_first);
 
-	for (vif = 0; vif < valid_vif_idx ; vif++) {
+	for (vif = 0; vif < valid_vif_idx ; vif++){
 		DEBUG_TRACE("%p: UDP Accelerate connection %p\n"
 			"Vif: %d\n"
 			"Protocol: %d\n"
 			"to_mtu: %u\n"
-			"from_ip: %pI4h:%d\n"
-			"to_ip: %pI4h:%d\n"
-			"xlate_ip: %pI4h:%d\n"
+			"from_ip: " ECM_IP_ADDR_OCTAL_FMT ":%d\n"
+			"to_ip: " ECM_IP_ADDR_OCTAL_FMT ":%d\n"
 			"to_mac: %pM\n"
 			"dest_iface_num: %u\n"
-			"ingress_pppoe_session_id: %u\n"
-			"ingress_pppoe_remote_mac: %pM\n"
 			"in_vlan[0] %x\n"
 			"in_vlan[1] %x\n"
 			"out_vlan[0] %x\n"
@@ -1259,13 +1222,10 @@ static void ecm_nss_multicast_ipv4_connection_accelerate(struct ecm_front_end_co
 			vif,
 			create->tuple.protocol,
 			create->if_rule[vif].if_mtu,
-			&create->tuple.flow_ip, create->tuple.flow_ident,
-			&create->tuple.return_ip, create->tuple.return_ident,
-			&create->if_rule[vif].xlate_src_ip, create->if_rule[vif].xlate_src_ident,
+			ECM_IP_ADDR_TO_OCTAL(create->tuple.flow_ip), create->tuple.flow_ident,
+			ECM_IP_ADDR_TO_OCTAL(create->tuple.return_ip), create->tuple.return_ident,
 			create->if_rule[vif].if_mac,
 			create->if_rule[vif].if_num,
-			create->ingress_pppoe_session_id,
-			create->ingress_pppoe_remote_mac,
 			create->ingress_vlan_tag[0],
 			create->ingress_vlan_tag[1],
 			create->if_rule[vif].egress_vlan_tag[0],
@@ -1290,13 +1250,14 @@ static void ecm_nss_multicast_ipv4_connection_accelerate(struct ecm_front_end_co
 	/*
 	 * Call the rule create function
 	 */
-	nss_tx_status = nss_ipv4_tx(ecm_nss_ipv4_nss_ipv4_mgr, nim);
+	nss_tx_status = nss_ipv6_tx(ecm_nss_ipv6_nss_ipv6_mgr, nim);
 	if (nss_tx_status == NSS_TX_SUCCESS) {
+
 		/*
 		 * Reset the driver_fail count - transmission was okay here.
 		 */
 		spin_lock_bh(&feci->lock);
-		nmci->base.stats.driver_fail = 0; /* Reset */
+		nmci->base.stats.driver_fail = 0;	/* Reset */
 		spin_unlock_bh(&feci->lock);
 		kfree(nim);
 		return;
@@ -1312,8 +1273,8 @@ static void ecm_nss_multicast_ipv4_connection_accelerate(struct ecm_front_end_co
 	 */
 	spin_lock_bh(&feci->lock);
 	DEBUG_ASSERT(feci->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING, "%p: accel mode unexpected: %d\n", nmci, feci->accel_mode);
-	nmci->base.stats.driver_fail_total++;
-	nmci->base.stats.driver_fail++;
+	feci->stats.driver_fail_total++;
+	feci->stats.driver_fail++;
 	if (feci->stats.driver_fail >= feci->stats.driver_fail_limit) {
 		DEBUG_WARN("%p: Accel failed - driver fail limit\n", nmci);
 		result_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DRIVER;
@@ -1321,34 +1282,34 @@ static void ecm_nss_multicast_ipv4_connection_accelerate(struct ecm_front_end_co
 		result_mode = ECM_FRONT_END_ACCELERATION_MODE_DECEL;
 	}
 
-	spin_lock_bh(&ecm_nss_ipv4_lock);
-	_ecm_nss_ipv4_accel_pending_clear(feci, result_mode);
-	spin_unlock_bh(&ecm_nss_ipv4_lock);
+	spin_lock_bh(&ecm_nss_ipv6_lock);
+	_ecm_nss_ipv6_accel_pending_clear(feci, result_mode);
+	spin_unlock_bh(&ecm_nss_ipv6_lock);
 
 	spin_unlock_bh(&feci->lock);
-
 	kfree(nim);
-
 	return;
 }
 
 /*
- * ecm_nss_multicast_ipv4_connection_destroy_callback()
+ * ecm_nss_multicast_ipv6_connection_destroy_callback()
  *	Callback for handling destroy ack/nack calls.
  */
-static void ecm_nss_multicast_ipv4_connection_destroy_callback(void *app_data, struct nss_ipv4_msg *nim)
+static void ecm_nss_multicast_ipv6_connection_destroy_callback(void *app_data, struct nss_ipv6_msg *nim)
 {
-	struct nss_ipv4_rule_destroy_msg * __attribute__((unused))nirdm = &nim->msg.rule_destroy;
+	struct nss_ipv6_rule_destroy_msg *nirdm = &nim->msg.rule_destroy;
 	uint32_t serial = (uint32_t)app_data;
 	struct ecm_db_connection_instance *ci;
 	struct ecm_front_end_connection_instance *feci;
-	struct ecm_nss_multicast_ipv4_connection_instance *nmci;
+	struct ecm_nss_multicast_ipv6_connection_instance *nmci;
+	ip_addr_t flow_ip;
+	ip_addr_t return_ip;
 
 	/*
 	 * Is this a response to a destroy message?
 	 */
-	if (nim->cm.type != NSS_IPV4_TX_DESTROY_RULE_MSG) {
-		DEBUG_ERROR("%p: ported destroy callback with improper type: %d\n", nim, nim->cm.type);
+	if (nim->cm.type != NSS_IPV6_TX_DESTROY_RULE_MSG) {
+		DEBUG_ERROR("%p: multicast destroy callback with improper type: %d\n", nim, nim->cm.type);
 		return;
 	}
 
@@ -1372,29 +1333,32 @@ static void ecm_nss_multicast_ipv4_connection_destroy_callback(void *app_data, s
 	 * Get the front end instance
 	 */
 	feci = ecm_db_connection_front_end_get_and_ref(ci);
-	nmci = (struct ecm_nss_multicast_ipv4_connection_instance *)feci;
-	DEBUG_CHECK_MAGIC(nmci, ECM_NSS_MULTICAST_IPV4_CONNECTION_INSTANCE_MAGIC, "%p: magic failed", nmci);
+	nmci = (struct ecm_nss_multicast_ipv6_connection_instance *)feci;
+	DEBUG_CHECK_MAGIC(nmci, ECM_NSS_MULTICAST_IPV6_CONNECTION_INSTANCE_MAGIC, "%p: magic failed", nmci);
+
+	ECM_NSS_IPV6_ADDR_TO_IP_ADDR(flow_ip, nirdm->tuple.flow_ip);
+	ECM_NSS_IPV6_ADDR_TO_IP_ADDR(return_ip, nirdm->tuple.return_ip);
 
 	/*
 	 * Record command duration
 	 */
-	ecm_nss_ipv4_decel_done_time_update(feci);
+	ecm_nss_ipv6_decel_done_time_update(feci);
 
 	/*
 	 * Dump some useful trace information.
 	 */
 	DEBUG_TRACE("%p: decelerate response for connection: %p\n", nmci, feci->ci);
-	DEBUG_TRACE("%p: flow_ip: %pI4h:%d\n", nmci, &nirdm->tuple.flow_ip, nirdm->tuple.flow_ident);
-	DEBUG_TRACE("%p: return_ip: %pI4h:%d\n", nmci, &nirdm->tuple.return_ip, nirdm->tuple.return_ident);
+	DEBUG_TRACE("%p: flow_ip: " ECM_IP_ADDR_OCTAL_FMT ":%d\n", nmci, ECM_IP_ADDR_TO_OCTAL(flow_ip), nirdm->tuple.flow_ident);
+	DEBUG_TRACE("%p: return_ip: " ECM_IP_ADDR_OCTAL_FMT ":%d\n", nmci, ECM_IP_ADDR_TO_OCTAL(return_ip), nirdm->tuple.return_ident);
 	DEBUG_TRACE("%p: protocol: %d\n", nmci, nirdm->tuple.protocol);
 
 	/*
 	 * Drop decel pending counter
 	 */
-	spin_lock_bh(&ecm_nss_ipv4_lock);
-	ecm_nss_ipv4_pending_decel_count--;
-	DEBUG_ASSERT(ecm_nss_ipv4_pending_decel_count >= 0, "Bad decel pending counter\n");
-	spin_unlock_bh(&ecm_nss_ipv4_lock);
+	spin_lock_bh(&ecm_nss_ipv6_lock);
+	ecm_nss_ipv6_pending_decel_count--;
+	DEBUG_ASSERT(ecm_nss_ipv6_pending_decel_count >= 0, "Bad decel pending counter\n");
+	spin_unlock_bh(&ecm_nss_ipv6_lock);
 
 	spin_lock_bh(&feci->lock);
 
@@ -1430,14 +1394,14 @@ static void ecm_nss_multicast_ipv4_connection_destroy_callback(void *app_data, s
 	spin_unlock_bh(&feci->lock);
 
 	/*
-	 * Mcast acceleration ends
+	 * Multicast acceleration ends
 	 */
-	spin_lock_bh(&ecm_nss_ipv4_lock);
-	ecm_nss_multicast_ipv4_accelerated_count--;	/* Protocol specific counter */
-	DEBUG_ASSERT(ecm_nss_multicast_ipv4_accelerated_count >= 0, "Bad udp accel counter\n");
-	ecm_nss_ipv4_accelerated_count--;		/* General running counter */
-	DEBUG_ASSERT(ecm_nss_ipv4_accelerated_count >= 0, "Bad accel counter\n");
-	spin_unlock_bh(&ecm_nss_ipv4_lock);
+	spin_lock_bh(&ecm_nss_ipv6_lock);
+	ecm_nss_multicast_ipv6_accelerated_count--;	/* Protocol specific counter */
+	DEBUG_ASSERT(ecm_nss_multicast_ipv6_accelerated_count >= 0, "Bad udp accel counter\n");
+	ecm_nss_ipv6_accelerated_count--;		/* General running counter */
+	DEBUG_ASSERT(ecm_nss_ipv6_accelerated_count >= 0, "Bad accel counter\n");
+	spin_unlock_bh(&ecm_nss_ipv6_lock);
 
 	/*
 	 * Release the connections.
@@ -1447,20 +1411,20 @@ static void ecm_nss_multicast_ipv4_connection_destroy_callback(void *app_data, s
 }
 
 /*
- * ecm_nss_multicast_ipv4_connection_decelerate()
+ * ecm_nss_multicast_ipv6_connection_decelerate()
  *	Decelerate a connection
  */
-static void ecm_nss_multicast_ipv4_connection_decelerate(struct ecm_front_end_connection_instance *feci)
+static void ecm_nss_multicast_ipv6_connection_decelerate(struct ecm_front_end_connection_instance *feci)
 {
-	struct ecm_nss_multicast_ipv4_connection_instance *nmci = (struct ecm_nss_multicast_ipv4_connection_instance *)feci;
-	struct nss_ipv4_msg nim;
-	struct nss_ipv4_rule_destroy_msg *nirdm;
+	struct ecm_nss_multicast_ipv6_connection_instance *nmci = (struct ecm_nss_multicast_ipv6_connection_instance *)feci;
+	struct nss_ipv6_msg nim;
+	struct nss_ipv6_rule_destroy_msg *nirdm;
 	struct ecm_db_multicast_tuple_instance *tuple_instance;
-	ip_addr_t src_addr;
-	ip_addr_t group_addr;
+	ip_addr_t src_ip;
+	ip_addr_t dest_ip;
 	nss_tx_status_t nss_tx_status;
 
-	DEBUG_CHECK_MAGIC(nmci, ECM_NSS_MULTICAST_IPV4_CONNECTION_INSTANCE_MAGIC, "%p: magic failed", nmci);
+	DEBUG_CHECK_MAGIC(nmci, ECM_NSS_MULTICAST_IPV6_CONNECTION_INSTANCE_MAGIC, "%p: magic failed", nmci);
 
 	/*
 	 * If decelerate is in error or already pending then ignore
@@ -1499,16 +1463,16 @@ static void ecm_nss_multicast_ipv4_connection_decelerate(struct ecm_front_end_co
 	/*
 	 * Increment the decel pending counter
 	 */
-	spin_lock_bh(&ecm_nss_ipv4_lock);
-	ecm_nss_ipv4_pending_decel_count++;
-	spin_unlock_bh(&ecm_nss_ipv4_lock);
+	spin_lock_bh(&ecm_nss_ipv6_lock);
+	ecm_nss_ipv6_pending_decel_count++;
+	spin_unlock_bh(&ecm_nss_ipv6_lock);
 
 	/*
 	 * Prepare deceleration message
 	 */
-	nss_ipv4_msg_init(&nim, NSS_IPV4_RX_INTERFACE, NSS_IPV4_TX_DESTROY_RULE_MSG,
-			sizeof(struct nss_ipv4_rule_destroy_msg),
-			ecm_nss_multicast_ipv4_connection_destroy_callback,
+	nss_ipv6_msg_init(&nim, NSS_IPV6_RX_INTERFACE, NSS_IPV6_TX_DESTROY_RULE_MSG,
+			sizeof(struct nss_ipv6_rule_destroy_msg),
+			ecm_nss_multicast_ipv6_connection_destroy_callback,
 			(void *)ecm_db_connection_serial_get(feci->ci));
 
 	nirdm = &nim.msg.rule_destroy;
@@ -1517,27 +1481,27 @@ static void ecm_nss_multicast_ipv4_connection_decelerate(struct ecm_front_end_co
 	/*
 	 * Get addressing information
 	 */
-	ecm_db_connection_from_address_get(feci->ci, src_addr);
-	ECM_IP_ADDR_TO_HIN4_ADDR(nirdm->tuple.flow_ip, src_addr);
-	ecm_db_connection_to_address_get(feci->ci, group_addr);
-	ECM_IP_ADDR_TO_HIN4_ADDR(nirdm->tuple.return_ip, group_addr);
+	ecm_db_connection_from_address_get(feci->ci, src_ip);
+	ECM_IP_ADDR_TO_NSS_IPV6_ADDR(nirdm->tuple.flow_ip, src_ip);
+	ecm_db_connection_to_address_get(feci->ci, dest_ip);
+	ECM_IP_ADDR_TO_NSS_IPV6_ADDR(nirdm->tuple.return_ip, dest_ip);
 	nirdm->tuple.flow_ident = ecm_db_connection_from_port_get(feci->ci);
 	nirdm->tuple.return_ident = ecm_db_connection_to_port_get(feci->ci);
 
 	DEBUG_INFO("%p: Mcast Connection %p decelerate\n"
-			"protocol: %d\n"
-			"src_ip: %pI4:%d\n"
-			"dest_ip: %pI4:%d\n",
-			nmci, feci->ci, nirdm->tuple.protocol,
-			&nirdm->tuple.flow_ip, nirdm->tuple.flow_ident,
-			&nirdm->tuple.return_ip, nirdm->tuple.return_ident);
+			"src_ip: " ECM_IP_ADDR_OCTAL_FMT ":%d\n"
+			"dest_ip: " ECM_IP_ADDR_OCTAL_FMT ":%d\n",
+			nmci, feci->ci,
+			ECM_IP_ADDR_TO_OCTAL(src_ip), nirdm->tuple.flow_ident,
+			ECM_IP_ADDR_TO_OCTAL(dest_ip), nirdm->tuple.return_ident);
+
 
 	/*
 	 * Right place to free the tuple_instance and multicast
 	 * destination interfaces list.
 	 */
-	spin_lock_bh(&ecm_nss_ipv4_lock);
-	tuple_instance = ecm_db_multicast_tuple_instance_find_and_ref(src_addr, group_addr);
+	spin_lock_bh(&ecm_nss_ipv6_lock);
+	tuple_instance = ecm_db_multicast_tuple_instance_find_and_ref(src_ip, dest_ip);
 	if (tuple_instance) {
 		ecm_db_multicast_connection_to_interfaces_clear(feci->ci);
 
@@ -1547,11 +1511,11 @@ static void ecm_nss_multicast_ipv4_connection_decelerate(struct ecm_front_end_co
 		ecm_db_multicast_tuple_instance_deref(tuple_instance);
 
 		/*
-		 * Release the tuple instance
+		 * Release the tuple instance here.
 		 */
 		ecm_db_multicast_tuple_instance_deref(tuple_instance);
 	}
-	spin_unlock_bh(&ecm_nss_ipv4_lock);
+	spin_unlock_bh(&ecm_nss_ipv6_lock);
 
 	/*
 	 * Take a ref to the feci->ci so that it will persist until we get a response from the NSS.
@@ -1560,13 +1524,22 @@ static void ecm_nss_multicast_ipv4_connection_decelerate(struct ecm_front_end_co
 	ecm_db_connection_ref(feci->ci);
 
 	/*
+	 * We are about to issue the command, record the time of transmission
+	 */
+	spin_lock_bh(&feci->lock);
+	feci->stats.cmd_time_begun = jiffies;
+	spin_unlock_bh(&feci->lock);
+
+	/*
 	 * Destroy the NSS connection cache entry.
 	 */
-	nss_tx_status = nss_ipv4_tx(ecm_nss_ipv4_nss_ipv4_mgr, &nim);
+	nss_tx_status = nss_ipv6_tx(ecm_nss_ipv6_nss_ipv6_mgr, &nim);
 	if (nss_tx_status == NSS_TX_SUCCESS) {
+		/*
+		 * Reset the driver_fail count - transmission was okay here.
+		 */
 		spin_lock_bh(&feci->lock);
-		feci->stats.driver_fail = 0;			/* Reset */
-		feci->stats.cmd_time_begun = jiffies;		/* Capture time we issued the command */
+		feci->stats.driver_fail = 0;
 		spin_unlock_bh(&feci->lock);
 		return;
 	}
@@ -1591,22 +1564,23 @@ static void ecm_nss_multicast_ipv4_connection_decelerate(struct ecm_front_end_co
 	/*
 	 * Could not send the request, decrement the decel pending counter
 	 */
-	spin_lock_bh(&ecm_nss_ipv4_lock);
-	ecm_nss_ipv4_pending_decel_count--;
-	DEBUG_ASSERT(ecm_nss_ipv4_pending_decel_count >= 0, "Bad decel pending counter\n");
-	spin_unlock_bh(&ecm_nss_ipv4_lock);
+	spin_lock_bh(&ecm_nss_ipv6_lock);
+	ecm_nss_ipv6_pending_decel_count--;
+	DEBUG_ASSERT(ecm_nss_ipv6_pending_decel_count >= 0, "Bad decel pending counter\n");
+	spin_unlock_bh(&ecm_nss_ipv6_lock);
+
 }
 
 /*
- * ecm_nss_multicast_ipv4_connection_defunct_callback()
+ * ecm_nss_multicast_ipv6_connection_defunct_callback()
  *	Callback to be called when a Mcast connection has become defunct.
  */
-static void ecm_nss_multicast_ipv4_connection_defunct_callback(void *arg)
+static void ecm_nss_multicast_ipv6_connection_defunct_callback(void *arg)
 {
 	struct ecm_front_end_connection_instance *feci = (struct ecm_front_end_connection_instance *)arg;
-	struct ecm_nss_multicast_ipv4_connection_instance *nmci = (struct ecm_nss_multicast_ipv4_connection_instance *)feci;
+	struct ecm_nss_multicast_ipv6_connection_instance *nmci = (struct ecm_nss_multicast_ipv6_connection_instance *)feci;
 
-	DEBUG_CHECK_MAGIC(nmci, ECM_NSS_MULTICAST_IPV4_CONNECTION_INSTANCE_MAGIC, "%p: magic failed", nmci);
+	DEBUG_CHECK_MAGIC(nmci, ECM_NSS_MULTICAST_IPV6_CONNECTION_INSTANCE_MAGIC, "%p: magic failed", nmci);
 
 	spin_lock_bh(&feci->lock);
 
@@ -1650,19 +1624,19 @@ static void ecm_nss_multicast_ipv4_connection_defunct_callback(void *arg)
 	 * NOTE: If the mode is accel pending then the decel will be actioned when that is completed.
 	 */
 	spin_unlock_bh(&feci->lock);
-	ecm_nss_multicast_ipv4_connection_decelerate(feci);
+	ecm_nss_multicast_ipv6_connection_decelerate(feci);
 }
 
 /*
- * ecm_nss_multicast_ipv4_connection_accel_state_get()
+ * ecm_nss_multicast_ipv6_connection_accel_state_get()
  *	Get acceleration state
  */
-static ecm_front_end_acceleration_mode_t ecm_nss_multicast_ipv4_connection_accel_state_get(struct ecm_front_end_connection_instance *feci)
+static ecm_front_end_acceleration_mode_t ecm_nss_multicast_ipv6_connection_accel_state_get(struct ecm_front_end_connection_instance *feci)
 {
-	struct ecm_nss_multicast_ipv4_connection_instance *nmci = (struct ecm_nss_multicast_ipv4_connection_instance *)feci;
+	struct ecm_nss_multicast_ipv6_connection_instance *nmci = (struct ecm_nss_multicast_ipv6_connection_instance *)feci;
 	ecm_front_end_acceleration_mode_t state;
 
-	DEBUG_CHECK_MAGIC(nmci, ECM_NSS_MULTICAST_IPV4_CONNECTION_INSTANCE_MAGIC, "%p: magic failed", nmci);
+	DEBUG_CHECK_MAGIC(nmci, ECM_NSS_MULTICAST_IPV6_CONNECTION_INSTANCE_MAGIC, "%p: magic failed", nmci);
 	spin_lock_bh(&feci->lock);
 	state = feci->accel_mode;
 	spin_unlock_bh(&feci->lock);
@@ -1670,16 +1644,16 @@ static ecm_front_end_acceleration_mode_t ecm_nss_multicast_ipv4_connection_accel
 }
 
 /*
- * ecm_nss_multicast_ipv4_connection_action_seen()
+ * ecm_nss_multicast_ipv6_connection_action_seen()
  *	Acceleration action / activity has been seen for this connection.
  *
  * NOTE: Call the action_seen() method when the NSS has demonstrated that it has offloaded some data for a connection.
  */
-static void ecm_nss_multicast_ipv4_connection_action_seen(struct ecm_front_end_connection_instance *feci)
+static void ecm_nss_multicast_ipv6_connection_action_seen(struct ecm_front_end_connection_instance *feci)
 {
-	struct ecm_nss_multicast_ipv4_connection_instance *nmci = (struct ecm_nss_multicast_ipv4_connection_instance *)feci;
+	struct ecm_nss_multicast_ipv6_connection_instance *nmci = (struct ecm_nss_multicast_ipv6_connection_instance *)feci;
 
-	DEBUG_CHECK_MAGIC(nmci, ECM_NSS_MULTICAST_IPV4_CONNECTION_INSTANCE_MAGIC, "%p: magic failed", nmci);
+	DEBUG_CHECK_MAGIC(nmci, ECM_NSS_MULTICAST_IPV6_CONNECTION_INSTANCE_MAGIC, "%p: magic failed", nmci);
 	DEBUG_INFO("%p: Action seen\n", nmci);
 	spin_lock_bh(&feci->lock);
 	feci->stats.no_action_seen = 0;
@@ -1687,17 +1661,17 @@ static void ecm_nss_multicast_ipv4_connection_action_seen(struct ecm_front_end_c
 }
 
 /*
- * ecm_nss_multicast_ipv4_connection_accel_ceased()
+ * ecm_nss_multicast_ipv6_connection_accel_ceased()
  *	NSS has indicated that acceleration has stopped.
  *
  * NOTE: This is called in response to an NSS self-initiated termination of acceleration.
  * This must NOT be called because the ECM terminated the acceleration.
  */
-static void ecm_nss_multicast_ipv4_connection_accel_ceased(struct ecm_front_end_connection_instance *feci)
+static void ecm_nss_multicast_ipv6_connection_accel_ceased(struct ecm_front_end_connection_instance *feci)
 {
-	struct ecm_nss_multicast_ipv4_connection_instance *nmci = (struct ecm_nss_multicast_ipv4_connection_instance *)feci;
+	struct ecm_nss_multicast_ipv6_connection_instance *nmci = (struct ecm_nss_multicast_ipv6_connection_instance *)feci;
 
-	DEBUG_CHECK_MAGIC(nmci, ECM_NSS_MULTICAST_IPV4_CONNECTION_INSTANCE_MAGIC, "%p: magic failed", nmci);
+	DEBUG_CHECK_MAGIC(nmci, ECM_NSS_MULTICAST_IPV6_CONNECTION_INSTANCE_MAGIC, "%p: magic failed", nmci);
 	DEBUG_INFO("%p: accel ceased\n", nmci);
 
 	spin_lock_bh(&feci->lock);
@@ -1744,43 +1718,43 @@ static void ecm_nss_multicast_ipv4_connection_accel_ceased(struct ecm_front_end_
 	/*
 	 * Mcast acceleration ends
 	 */
-	spin_lock_bh(&ecm_nss_ipv4_lock);
-	ecm_nss_multicast_ipv4_accelerated_count--;	/* Protocol specific counter */
-	DEBUG_ASSERT(ecm_nss_multicast_ipv4_accelerated_count >= 0, "Bad Mcast accel counter\n");
-	ecm_nss_ipv4_accelerated_count--;		/* General running counter */
-	DEBUG_ASSERT(ecm_nss_ipv4_accelerated_count >= 0, "Bad accel counter\n");
-	spin_unlock_bh(&ecm_nss_ipv4_lock);
+	spin_lock_bh(&ecm_nss_ipv6_lock);
+	ecm_nss_multicast_ipv6_accelerated_count--;	/* Protocol specific counter */
+	DEBUG_ASSERT(ecm_nss_multicast_ipv6_accelerated_count >= 0, "Bad Mcast accel counter\n");
+	ecm_nss_ipv6_accelerated_count--;		/* General running counter */
+	DEBUG_ASSERT(ecm_nss_ipv6_accelerated_count >= 0, "Bad accel counter\n");
+	spin_unlock_bh(&ecm_nss_ipv6_lock);
 }
 
 /*
- * ecm_nss_multicast_ipv4_connection_ref()
+ * ecm_nss_multicast_ipv6_connection_ref()
  *	Ref a connection front end instance
  */
-static void ecm_nss_multicast_ipv4_connection_ref(struct ecm_front_end_connection_instance *feci)
+static void ecm_nss_multicast_ipv6_connection_ref(struct ecm_front_end_connection_instance *feci)
 {
-	struct ecm_nss_multicast_ipv4_connection_instance *nmci = (struct ecm_nss_multicast_ipv4_connection_instance *)feci;
+	struct ecm_nss_multicast_ipv6_connection_instance *nmci = (struct ecm_nss_multicast_ipv6_connection_instance *)feci;
 
-	DEBUG_CHECK_MAGIC(nmci, ECM_NSS_MULTICAST_IPV4_CONNECTION_INSTANCE_MAGIC, "%p: magic failed", nmci);
+	DEBUG_CHECK_MAGIC(nmci, ECM_NSS_MULTICAST_IPV6_CONNECTION_INSTANCE_MAGIC, "%p: magic failed", nmci);
 	spin_lock_bh(&feci->lock);
 	feci->refs++;
-	DEBUG_TRACE("%p: nmci ref %d\n", feci, feci->refs);
-	DEBUG_ASSERT(feci->refs > 0, "%p: ref wrap\n", feci);
+	DEBUG_TRACE("%p: nmci ref %d\n", nmci, feci->refs);
+	DEBUG_ASSERT(feci->refs > 0, "%p: ref wrap\n", nmci);
 	spin_unlock_bh(&feci->lock);
 }
 
 /*
- * ecm_nss_multicast_ipv4_connection_deref()
+ * ecm_nss_multicast_ipv6_connection_deref()
  *	Deref a connection front end instance
  */
-static int ecm_nss_multicast_ipv4_connection_deref(struct ecm_front_end_connection_instance *feci)
+static int ecm_nss_multicast_ipv6_connection_deref(struct ecm_front_end_connection_instance *feci)
 {
-	struct ecm_nss_multicast_ipv4_connection_instance *nmci = (struct ecm_nss_multicast_ipv4_connection_instance *)feci;
+	struct ecm_nss_multicast_ipv6_connection_instance *nmci = (struct ecm_nss_multicast_ipv6_connection_instance *)feci;
 
-	DEBUG_CHECK_MAGIC(nmci, ECM_NSS_MULTICAST_IPV4_CONNECTION_INSTANCE_MAGIC, "%p: magic failed", nmci);
+	DEBUG_CHECK_MAGIC(nmci, ECM_NSS_MULTICAST_IPV6_CONNECTION_INSTANCE_MAGIC, "%p: magic failed", nmci);
 
 	spin_lock_bh(&feci->lock);
 	feci->refs--;
-	DEBUG_ASSERT(feci->refs >= 0, "%p: ref wrap\n", feci);
+	DEBUG_ASSERT(feci->refs >= 0, "%p: ref wrap\n", nmci);
 
 	if (feci->refs > 0) {
 		int refs = feci->refs;
@@ -1796,23 +1770,24 @@ static int ecm_nss_multicast_ipv4_connection_deref(struct ecm_front_end_connecti
 	DEBUG_TRACE("%p: nmci final\n", nmci);
 	DEBUG_CLEAR_MAGIC(nmci);
 	kfree(nmci);
+
 	return 0;
 }
 
 #ifdef ECM_STATE_OUTPUT_ENABLE
 /*
- * ecm_nss_multicast_ipv4_connection_state_get()
+ * ecm_nss_multicast_ipv6_connection_state_get()
  *	Return state of this multicast front end instance
  */
-static int ecm_nss_multicast_ipv4_connection_state_get(struct ecm_front_end_connection_instance *feci, struct ecm_state_file_instance *sfi)
+static int ecm_nss_multicast_ipv6_connection_state_get(struct ecm_front_end_connection_instance *feci, struct ecm_state_file_instance *sfi)
 {
 	int result;
 	bool can_accel;
 	ecm_front_end_acceleration_mode_t accel_mode;
 	struct ecm_front_end_connection_mode_stats stats;
-	struct ecm_nss_multicast_ipv4_connection_instance *nmci = (struct ecm_nss_multicast_ipv4_connection_instance *)feci;
+	struct ecm_nss_multicast_ipv6_connection_instance *nmci = (struct ecm_nss_multicast_ipv6_connection_instance *)feci;
 
-	DEBUG_CHECK_MAGIC(nmci, ECM_NSS_MULTICAST_IPV4_CONNECTION_INSTANCE_MAGIC, "%p: magic failed", nmci);
+	DEBUG_CHECK_MAGIC(nmci, ECM_NSS_MULTICAST_IPV6_CONNECTION_INSTANCE_MAGIC, "%p: magic failed", nmci);
 
 	spin_lock_bh(&feci->lock);
 	can_accel = feci->can_accel;
@@ -1820,7 +1795,7 @@ static int ecm_nss_multicast_ipv4_connection_state_get(struct ecm_front_end_conn
 	memcpy(&stats, &feci->stats, sizeof(struct ecm_front_end_connection_mode_stats));
 	spin_unlock_bh(&feci->lock);
 
-	if ((result = ecm_state_prefix_add(sfi, "front_end_v4.multicast"))) {
+	if ((result = ecm_state_prefix_add(sfi, "front_end_v6.multicast"))) {
 		return result;
 	}
 
@@ -1864,25 +1839,24 @@ static int ecm_nss_multicast_ipv4_connection_state_get(struct ecm_front_end_conn
 		return result;
 	}
 
-	return ecm_state_prefix_remove(sfi);
+ 	return ecm_state_prefix_remove(sfi);
 }
 #endif
 
 /*
- * ecm_nss_multicast_ipv4_connection_instance_alloc()
+ * ecm_nss_multicast_ipv6_connection_instance_alloc()
  *	Create a front end instance specific for Mcast connection
  */
-static struct ecm_nss_multicast_ipv4_connection_instance *ecm_nss_multicast_ipv4_connection_instance_alloc(
+static struct ecm_nss_multicast_ipv6_connection_instance *ecm_nss_multicast_ipv6_connection_instance_alloc(
 								struct ecm_db_connection_instance *ci,
 								struct ecm_db_mapping_instance *src_mi,
 								struct ecm_db_mapping_instance *dest_mi,
-								int protocol,
 								bool can_accel)
 {
-	struct ecm_nss_multicast_ipv4_connection_instance *nmci;
+	struct ecm_nss_multicast_ipv6_connection_instance *nmci;
 	struct ecm_front_end_connection_instance *feci;
 
-	nmci = (struct ecm_nss_multicast_ipv4_connection_instance *)kzalloc(sizeof(struct ecm_nss_multicast_ipv4_connection_instance), GFP_ATOMIC | __GFP_NOWARN);
+	nmci = (struct ecm_nss_multicast_ipv6_connection_instance *)kzalloc(sizeof(struct ecm_nss_multicast_ipv6_connection_instance), GFP_ATOMIC | __GFP_NOWARN);
 	if (!nmci) {
 		DEBUG_WARN("Mcast Front end alloc failed\n");
 		return NULL;
@@ -1893,16 +1867,16 @@ static struct ecm_nss_multicast_ipv4_connection_instance *ecm_nss_multicast_ipv4
 	 */
 	feci = (struct ecm_front_end_connection_instance *)nmci;
 	feci->refs = 1;
-	DEBUG_SET_MAGIC(nmci, ECM_NSS_MULTICAST_IPV4_CONNECTION_INSTANCE_MAGIC);
+	DEBUG_SET_MAGIC(nmci, ECM_NSS_MULTICAST_IPV6_CONNECTION_INSTANCE_MAGIC);
 	spin_lock_init(&feci->lock);
 
 	feci->can_accel = can_accel;
-	feci->accel_mode = (can_accel)? ECM_FRONT_END_ACCELERATION_MODE_DECEL : ECM_FRONT_END_ACCELERATION_MODE_FAIL_DENIED;
-	spin_lock_bh(&ecm_nss_ipv4_lock);
-	feci->stats.no_action_seen_limit = ecm_nss_ipv4_no_action_limit_default;
-	feci->stats.driver_fail_limit = ecm_nss_ipv4_driver_fail_limit_default;
-	feci->stats.nss_nack_limit = ecm_nss_ipv4_nack_limit_default;
-	spin_unlock_bh(&ecm_nss_ipv4_lock);
+	feci->accel_mode = (can_accel) ? ECM_FRONT_END_ACCELERATION_MODE_DECEL : ECM_FRONT_END_ACCELERATION_MODE_FAIL_DENIED;
+	spin_lock_bh(&ecm_nss_ipv6_lock);
+	feci->stats.no_action_seen_limit = ecm_nss_ipv6_no_action_limit_default;
+	feci->stats.driver_fail_limit = ecm_nss_ipv6_driver_fail_limit_default;
+	feci->stats.nss_nack_limit = ecm_nss_ipv6_nack_limit_default;
+	spin_unlock_bh(&ecm_nss_ipv6_lock);
 
 	/*
 	 * Copy reference to connection - no need to ref ci as ci maintains a ref to this instance instead (this instance persists for as long as ci does)
@@ -1912,24 +1886,23 @@ static struct ecm_nss_multicast_ipv4_connection_instance *ecm_nss_multicast_ipv4
 	/*
 	 * Populate the methods and callbacks
 	 */
-	feci->ref = ecm_nss_multicast_ipv4_connection_ref;
-	feci->deref = ecm_nss_multicast_ipv4_connection_deref;
-	feci->decelerate = ecm_nss_multicast_ipv4_connection_decelerate;
-	feci->accel_state_get = ecm_nss_multicast_ipv4_connection_accel_state_get;
-	feci->action_seen = ecm_nss_multicast_ipv4_connection_action_seen;
-	feci->accel_ceased = ecm_nss_multicast_ipv4_connection_accel_ceased;
+	feci->ref = ecm_nss_multicast_ipv6_connection_ref;
+	feci->deref = ecm_nss_multicast_ipv6_connection_deref;
+	feci->decelerate = ecm_nss_multicast_ipv6_connection_decelerate;
+	feci->accel_state_get = ecm_nss_multicast_ipv6_connection_accel_state_get;
+	feci->action_seen = ecm_nss_multicast_ipv6_connection_action_seen;
+	feci->accel_ceased = ecm_nss_multicast_ipv6_connection_accel_ceased;
 #ifdef ECM_STATE_OUTPUT_ENABLE
-	feci->state_get = ecm_nss_multicast_ipv4_connection_state_get;
+	feci->state_get = ecm_nss_multicast_ipv6_connection_state_get;
 #endif
-
 	return nmci;
 }
 
 /*
- * ecm_nss_multicast_ipv4_connection_process()
- *	Process a UDP multicast flow
+ * ecm_nss_multicast_ipv6_connection_process()
+ *	Process a UDP Multicast packet
  */
-unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_dev,
+unsigned int ecm_nss_multicast_ipv6_connection_process(struct net_device *out_dev,
 							struct net_device *in_dev,
 							uint8_t *src_node_addr,
 							uint8_t *dest_node_addr,
@@ -1938,29 +1911,27 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 							struct nf_conn *ct, ecm_tracker_sender_type_t sender,
 							struct nf_conntrack_tuple *orig_tuple, struct nf_conntrack_tuple *reply_tuple)
 {
-	int vif, if_cnt;
-	uint32_t dst_dev[MAXVIFS];
 	struct udphdr *udp_hdr;
 	struct udphdr udp_hdr_buff;
+	struct in6_addr origin6;
+	struct in6_addr group6;
+	struct ecm_db_multicast_tuple_instance *tuple_instance;
 	int src_port;
 	int dest_port;
-	int src_port_nat = 0;
-	struct net_device *in_dev_nat = NULL;
-	struct ecm_db_multicast_tuple_instance *tuple_instance;
 	struct ecm_db_connection_instance *ci;
+	ecm_db_direction_t ecm_dir = ECM_DB_DIRECTION_NON_NAT;
 	ip_addr_t match_addr;
 	struct ecm_classifier_instance *assignments[ECM_CLASSIFIER_TYPES];
 	int aci_index;
+	int32_t mc_if_cnt;
 	int assignment_count;
-	ecm_db_direction_t ecm_dir = ECM_DB_DIRECTION_INGRESS_NAT;
 	ecm_db_timer_group_t ci_orig_timer_group;
 	struct ecm_classifier_process_response prevalent_pr;
 	ip_addr_t ip_src_addr;
 	ip_addr_t ip_dest_addr;
-	ip_addr_t ip_src_addr_nat;
-	__be32 ip_src;
-	__be32 ip_grp;
+	uint32_t mc_dest_if[ECM_DB_MULTICAST_IF_MAX];
 	bool br_dev_found_in_mfc = false;
+
 	int protocol = (int)orig_tuple->dst.protonum;
 
 	if (protocol != IPPROTO_UDP) {
@@ -1987,36 +1958,32 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 		reply_tuple->dst.u.udp.port = udp_hdr->source;
 	}
 
-	ECM_NIN4_ADDR_TO_IP_ADDR(ip_src_addr, orig_tuple->src.u3.ip);
-	ECM_NIN4_ADDR_TO_IP_ADDR(ip_dest_addr, orig_tuple->dst.u3.ip);
-	ECM_NIN4_ADDR_TO_IP_ADDR(ip_src_addr_nat, reply_tuple->dst.u3.ip);
-
-	ECM_IP_ADDR_TO_NIN4_ADDR(ip_src, ip_src_addr);
-	ECM_IP_ADDR_TO_NIN4_ADDR(ip_grp, ip_dest_addr);
-
 	/*
-	 * Extract Port numbers
+	 * Extract transport port information
+	 * Refer to the ecm_nss_ipv6_process() for information on how we extract this information.
 	 */
 	src_port = ntohs(orig_tuple->src.u.udp.port);
 	dest_port = ntohs(orig_tuple->dst.u.udp.port);
-	src_port_nat = ntohs(reply_tuple->dst.u.udp.port);
+
+	ECM_NIN6_ADDR_TO_IP_ADDR(ip_src_addr, orig_tuple->src.u3.in6);
+	ECM_NIN6_ADDR_TO_IP_ADDR(ip_dest_addr, orig_tuple->dst.u3.in6);
 
 	/*
-	 * Initialize in_dev_nat to default in_dev.
+	 * Query MFC/Bridge Snooper to access the destination interface list.
 	 */
-	in_dev_nat = in_dev;
+	ECM_IP_ADDR_TO_NIN6_ADDR(origin6, ip_src_addr);
+	ECM_IP_ADDR_TO_NIN6_ADDR(group6, ip_dest_addr);
 
-	/*
-	 * Query MFC/Bridge to access the destination interface list.
-	 */
-	memset(dst_dev, 0, sizeof(dst_dev));
-	if_cnt =  ipmr_find_mfc_entry(&init_net, ip_src, ip_grp, ECM_DB_MULTICAST_IF_MAX, dst_dev);
+	memset(mc_dest_if, 0, sizeof(mc_dest_if));
+
+	mc_if_cnt =  ip6mr_find_mfc_entry(&init_net, &origin6, &group6, ECM_DB_MULTICAST_IF_MAX, mc_dest_if);
+
 	if (is_routed) {
 		/*
 		 * This is a routed flow, hence look for a valid MFC rule
 		 */
-		if (if_cnt <= 0) {
-			DEBUG_WARN("Not found a valid vif count %d\n", if_cnt);
+		if (mc_if_cnt <= 0){
+			DEBUG_WARN("Not found a valid vif count %d\n", mc_if_cnt);
 			return NF_ACCEPT;
 		}
 
@@ -2024,82 +1991,48 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 		 * Check for the presence of a bridge device in the destination
 		 * interface list given to us by MFC
 		 */
-		br_dev_found_in_mfc = ecm_interface_multicast_check_for_br_dev(dst_dev, if_cnt);
+
+		br_dev_found_in_mfc = ecm_interface_multicast_check_for_br_dev(mc_dest_if, mc_if_cnt);
 	} else {
-		if (if_cnt > 0) {
+		if (mc_if_cnt > 0) {
+
 			/*
 			 *  In case of Bridge + Route there is chance that Bridge post routing hook called first and
 			 *  is_route flag is false. To make sure this is a routed flow, query the MFC and if MFC if_cnt
 			 *  is not Zero than this is a routed flow.
 			 */
 			is_routed = true;
-			br_dev_found_in_mfc = ecm_interface_multicast_check_for_br_dev(dst_dev, if_cnt);
+			br_dev_found_in_mfc = ecm_interface_multicast_check_for_br_dev(mc_dest_if, mc_if_cnt);
 		} else {
+
 			/*
 			 * Packet flow is pure bridge. Try to query the snooper for the destination
 			 * interface list
 			 */
-			if_cnt = mc_bridge_ipv4_get_if(out_dev->master, ip_src, ip_grp, ECM_DB_MULTICAST_IF_MAX, dst_dev);
-			if (if_cnt <= 0) {
-				DEBUG_WARN("Not found a valid MCS if count %d\n", if_cnt);
+			mc_if_cnt = mc_bridge_ipv6_get_if(out_dev->master, &origin6, &group6, ECM_DB_MULTICAST_IF_MAX, mc_dest_if);
+			if (mc_if_cnt <= 0) {
+				DEBUG_WARN("Not found a valid MFC if count %d\n", mc_if_cnt);
 				return NF_ACCEPT;
 			}
 		}
 	}
 
-	/*
-	 * Work out if this packet involves NAT or not.
-	 * If it does involve NAT then work out if this is an ingressing or egressing packet.
-	 */
-	if (!ECM_IP_ADDR_MATCH(ip_src_addr, ip_src_addr_nat)) {
-		int nat_if_found = 0;
-		bool from_local_addr;
-
-		/*
-		 * Egressing NAT
-		 */
-		in_dev_nat = ecm_interface_dev_find_by_addr(ip_src_addr_nat, &from_local_addr);
-		if (!in_dev_nat) {
-			return NF_ACCEPT;
-		}
-
-		/*
-		 * Try to find the egress NAT interface in the list of destination
-		 * interfaces
-		 */
-		for (vif = 0; vif < if_cnt; vif++) {
-			if (dst_dev[vif] == in_dev_nat->ifindex) {
-				nat_if_found = 1;
-				break;
-			}
-		}
-		dev_put(in_dev_nat);
-
-		/*
-		 * We have not found the NAT interface in the MFC destination interface
-		 * list for a NAT flow, which should not happen.
-		 */
-		if (!nat_if_found) {
-			return NF_ACCEPT;
-		}
-	}
-
-
-	DEBUG_TRACE("MCAST UDP src: " ECM_IP_ADDR_DOT_FMT ":%d, dest: " ECM_IP_ADDR_DOT_FMT ":%d, dir %d\n",
-			ECM_IP_ADDR_TO_DOT(ip_src_addr), src_port, ECM_IP_ADDR_TO_DOT(ip_dest_addr), dest_port, ecm_dir);
+	DEBUG_TRACE("UDP src: " ECM_IP_ADDR_OCTAL_FMT ":%d, dest: " ECM_IP_ADDR_OCTAL_FMT ":%d\n",
+			ECM_IP_ADDR_TO_OCTAL(ip_src_addr), src_port, ECM_IP_ADDR_TO_OCTAL(ip_dest_addr), dest_port);
 
 	/*
 	 * Look up a connection
 	 */
-	ci = ecm_db_connection_find_and_ref(ip_src_addr, ip_dest_addr, protocol, src_port, dest_port);
+	ci = ecm_db_connection_find_and_ref(ip_src_addr, ip_dest_addr, IPPROTO_UDP, src_port, dest_port);
 
+	/*
+	 * If there is no existing connection then create a new one.
+	 */
 	if (unlikely(!ci)) {
 		struct ecm_db_mapping_instance *src_mi;
 		struct ecm_db_mapping_instance *dest_mi;
-		struct ecm_db_mapping_instance *src_nat_mi;
 		struct ecm_db_node_instance *src_ni;
 		struct ecm_db_node_instance *dest_ni;
-		struct ecm_db_node_instance *src_nat_ni;
 		struct ecm_classifier_default_instance *dci;
 		struct ecm_front_end_connection_instance *feci;
 		struct ecm_db_connection_instance *nci;
@@ -2107,24 +2040,23 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 		struct ecm_db_iface_instance *to_list;
 		struct ecm_db_iface_instance *to_list_single;
 		struct ecm_db_iface_instance *to_list_temp[ECM_DB_IFACE_HEIRARCHY_MAX];
-		struct ecm_db_iface_instance *from_nat_list[ECM_DB_IFACE_HEIRARCHY_MAX];
 		ecm_classifier_type_t classifier_type;
-		int32_t from_list_first;
-		int32_t interface_idx_cnt = 0;
-		int32_t from_nat_list_first;
 		int32_t *to_list_first;
 		int32_t *to_first;
-		uint8_t dest_mac_addr[ETH_ALEN];
+		int32_t from_list_first;
+		int32_t interface_idx_cnt = 0;
+		int vif;
+		char dest_mac_addr[6];
 
-		DEBUG_TRACE("New UDP connection from " ECM_IP_ADDR_DOT_FMT ":%u to " ECM_IP_ADDR_DOT_FMT ":%u\n", ECM_IP_ADDR_TO_DOT(ip_src_addr), \
-				src_port, ECM_IP_ADDR_TO_DOT(ip_dest_addr), dest_port);
+		DEBUG_TRACE("New UDP connection from " ECM_IP_ADDR_OCTAL_FMT ":%u to " ECM_IP_ADDR_OCTAL_FMT ":%u\n",
+				ECM_IP_ADDR_TO_OCTAL(ip_src_addr), src_port, ECM_IP_ADDR_TO_OCTAL(ip_dest_addr), dest_port);
 
 		/*
 		 * Before we attempt to create the connection are we being terminated?
 		 */
-		spin_lock_bh(&ecm_nss_ipv4_lock);
-		if (ecm_nss_ipv4_terminate_pending) {
-			spin_unlock_bh(&ecm_nss_ipv4_lock);
+		spin_lock_bh(&ecm_nss_ipv6_lock);
+		if (ecm_nss_ipv6_terminate_pending) {
+			spin_unlock_bh(&ecm_nss_ipv6_lock);
 			DEBUG_WARN("Terminating\n");
 
 			/*
@@ -2132,7 +2064,7 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 			 */
 			return NF_ACCEPT;
 		}
-		spin_unlock_bh(&ecm_nss_ipv4_lock);
+		spin_unlock_bh(&ecm_nss_ipv6_lock);
 
 		/*
 		 * Now allocate the new connection
@@ -2149,11 +2081,13 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 		ecm_translate_multicast_mac(ip_dest_addr, dest_mac_addr);
 
 		/*
-		 * Get the src and destination mappings.
+		 * Get the src and destination mappings
 		 * For this we also need the interface lists which we also set upon the new connection while we are at it.
+		 * GGG TODO rework terms of "src/dest" - these need to be named consistently as from/to as per database terms.
+		 * GGG TODO The empty list checks should not be needed, mapping_establish_and_ref() should fail out if there is no list anyway.
 		 */
 		DEBUG_TRACE("%p: Create the 'from' interface heirarchy list\n", nci);
-		from_list_first = ecm_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, 4, protocol, in_dev, is_routed, in_dev, src_node_addr, dest_node_addr);
+		from_list_first = ecm_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, 6, IPPROTO_UDP, in_dev, is_routed, in_dev, src_node_addr, dest_node_addr);
 		if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to obtain 'from' heirarchy list\n");
@@ -2161,27 +2095,28 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 		}
 		ecm_db_connection_from_interfaces_reset(nci, from_list, from_list_first);
 
-		DEBUG_TRACE("%p: Establish source node\n", nci);
-		src_ni = ecm_nss_ipv4_node_establish_and_ref(in_dev, ip_src_addr, from_list, from_list_first, src_node_addr);
+		DEBUG_TRACE("%p: Create source node\n", nci);
+		src_ni = ecm_nss_ipv6_node_establish_and_ref(in_dev, ip_src_addr, from_list, from_list_first, src_node_addr);
 		ecm_db_connection_interfaces_deref(from_list, from_list_first);
 		if (!src_ni) {
-			DEBUG_WARN("%p: Failed to establish source node\n", nci);
 			ecm_db_connection_deref(nci);
+			DEBUG_WARN("Failed to establish source node\n");
 			return NF_ACCEPT;
 		}
 
 		DEBUG_TRACE("%p: Create source mapping\n", nci);
-		src_mi = ecm_nss_ipv4_mapping_establish_and_ref(ip_src_addr, src_port);
+		src_mi = ecm_nss_ipv6_mapping_establish_and_ref(ip_src_addr, src_port);
 		if (!src_mi) {
-			DEBUG_WARN("%p: Failed to establish src mapping\n", nci);
 			ecm_db_node_deref(src_ni);
 			ecm_db_connection_deref(nci);
+			DEBUG_WARN("Failed to establish src mapping\n");
 			return NF_ACCEPT;
 		}
 
+		DEBUG_TRACE("%p: Create the 'to' interface heirarchy list\n", nci);
+
 		to_list = (struct ecm_db_iface_instance *)kzalloc(ECM_DB_TO_MCAST_INTERFACES_SIZE, GFP_ATOMIC | __GFP_NOWARN);
 		if (!to_list) {
-			DEBUG_WARN("%p: Failed to alloc memory for multicast dest interface hierarchies\n", nci);
 			ecm_db_node_deref(src_ni);
 			ecm_db_connection_deref(nci);
 			return NF_ACCEPT;
@@ -2189,7 +2124,6 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 
 		to_list_first = (int32_t *)kzalloc(sizeof(int32_t *) * ECM_DB_MULTICAST_IF_MAX, GFP_ATOMIC | __GFP_NOWARN);
 		if (!to_list_first) {
-			DEBUG_WARN("%p: Failed to alloc memory for multicast dest interfaces first list\n", nci);
 			ecm_db_node_deref(src_ni);
 			ecm_db_connection_deref(nci);
 			kfree(to_list);
@@ -2205,24 +2139,22 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 			*to_first = ECM_DB_IFACE_HEIRARCHY_MAX;
 		}
 
-		interface_idx_cnt = ecm_nss_multicast_connection_to_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, in_dev, out_dev->master, if_cnt, dst_dev, to_list_first, is_routed);
+		interface_idx_cnt = ecm_nss_multicast_ipv6_interface_heirarchy_construct(to_list, in_dev, out_dev->master, ip_src_addr,
+										      ip_dest_addr, mc_if_cnt, mc_dest_if, to_list_first, is_routed);
 		if (interface_idx_cnt == 0) {
-			ecm_db_node_deref(src_ni);
+			DEBUG_WARN("Failed to obtain 'to' heirarchy list\n");
 			ecm_db_mapping_deref(src_mi);
+			ecm_db_node_deref(src_ni);
 			ecm_db_connection_deref(nci);
-			DEBUG_WARN("%p: Failed to obtain mutlicast 'to' heirarchy list\n", nci);
 			kfree(to_list);
 			kfree(to_list_first);
 			return NF_ACCEPT;
 		}
+
 		ecm_db_multicast_connection_to_interfaces_reset(nci, to_list, to_list_first);
 
-		DEBUG_TRACE("%p: Create destination node\n", nci);
-		ecm_db_multicast_copy_if_heirarchy(to_list_temp, to_list);
-		dest_ni = ecm_nss_ipv4_node_establish_and_ref(out_dev, ip_dest_addr, to_list_temp, *to_list_first, dest_mac_addr);
-
 		/*
-		 * De-ref the Multicast destination interface list
+		 * De-ref the destination interface list
 		 */
 		for (vif = 0; vif < ECM_DB_MULTICAST_IF_MAX; vif++) {
 			to_list_single = ecm_db_multicast_if_heirarchy_get(to_list, vif);
@@ -2231,106 +2163,49 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 			ecm_db_connection_interfaces_deref(to_list_temp, *to_first);
 		}
 
+		DEBUG_TRACE("%p: Create dest node\n", nci);
+		ecm_db_multicast_copy_if_heirarchy(to_list_temp, to_list);
+		dest_ni = ecm_nss_ipv6_node_establish_and_ref(out_dev, ip_dest_addr, to_list_temp, *to_list_first, dest_mac_addr);
+
 		if (!dest_ni) {
-			ecm_db_node_deref(src_ni);
-			ecm_db_mapping_deref(src_mi);
-			ecm_db_connection_deref(nci);
-			kfree(to_list);
-			kfree(to_list_first);
-			DEBUG_WARN("Failed to establish destination node\n");
-			return NF_ACCEPT;
-		}
-
-		DEBUG_TRACE("%p: Create source mapping\n", nci);
-		dest_mi = ecm_nss_ipv4_mapping_establish_and_ref(ip_dest_addr, dest_port);
-		if (!src_mi) {
 			for (vif = 0; vif < ECM_DB_MULTICAST_IF_MAX; vif++) {
 				to_list_single = ecm_db_multicast_if_heirarchy_get(to_list, vif);
 				ecm_db_multicast_copy_if_heirarchy(to_list_temp, to_list_single);
 				to_first = ecm_db_multicast_if_first_get_at_index(to_list_first, vif);
 				ecm_db_connection_interfaces_deref(to_list_temp, *to_first);
 			}
-
-			ecm_db_node_deref(src_ni);
-			ecm_db_node_deref(dest_ni);
 			ecm_db_mapping_deref(src_mi);
+			ecm_db_node_deref(src_ni);
 			ecm_db_connection_deref(nci);
 			kfree(to_list);
 			kfree(to_list_first);
-			DEBUG_WARN("Failed to establish dst mapping\n");
+			DEBUG_WARN("Failed to establish dest node\n");
 			return NF_ACCEPT;
 		}
 
-		DEBUG_TRACE("%p: Create the 'from NAT' interface heirarchy list\n", nci);
-		from_nat_list_first = ecm_interface_heirarchy_construct(from_nat_list, ip_dest_addr, ip_src_addr_nat, 4, protocol, in_dev_nat, is_routed, in_dev_nat, src_node_addr, dest_node_addr);
-		if (from_nat_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
+		DEBUG_TRACE("%p: Create dest mapping\n", nci);
+		dest_mi = ecm_nss_ipv6_mapping_establish_and_ref(ip_dest_addr, dest_port);
+		if (!dest_mi) {
 			for (vif = 0; vif < ECM_DB_MULTICAST_IF_MAX; vif++) {
 				to_list_single = ecm_db_multicast_if_heirarchy_get(to_list, vif);
 				ecm_db_multicast_copy_if_heirarchy(to_list_temp, to_list_single);
 				to_first = ecm_db_multicast_if_first_get_at_index(to_list_first, vif);
 				ecm_db_connection_interfaces_deref(to_list_temp, *to_first);
 			}
-
-			ecm_db_node_deref(src_ni);
 			ecm_db_node_deref(dest_ni);
-			ecm_db_mapping_deref(dest_mi);
 			ecm_db_mapping_deref(src_mi);
+			ecm_db_node_deref(src_ni);
 			ecm_db_connection_deref(nci);
 			kfree(to_list);
 			kfree(to_list_first);
-			DEBUG_WARN("Failed to obtain 'from NAT' heirarchy list\n");
-			return NF_ACCEPT;
-		}
-		ecm_db_connection_from_nat_interfaces_reset(nci, from_nat_list, from_nat_list_first);
-
-		src_nat_ni = ecm_nss_ipv4_node_establish_and_ref(in_dev_nat, ip_src_addr_nat, from_nat_list, from_nat_list_first, src_node_addr);
-		ecm_db_connection_interfaces_deref(from_nat_list, from_nat_list_first);
-		if (!src_nat_ni) {
-			for (vif = 0; vif < ECM_DB_MULTICAST_IF_MAX; vif++) {
-				to_list_single = ecm_db_multicast_if_heirarchy_get(to_list, vif);
-				ecm_db_multicast_copy_if_heirarchy(to_list_temp, to_list_single);
-				to_first = ecm_db_multicast_if_first_get_at_index(to_list_first, vif);
-				ecm_db_connection_interfaces_deref(to_list_temp, *to_first);
-			}
-
-			ecm_db_node_deref(src_ni);
-			ecm_db_node_deref(dest_ni);
-			ecm_db_mapping_deref(src_mi);
-			ecm_db_mapping_deref(src_mi);
-			ecm_db_connection_deref(nci);
-			kfree(to_list);
-			kfree(to_list_first);
-			DEBUG_WARN("Failed to obtain 'from NAT' node\n");
-			return NF_ACCEPT;
-		}
-
-		DEBUG_TRACE("%p: Create from NAT mapping\n", nci);
-		src_nat_mi = ecm_nss_ipv4_mapping_establish_and_ref(ip_src_addr_nat, src_port_nat);
-
-		if (!src_nat_mi) {
-			for (vif = 0; vif < ECM_DB_MULTICAST_IF_MAX; vif++) {
-				to_list_single = ecm_db_multicast_if_heirarchy_get(to_list, vif);
-				ecm_db_multicast_copy_if_heirarchy(to_list_temp, to_list_single);
-				to_first = ecm_db_multicast_if_first_get_at_index(to_list_first, vif);
-				ecm_db_connection_interfaces_deref(to_list_temp, *to_first);
-			}
-
-			ecm_db_node_deref(src_ni);
-			ecm_db_node_deref(dest_ni);
-			ecm_db_node_deref(src_nat_ni);
-			ecm_db_mapping_deref(dest_mi);
-			ecm_db_mapping_deref(src_mi);
-			ecm_db_connection_deref(nci);
-			kfree(to_list);
-			kfree(to_list_first);
-			DEBUG_WARN("Failed to establish from nat mapping\n");
+			DEBUG_WARN("Failed to establish dest mapping\n");
 			return NF_ACCEPT;
 		}
 
 		/*
 		 * Connection must have a front end instance associated with it
 		 */
-		feci = (struct ecm_front_end_connection_instance *)ecm_nss_multicast_ipv4_connection_instance_alloc(nci, src_mi, dest_mi, protocol, can_accel);
+		feci = (struct ecm_front_end_connection_instance *)ecm_nss_multicast_ipv6_connection_instance_alloc(nci, src_mi, dest_mi, can_accel);
 		if (!feci) {
 			for (vif = 0; vif < ECM_DB_MULTICAST_IF_MAX; vif++) {
 				to_list_single = ecm_db_multicast_if_heirarchy_get(to_list, vif);
@@ -2338,13 +2213,10 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 				to_first = ecm_db_multicast_if_first_get_at_index(to_list_first, vif);
 				ecm_db_connection_interfaces_deref(to_list_temp, *to_first);
 			}
-
-			ecm_db_node_deref(src_ni);
-			ecm_db_node_deref(dest_ni);
-			ecm_db_node_deref(src_nat_ni);
 			ecm_db_mapping_deref(dest_mi);
-			ecm_db_mapping_deref(src_nat_mi);
+			ecm_db_node_deref(dest_ni);
 			ecm_db_mapping_deref(src_mi);
+			ecm_db_node_deref(src_ni);
 			ecm_db_connection_deref(nci);
 			kfree(to_list);
 			kfree(to_list_first);
@@ -2355,7 +2227,7 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 		/*
 		 * Every connection also needs a default classifier
 		 */
-		dci = ecm_classifier_default_instance_alloc(nci, protocol, ecm_dir, src_port, dest_port);
+		dci = ecm_classifier_default_instance_alloc(nci, IPPROTO_UDP, ecm_dir, src_port, dest_port);
 		if (!dci) {
 			for (vif = 0; vif < ECM_DB_MULTICAST_IF_MAX; vif++) {
 				to_list_single = ecm_db_multicast_if_heirarchy_get(to_list, vif);
@@ -2363,14 +2235,11 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 				to_first = ecm_db_multicast_if_first_get_at_index(to_list_first, vif);
 				ecm_db_connection_interfaces_deref(to_list_temp, *to_first);
 			}
-
 			feci->deref(feci);
-			ecm_db_node_deref(src_ni);
-			ecm_db_node_deref(dest_ni);
-			ecm_db_node_deref(src_nat_ni);
 			ecm_db_mapping_deref(dest_mi);
-			ecm_db_mapping_deref(src_nat_mi);
+			ecm_db_node_deref(dest_ni);
 			ecm_db_mapping_deref(src_mi);
+			ecm_db_node_deref(src_ni);
 			ecm_db_connection_deref(nci);
 			kfree(to_list);
 			kfree(to_list_first);
@@ -2384,7 +2253,7 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 		 * NOTE: Default classifier is a special case considered previously
 		 */
 		for (classifier_type = ECM_CLASSIFIER_TYPE_DEFAULT + 1; classifier_type < ECM_CLASSIFIER_TYPES; ++classifier_type) {
-			struct ecm_classifier_instance *aci = ecm_nss_ipv4_assign_classifier(nci, classifier_type);
+			struct ecm_classifier_instance *aci = ecm_nss_ipv6_assign_classifier(nci, classifier_type);
 			if (aci) {
 				aci->deref(aci);
 			} else {
@@ -2396,13 +2265,10 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 					to_first = ecm_db_multicast_if_first_get_at_index(to_list_first, vif);
 					ecm_db_connection_interfaces_deref(to_list_temp, *to_first);
 				}
-
-				ecm_db_node_deref(src_ni);
-				ecm_db_node_deref(dest_ni);
-				ecm_db_node_deref(src_nat_ni);
 				ecm_db_mapping_deref(dest_mi);
-				ecm_db_mapping_deref(src_nat_mi);
+				ecm_db_node_deref(dest_ni);
 				ecm_db_mapping_deref(src_mi);
+				ecm_db_node_deref(src_ni);
 				ecm_db_connection_deref(nci);
 				kfree(to_list);
 				kfree(to_list_first);
@@ -2418,13 +2284,20 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 		 * We *could* end up creating more than one connection instance for the same actual connection.
 		 * To guard against this we now perform a mutex'd lookup of the connection + add once more - another cpu may have created it before us.
 		 */
-		spin_lock_bh(&ecm_nss_ipv4_lock);
-		ci = ecm_db_connection_find_and_ref(ip_src_addr, ip_dest_addr, protocol, src_port, dest_port);
+		spin_lock_bh(&ecm_nss_ipv6_lock);
+		ci = ecm_db_connection_find_and_ref(ip_src_addr, ip_dest_addr, IPPROTO_UDP, src_port, dest_port);
 		if (ci) {
 			/*
 			 * Another cpu created the same connection before us - use the one we just found
 			 */
-			spin_unlock_bh(&ecm_nss_ipv4_lock);
+			spin_unlock_bh(&ecm_nss_ipv6_lock);
+			for (vif = 0; vif < ECM_DB_MULTICAST_IF_MAX; vif++) {
+				to_list_single = ecm_db_multicast_if_heirarchy_get(to_list, vif);
+				ecm_db_multicast_copy_if_heirarchy(to_list_temp, to_list_single);
+				to_first = ecm_db_multicast_if_first_get_at_index(to_list_first, vif);
+				ecm_db_connection_interfaces_deref(to_list_temp, *to_first);
+			}
+
 			ecm_db_connection_deref(nci);
 		} else {
 			struct ecm_tracker_instance *ti;
@@ -2444,18 +2317,17 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 			 * Add the new connection we created into the database
 			 * NOTE: assign to a short timer group for now - it is the assigned classifiers responsibility to do this
 			 */
-			ecm_db_connection_add(nci, feci,
-					src_mi, dest_mi, src_nat_mi, dest_mi,
-					src_ni, dest_ni, src_nat_ni, dest_ni,
-					4, protocol, ecm_dir,
+			ecm_db_connection_add(nci, feci, src_mi, dest_mi, src_mi, dest_mi,
+					src_ni, dest_ni, src_ni, dest_ni,
+					6, IPPROTO_UDP, ecm_dir,
 					NULL /* final callback */,
-					ecm_nss_multicast_ipv4_connection_defunct_callback,
+					ecm_nss_multicast_ipv6_connection_defunct_callback,
 					tg, is_routed, nci);
 
-			spin_unlock_bh(&ecm_nss_ipv4_lock);
+			spin_unlock_bh(&ecm_nss_ipv6_lock);
 
 			ci = nci;
-			DEBUG_INFO("%p: New UDP multicast connection created\n", ci);
+			DEBUG_INFO("%p: New UDP connection created\n", ci);
 		}
 
 		/*
@@ -2463,22 +2335,20 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 		 */
 		feci->deref(feci);
 		dci->base.deref((struct ecm_classifier_instance *)dci);
-		ecm_db_node_deref(src_ni);
-		ecm_db_node_deref(dest_ni);
-		ecm_db_node_deref(src_nat_ni);
-		ecm_db_mapping_deref(src_nat_mi);
-		ecm_db_mapping_deref(src_mi);
 		ecm_db_mapping_deref(dest_mi);
+		ecm_db_node_deref(dest_ni);
+		ecm_db_mapping_deref(src_mi);
+		ecm_db_node_deref(src_ni);
 		kfree(to_list);
 		kfree(to_list_first);
 	} else {
 		bool is_dest_interface_list_empty;
 
 		/*
-		 * At this pont the feci->accel_mode is DEACEL because the MC connection has expired
-		 * and we had received a callback from MFC which had freed the multicast destination
-		 * interface heirarchy. In this case, we reconstruct the multicastdestination interface
-		 * heirarchy and re-accelerate the connection.
+		 * At this pont the feci->accel_mode is ECM_FRONT_END_ACCELERATION_MODE_DEACCEL because the
+		 * MC connection has expired and we had received a callback from MFC which had freed the
+		 * multicast destination interface heirarchy. In this case, we reconstruct the multicast
+		 * destination interface heirarchy and re-accelerate the connection.
 		 */
 		is_dest_interface_list_empty = ecm_db_multicast_connection_to_interfaces_set_check(ci);
 		if (!is_dest_interface_list_empty) {
@@ -2488,6 +2358,7 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 			int32_t *to_list_first;
 			int32_t *to_first;
 			int32_t i, interface_idx_cnt;
+
 			to_list = (struct ecm_db_iface_instance *)kzalloc(ECM_DB_TO_MCAST_INTERFACES_SIZE, GFP_ATOMIC | __GFP_NOWARN);
 			if (!to_list) {
 				ecm_db_connection_deref(ci);
@@ -2501,15 +2372,14 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 				return NF_ACCEPT;
 			}
 
-			/*
-			 * Reconstruct the multicast destination interface heirarchy.
-			 */
-			for (i = 0; i < ECM_DB_MULTICAST_IF_MAX; i++ ) {
+			for (i = 0; i < ECM_DB_MULTICAST_IF_MAX; i++) {
 				to_first = ecm_db_multicast_if_first_get_at_index(to_list_first, i);
 				*to_first = ECM_DB_IFACE_HEIRARCHY_MAX;
 			}
 
-			interface_idx_cnt = ecm_nss_multicast_connection_to_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, in_dev, out_dev->master, if_cnt, dst_dev, to_list_first, is_routed);
+			interface_idx_cnt = ecm_nss_multicast_ipv6_interface_heirarchy_construct(to_list, in_dev, out_dev->master,\
+												   ip_src_addr, ip_dest_addr, mc_if_cnt,\
+												   mc_dest_if, to_list_first, is_routed);
 			if (interface_idx_cnt == 0) {
 				DEBUG_WARN("Failed to reconstruct 'to mc' heirarchy list\n");
 				ecm_db_connection_deref(ci);
@@ -2557,6 +2427,7 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 	 * Do we need to action generation change?
 	 */
 	if (unlikely(ecm_db_connection_classifier_generation_changed(ci))) {
+
 		/*
 		 * TODO: Will add support for multicast connection re-generation here.
 		 */
@@ -2699,15 +2570,23 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 		ecm_db_connection_deref(ci);
 		return NF_ACCEPT;
 	}
-	ecm_db_multicast_connection_data_totals_update(ci, false, skb->len, 1);
+	ecm_db_connection_data_totals_update(ci, (sender == ECM_TRACKER_SENDER_TYPE_SRC)? true : false, skb->len, 1);
+
+	/*
+	 * Assign qos tag
+	 * GGG TODO Should we use sender to identify whether to use flow or return qos tag?
+	 */
+	skb->priority = prevalent_pr.flow_qos_tag;
+	DEBUG_TRACE("%p: skb priority: %u\n", ci, skb->priority);
 
 	/*
 	 * Accelerate?
 	 */
 	if (prevalent_pr.accel_mode == ECM_CLASSIFIER_ACCELERATION_MODE_ACCEL) {
 		struct ecm_front_end_connection_instance *feci;
+		DEBUG_TRACE("%p: accel\n", ci);
 		feci = ecm_db_connection_front_end_get_and_ref(ci);
-		ecm_nss_multicast_ipv4_connection_accelerate(feci, &prevalent_pr);
+		ecm_nss_multicast_ipv6_connection_accelerate(feci, &prevalent_pr);
 		feci->deref(feci);
 	} else {
 		goto done;
@@ -2721,45 +2600,26 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 	if (!tuple_instance) {
 		tuple_instance = ecm_db_multicast_tuple_instance_alloc(ip_src_addr, ip_dest_addr, src_port, dest_port);
 		if (!tuple_instance) {
-			goto done;
+			ecm_db_connection_deref(ci);
+			return NF_ACCEPT;
 		}
-		if (br_dev_found_in_mfc) {
+		if(br_dev_found_in_mfc) {
 			ecm_db_multicast_tuple_instance_flags_set(tuple_instance, ECM_DB_MULTICAST_CONNECTION_BRIDGE_DEV_SET_FLAG);
 		}
+
 		ecm_db_multicast_tuple_instance_add(tuple_instance);
-	    	ecm_db_multicast_tuple_instance_deref(tuple_instance);
+		ecm_db_multicast_tuple_instance_deref(tuple_instance);
+
 	} else {
 	    ecm_db_multicast_tuple_instance_deref(tuple_instance);
 	}
-
 done:
 	ecm_db_connection_deref(ci);
 	return NF_ACCEPT;
 }
 
 /*
- * ecm_nss_multicast_ipv4_get_accelerated_count()
- */
-ssize_t ecm_nss_multicast_ipv4_get_accelerated_count(struct device *dev,
-				  struct device_attribute *attr,
-				  char *buf)
-{
-	ssize_t count;
-	int num;
-
-	/*
-	 * Operate under our locks
-	 */
-	spin_lock_bh(&ecm_nss_ipv4_lock);
-	num = ecm_nss_multicast_ipv4_accelerated_count;
-	spin_unlock_bh(&ecm_nss_ipv4_lock);
-
-	count = snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", num);
-	return count;
-}
-
-/*
- * ecm_br_multicast_update_event_callback()
+ * ecm_nss_multicast_ipv6_br_update_event_callback()
  * 	Callback received from bridge multicast snooper module in the
  * 	following events:
  * 	a.) Updates to a muticast group due to IGMP JOIN/LEAVE.
@@ -2775,42 +2635,45 @@ ssize_t ecm_nss_multicast_ipv4_get_accelerated_count(struct device *dev,
  *     destination interfaces heirarchy for the CI, and decide whether to delete an
  *     exiting interface heirarchy or add a new heirarchy.
  */
-static void ecm_br_multicast_update_event_callback(struct net_device *brdev, uint32_t group)
+static void ecm_nss_multicast_ipv6_br_update_event_callback(struct net_device *brdev, struct in6_addr *group)
 {
 	struct ecm_db_multicast_tuple_instance *tuple_instance;
 	struct ecm_db_multicast_tuple_instance *tuple_instance_next;
 	struct ecm_db_connection_instance *ci;
 	struct ecm_front_end_connection_instance *feci;
-	struct ecm_multicast_if_update mc_update;
 	struct ecm_db_iface_instance *to_list;
 	struct ecm_db_iface_instance *to_list_single;
 	struct ecm_db_iface_instance *to_list_temp[ECM_DB_IFACE_HEIRARCHY_MAX];
+	struct ecm_multicast_if_update mc_sync;
 	ip_addr_t dest_ip;
 	ip_addr_t grp_ip;
 	ip_addr_t src_ip;
+	struct in6_addr group6;
+	struct in6_addr origin6;
 	int32_t to_list_first[ECM_DB_MULTICAST_IF_MAX];
 	int i, ret;
-	uint32_t mc_dst_dev[4];
-	uint32_t if_cnt;
+	uint32_t if_cnt, mc_flags = 0;
+	bool mc_update;
 	int32_t if_num;
-	uint32_t mc_flags = 0;
-	uint32_t mc_max_dst = 4;
-	bool if_update;
+	uint32_t mc_max_dst = ECM_DB_MULTICAST_IF_MAX;
+	uint32_t mc_dst_dev[ECM_DB_MULTICAST_IF_MAX];
 
-	DEBUG_TRACE("ecm_br_multicast_event_callback 0x%x\n", group);
 
-	ECM_HIN4_ADDR_TO_IP_ADDR(dest_ip, htonl(group));
+	memcpy(&group6, group, sizeof(struct in6_addr));
+	ECM_NIN6_ADDR_TO_IP_ADDR(dest_ip, group6);
+
+	DEBUG_TRACE("IP dst: " ECM_IP_ADDR_OCTAL_FMT , ECM_IP_ADDR_TO_OCTAL(dest_ip));
 
 	/*
 	 * Get the first entry for the group in the tuple_instance table
 	 */
 	tuple_instance = ecm_db_multicast_tuple_instance_get_and_ref_first(dest_ip);
 	if (!tuple_instance) {
-		DEBUG_TRACE("ecm_br_multicast_event_callback: pf_info not found\n");
+		DEBUG_TRACE("tuple info not found\n");
 		return;
 	}
 
-	spin_lock_bh(&ecm_nss_ipv4_lock);
+	spin_lock_bh(&ecm_nss_ipv6_lock);
 
 	while (tuple_instance) {
 		/*
@@ -2835,13 +2698,15 @@ static void ecm_br_multicast_update_event_callback(struct net_device *brdev, uin
 		 * Get the source IP address for this entry for the group
 		 */
 		ecm_db_multicast_tuple_instance_source_ip_get(tuple_instance, src_ip);
+		ECM_IP_ADDR_TO_NIN6_ADDR(origin6, src_ip);
 
 		/*
 		 * Query bridge snooper for the destination list when given the group and source
 		 */
-		if_num = mc_bridge_ipv4_get_if(brdev, htonl(src_ip[0]), htonl(dest_ip[0]), mc_max_dst, mc_dst_dev);
+		if_num = mc_bridge_ipv6_get_if (brdev, &origin6, &group6, mc_max_dst, mc_dst_dev);
 		if (if_num <= 0) {
 			DEBUG_TRACE("No valid bridge slaves for the group/source\n");
+
 			/*
 			 * This may a valid case when all the interface has left a multicast group.
 			 * In this case the MCS will return if_num 0, But we may have an oudated
@@ -2859,6 +2724,7 @@ static void ecm_br_multicast_update_event_callback(struct net_device *brdev, uin
 		 */
 		ci = ecm_db_multicast_connection_find_and_ref(tuple_instance);
 		if (!ci) {
+
 			/*
 			 * TODO: Should this be an assert?
 			 */
@@ -2870,7 +2736,7 @@ static void ecm_br_multicast_update_event_callback(struct net_device *brdev, uin
 
 		DEBUG_TRACE("MCS-cb: src_ip = 0x%x, dest_ip = 0x%x, Num if = %d\n", src_ip[0], dest_ip[0], if_num);
 
-		memset(&mc_update, 0, sizeof(mc_update));
+		memset(&mc_sync, 0, sizeof(mc_sync));
 
 		/*
 		 * Find out changes to the destination interfaces heirarchy
@@ -2878,8 +2744,9 @@ static void ecm_br_multicast_update_event_callback(struct net_device *brdev, uin
 		 * have joined new, and the existing interfaces in the list
 		 * that have left seperately.
 		 */
-		if_update = ecm_interface_multicast_find_updates_to_iface_list(ci, &mc_update, mc_flags, true ,mc_dst_dev, if_num);
-		if (!if_update) {
+		mc_update = ecm_interface_multicast_find_updates_to_iface_list(ci, &mc_sync, mc_flags, true, mc_dst_dev, if_num);
+		if (!mc_update) {
+
 			/*
 			 * No updates to this multicast flow. Move on to the next
 			 * flow for the same group
@@ -2891,17 +2758,17 @@ static void ecm_br_multicast_update_event_callback(struct net_device *brdev, uin
 			continue;
 		}
 
-		DEBUG_TRACE("BRIDGE UPDATE callback ===> leave_cnt %d, join_cnt %d\n", mc_update.if_leave_cnt, mc_update.if_join_cnt);
+		DEBUG_TRACE("BRIDGE UPDATE callback ===> leave_cnt %d, join_cnt %d\n", mc_sync.if_leave_cnt, mc_sync.if_join_cnt);
 
 		/*
 		 * Do we have any new interfaces that have joined?
 		 */
-		if (mc_update.if_join_cnt > 0) {
+		if (mc_sync.if_join_cnt > 0) {
 			to_list = (struct ecm_db_iface_instance *)kzalloc(ECM_DB_TO_MCAST_INTERFACES_SIZE, GFP_ATOMIC | __GFP_NOWARN);
 			if (!to_list) {
-				spin_unlock_bh(&ecm_nss_ipv4_lock);
-				ecm_db_multicast_tuple_instance_deref(tuple_instance);
+				spin_unlock_bh(&ecm_nss_ipv6_lock);
 				ecm_db_connection_deref(ci);
+				ecm_db_multicast_tuple_instance_deref(tuple_instance);
 				return;
 			}
 
@@ -2917,7 +2784,7 @@ static void ecm_br_multicast_update_event_callback(struct net_device *brdev, uin
 			 * Create the interface heirarchy list for the new interfaces. We append this list later to
 			 * the existing list of destination interfaces.
 			 */
-			if_cnt = ecm_interface_multicast_heirarchy_construct_bridged(to_list, brdev, src_ip, dest_ip, mc_update.if_join_cnt, mc_update.join_dev, to_list_first );
+			if_cnt = ecm_interface_multicast_heirarchy_construct_bridged(to_list, brdev, src_ip, dest_ip, mc_sync.if_join_cnt, mc_sync.join_dev, to_list_first);
 			if (if_cnt == 0) {
 				DEBUG_WARN("Failed to obtain 'to_mcast_update' heirarchy list\n");
 				ecm_db_multicast_tuple_instance_deref(tuple_instance);
@@ -2929,19 +2796,18 @@ static void ecm_br_multicast_update_event_callback(struct net_device *brdev, uin
 			/*
 			 * Append the interface heirarchy array of the new joinees to the existing destination list
 			 */
-			ecm_db_multicast_connection_to_interfaces_update(ci, to_list, to_list_first, mc_update.if_join_idx);
+			ecm_db_multicast_connection_to_interfaces_update(ci, to_list, to_list_first, mc_sync.if_join_idx);
 
 			/*
 			 * De-ref the updated destination interface list
 			 */
 			for (i = 0; i < ECM_DB_MULTICAST_IF_MAX; i++) {
-				if (mc_update.if_join_idx[i]) {
+				if (mc_sync.if_join_idx[i]) {
 					to_list_single = ecm_db_multicast_if_heirarchy_get(to_list, i);
 					ecm_db_multicast_copy_if_heirarchy(to_list_temp, to_list_single);
 					ecm_db_connection_interfaces_deref(to_list_temp, to_list_first[i]);
 				}
 			}
-
 			kfree(to_list);
 		}
 
@@ -2953,20 +2819,15 @@ static void ecm_br_multicast_update_event_callback(struct net_device *brdev, uin
 		if ((feci->accel_mode <= ECM_FRONT_END_ACCELERATION_MODE_FAIL_DENIED) ||
 				(feci->accel_mode != ECM_FRONT_END_ACCELERATION_MODE_ACCEL)) {
 			DEBUG_TRACE("%p: Ignoring wrong mode accel for conn: %p\n", feci, feci->ci);
-			spin_unlock_bh(&ecm_nss_ipv4_lock);
+			spin_unlock_bh(&ecm_nss_ipv6_lock);
 			feci->deref(feci);
 			ecm_db_connection_deref(ci);
 			ecm_db_multicast_tuple_instance_deref(tuple_instance);
 			return;
 		}
 
-		spin_unlock_bh(&ecm_nss_ipv4_lock);
-
-		/*
-		 * Update the new rules in FW. If returns error decelerate the connection
-		 * and flush all ECM rules.
-		 */
-		ret = ecm_nss_multicast_ipv4_connection_update_accelerate(feci, &mc_update, true);
+		spin_unlock_bh(&ecm_nss_ipv6_lock);
+		ret = ecm_nss_multicast_ipv6_connection_update_accelerate(feci, &mc_sync, true);
 		if (ret < 0) {
 			ecm_db_multicast_tuple_instance_deref(tuple_instance);
 			feci->decelerate(feci);
@@ -2976,24 +2837,26 @@ static void ecm_br_multicast_update_event_callback(struct net_device *brdev, uin
 		}
 
 		feci->deref(feci);
-		spin_lock_bh(&ecm_nss_ipv4_lock);
+		spin_lock_bh(&ecm_nss_ipv6_lock);
 
 		/*
 		 * Release the interfaces that may have left the connection
 		 */
-		for (i = 0; i < ECM_DB_MULTICAST_IF_MAX && mc_update.if_leave_cnt; i++) {
+		for (i = 0; i < ECM_DB_MULTICAST_IF_MAX && mc_sync.if_leave_cnt; i++) {
+
 			/*
 			 * Is this entry marked? If yes, then the corresponding entry
 			 * in the 'to_mcast_interfaces' array in the ci has left the
 			 * connection
 			 */
-			if (mc_update.if_leave_idx[i]) {
+			if (mc_sync.if_leave_idx[i]) {
+
 				/*
 				 * Release the interface heirarchy for this
 				 * interface since it has left the group
 				 */
 				ecm_db_multicast_connection_to_interfaces_clear_at_index(ci, i);
-				mc_update.if_leave_cnt--;
+				mc_sync.if_leave_cnt--;
 			}
 		}
 
@@ -3003,12 +2866,12 @@ static void ecm_br_multicast_update_event_callback(struct net_device *brdev, uin
 		tuple_instance = tuple_instance_next;
 	}
 
-	spin_unlock_bh(&ecm_nss_ipv4_lock);
+	spin_unlock_bh(&ecm_nss_ipv6_lock);
 	return;
 }
 
 /*
- * ecm_mfc_update_event_callback()
+ * ecm_nss_multicast_ipv6_mfc_update_event_callback()
  * 	Callback called by Linux kernel multicast routing module in the
  * 	following events:
  * 	a.) Updates to destination interface lists for a multicast route due to
@@ -3028,21 +2891,25 @@ static void ecm_br_multicast_update_event_callback(struct net_device *brdev, uin
  *     destination interfaces heirarchy for the CI, and decide whether to delete an
  *     exiting interface heirarchy or add a new heirarchy.
  */
-static void ecm_mfc_update_event_callback(__be32 group, __be32 origin, uint32_t max_to_dev, uint32_t to_dev_idx[], uint8_t op)
+static void ecm_nss_multicast_ipv6_mfc_update_event_callback(struct in6_addr *group, struct in6_addr *origin, uint32_t max_to_dev, uint32_t to_dev_idx[], uint8_t op)
 {
 	struct ecm_db_connection_instance *ci;
 	struct ecm_db_multicast_tuple_instance *tuple_instance;
-	struct ecm_multicast_if_update mc_update;
+	struct ecm_multicast_if_update mc_sync;
+	struct in6_addr origin6;
+	struct in6_addr group6;
 	int32_t vif_cnt;
 	ip_addr_t src_ip;
 	ip_addr_t dest_ip;
-	bool tuple_instance_flags = false;
 
-	ECM_HIN4_ADDR_TO_IP_ADDR(src_ip, htonl(origin));
-	ECM_HIN4_ADDR_TO_IP_ADDR(dest_ip, htonl(group));
+	memcpy(&origin6, origin, sizeof(ip_addr_t));
+	memcpy(&group6, group, sizeof(ip_addr_t));
 
-	DEBUG_TRACE("origin : group " ECM_IP_ADDR_DOT_FMT ":" ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(src_ip), ECM_IP_ADDR_TO_DOT(dest_ip));
+	ECM_NIN6_ADDR_TO_IP_ADDR(src_ip, origin6);
+	ECM_NIN6_ADDR_TO_IP_ADDR(dest_ip, group6);
 
+	DEBUG_TRACE("IP Packet src: " ECM_IP_ADDR_OCTAL_FMT "dst: " ECM_IP_ADDR_OCTAL_FMT ,
+			                                ECM_IP_ADDR_TO_OCTAL(src_ip),ECM_IP_ADDR_TO_OCTAL(dest_ip));
 
 	/*
 	 * Access the 5-tuple information from the tuple_instance table, using the
@@ -3050,7 +2917,7 @@ static void ecm_mfc_update_event_callback(__be32 group, __be32 origin, uint32_t 
 	 */
 	tuple_instance = ecm_db_multicast_tuple_instance_find_and_ref(src_ip, dest_ip);
 	if (!tuple_instance) {
-		DEBUG_TRACE("MFC_EVENT: Tuple info is not found\n");
+		DEBUG_TRACE("MFC_EVENT: Port info is not found\n");
 		return;
 	}
 
@@ -3066,10 +2933,10 @@ static void ecm_mfc_update_event_callback(__be32 group, __be32 origin, uint32_t 
 
 	DEBUG_TRACE("%p: Multicast conn\n", ci);
 
-	memset(&mc_update, 0, sizeof(mc_update));
+	memset(&mc_sync, 0, sizeof(mc_sync));
 
 	switch (op) {
-	case IPMR_MFC_EVENT_UPDATE:
+	case IP6MR_MFC_EVENT_UPDATE:
 	{
 		struct ecm_front_end_connection_instance *feci;
 		struct ecm_db_iface_instance *to_list;
@@ -3077,48 +2944,49 @@ static void ecm_mfc_update_event_callback(__be32 group, __be32 origin, uint32_t 
 		struct ecm_db_iface_instance *to_list_temp[ECM_DB_IFACE_HEIRARCHY_MAX];
 		uint32_t to_list_first[ECM_DB_MULTICAST_IF_MAX];
 		uint32_t i, ret;
-		uint32_t mc_flag = 0;
-		bool if_update = false;
+		uint32_t mc_flags = 0;
+		bool br_present_in_dest_dev_list = false;
+		bool mc_update = false;
 
 		/*
 		 * Check if this multicast connection has a bridge
 		 * device in multicast destination interface list.
 		 */
-		tuple_instance_flags = ecm_db_multicast_tuple_instance_flags_get(tuple_instance);
-		if (tuple_instance_flags & ECM_DB_MULTICAST_CONNECTION_BRIDGE_DEV_SET_FLAG) {
-			mc_flag |= ECM_DB_MULTICAST_CONNECTION_BRIDGE_DEV_SET_FLAG;
+		mc_flags = ecm_db_multicast_tuple_instance_flags_get(tuple_instance);
+		if (br_present_in_dest_dev_list & ECM_DB_MULTICAST_CONNECTION_BRIDGE_DEV_SET_FLAG) {
+			mc_flags |= ECM_DB_MULTICAST_CONNECTION_BRIDGE_DEV_SET_FLAG;
 		}
 
-		spin_lock_bh(&ecm_nss_ipv4_lock);
+		spin_lock_bh(&ecm_nss_ipv6_lock);
 
 		/*
-		 * Find out if any change in destination interfaces heirarchy
-		 * list. We try to find out the interfaces that
+		 * Find out changes to the destination interfaces heirarchy
+		 * of the connection. We try to find out the interfaces that
 		 * have joined new, and the existing interfaces in the list
 		 * that have left seperately.
 		 */
-		if_update = ecm_interface_multicast_find_updates_to_iface_list(ci, &mc_update, mc_flag, false, to_dev_idx, max_to_dev);
-		if (!if_update) {
-			spin_unlock_bh(&ecm_nss_ipv4_lock);
+		mc_update = ecm_interface_multicast_find_updates_to_iface_list(ci, &mc_sync, mc_flags, false, to_dev_idx, max_to_dev);
+		if (!mc_update) {
+			spin_unlock_bh(&ecm_nss_ipv6_lock);
 			ecm_db_multicast_tuple_instance_deref(tuple_instance);
 			ecm_db_connection_deref(ci);
 			return;
 		}
 
-		tuple_instance_flags = ecm_interface_multicast_check_for_br_dev(mc_update.join_dev, mc_update.if_join_cnt);
-		if (!tuple_instance_flags) {
+		br_present_in_dest_dev_list = ecm_interface_multicast_check_for_br_dev(mc_sync.join_dev, mc_sync.if_join_cnt);
+		if (!br_present_in_dest_dev_list) {
 			ecm_db_multicast_tuple_instance_flags_set(tuple_instance, ~ECM_DB_MULTICAST_CONNECTION_BRIDGE_DEV_SET_FLAG);
 		}
 
-		DEBUG_TRACE("%p: MFC update callback leave_cnt %d, join_cnt %d\n", ci, mc_update.if_leave_cnt, mc_update.if_join_cnt);
+		DEBUG_TRACE("%p: MFC update callback ===> leave_cnt %d, join_cnt %d\n", ci, mc_sync.if_leave_cnt, mc_sync.if_join_cnt);
 
 		/*
 		 * Do we have any new interfaces that have joined?
 		 */
-		if (mc_update.if_join_cnt > 0) {
+		if (mc_sync.if_join_cnt > 0) {
 			to_list = (struct ecm_db_iface_instance *)kzalloc(ECM_DB_TO_MCAST_INTERFACES_SIZE, GFP_ATOMIC | __GFP_NOWARN);
 			if (!to_list) {
-				spin_unlock_bh(&ecm_nss_ipv4_lock);
+				spin_unlock_bh(&ecm_nss_ipv6_lock);
 				ecm_db_multicast_tuple_instance_deref(tuple_instance);
 				ecm_db_connection_deref(ci);
 				return;
@@ -3136,10 +3004,10 @@ static void ecm_mfc_update_event_callback(__be32 group, __be32 origin, uint32_t 
 			 * Create the interface heirarchy list for the new interfaces. We append this list later to
 			 * the existing list of destination interfaces.
 			 */
-			vif_cnt = ecm_interface_multicast_heirarchy_construct_routed(to_list, NULL, src_ip, dest_ip, mc_update.if_join_cnt, mc_update.join_dev, to_list_first);
+			vif_cnt = ecm_interface_multicast_heirarchy_construct_routed(to_list, NULL, src_ip, dest_ip, mc_sync.if_join_cnt, mc_sync.join_dev, to_list_first);
 			if (vif_cnt == 0) {
 				DEBUG_WARN("Failed to obtain 'to_mcast_update' heirarchy list\n");
-				spin_unlock_bh(&ecm_nss_ipv4_lock);
+				spin_unlock_bh(&ecm_nss_ipv6_lock);
 				ecm_db_multicast_tuple_instance_deref(tuple_instance);
 				ecm_db_connection_deref(ci);
 				kfree(to_list);
@@ -3149,19 +3017,18 @@ static void ecm_mfc_update_event_callback(__be32 group, __be32 origin, uint32_t 
 			/*
 			 * Append the interface heirarchy array of the new joinees to the existing destination list
 			 */
-			ecm_db_multicast_connection_to_interfaces_update(ci, to_list, to_list_first, mc_update.if_join_idx);
+			ecm_db_multicast_connection_to_interfaces_update(ci, to_list, to_list_first, mc_sync.if_join_idx);
 
 			/*
 			 * De-ref the updated destination interface list
 			 */
 			for (i = 0; i < ECM_DB_MULTICAST_IF_MAX; i++) {
-				if (mc_update.if_join_idx[i]) {
+				if (mc_sync.if_join_idx[i]) {
 					to_list_single = ecm_db_multicast_if_heirarchy_get(to_list, i);
 					ecm_db_multicast_copy_if_heirarchy(to_list_temp, to_list_single);
 					ecm_db_connection_interfaces_deref(to_list_temp, to_list_first[i]);
 				}
 			}
-
 			kfree(to_list);
 		}
 
@@ -3173,20 +3040,20 @@ static void ecm_mfc_update_event_callback(__be32 group, __be32 origin, uint32_t 
 		if ((feci->accel_mode <= ECM_FRONT_END_ACCELERATION_MODE_FAIL_DENIED) ||
 				(feci->accel_mode != ECM_FRONT_END_ACCELERATION_MODE_ACCEL)) {
 			DEBUG_TRACE("%p: Ignoring wrong mode accel for conn: %p\n", feci, feci->ci);
-			spin_unlock_bh(&ecm_nss_ipv4_lock);
+			spin_unlock_bh(&ecm_nss_ipv6_lock);
 			feci->deref(feci);
 			ecm_db_connection_deref(ci);
 			ecm_db_multicast_tuple_instance_deref(tuple_instance);
 			return;
 		}
 
-		spin_unlock_bh(&ecm_nss_ipv4_lock);
+		spin_unlock_bh(&ecm_nss_ipv6_lock);
 
 		/*
 		 * Update the new rules in FW. If returns error decelerate the connection
 		 * and flush all ECM rules.
 		 */
-		ret = ecm_nss_multicast_ipv4_connection_update_accelerate(feci, &mc_update, false);
+		ret = ecm_nss_multicast_ipv6_connection_update_accelerate(feci, &mc_sync, false);
 		if (ret < 0) {
 			ecm_db_multicast_tuple_instance_deref(tuple_instance);
 			feci->decelerate(feci);
@@ -3196,33 +3063,34 @@ static void ecm_mfc_update_event_callback(__be32 group, __be32 origin, uint32_t 
 		}
 
 		feci->deref(feci);
-		spin_lock_bh(&ecm_nss_ipv4_lock);
+		spin_lock_bh(&ecm_nss_ipv6_lock);
 
 		/*
 		 * Release the interfaces that may have left the connection
 		 */
-		for (i = 0; i < ECM_DB_MULTICAST_IF_MAX && mc_update.if_leave_cnt; i++) {
+		for (i = 0; i < ECM_DB_MULTICAST_IF_MAX && mc_sync.if_leave_cnt; i++) {
+
 			/*
 			 * Is this entry marked? If yes, then the corresponding entry
 			 * in the 'to_mcast_interfaces' array in the ci has left the
 			 * connection
 			 */
-			if (mc_update.if_leave_idx[i]) {
+			if (mc_sync.if_leave_idx[i]) {
+
 				/*
 				 * Release the interface heirarchy for this
 				 * interface since it has left the group
 				 */
 				ecm_db_multicast_connection_to_interfaces_clear_at_index(ci, i);
-				mc_update.if_leave_cnt--;
+				mc_sync.if_leave_cnt--;
 			}
 		}
-
-		spin_unlock_bh(&ecm_nss_ipv4_lock);
+		spin_unlock_bh(&ecm_nss_ipv6_lock);
 		ecm_db_multicast_tuple_instance_deref(tuple_instance);
 		ecm_db_connection_deref(ci);
 		break;
 	}
-	case IPMR_MFC_EVENT_DELETE:
+	case IP6MR_MFC_EVENT_DELETE:
 	{
 		struct ecm_front_end_connection_instance *feci;
 
@@ -3230,7 +3098,7 @@ static void ecm_mfc_update_event_callback(__be32 group, __be32 origin, uint32_t 
 		 * MFC reports that the multicast connection has died.
 		 * Now we can Decelerate connection and free the frontend instance
 		 */
-		DEBUG_TRACE("MFC_EVENT: delete all entry\n");
+		DEBUG_TRACE("MFC callback ===> delete all entry\n");
 		ecm_db_multicast_tuple_instance_deref(tuple_instance);
 
 		/*
@@ -3251,16 +3119,16 @@ static void ecm_mfc_update_event_callback(__be32 group, __be32 origin, uint32_t 
 }
 
 /*
- * ecm_nss_multicast_ipv4_debugfs_init()
+ * ecm_nss_multicast_ipv6_debugfs_init()
  */
-bool ecm_nss_multicast_ipv4_debugfs_init(struct dentry *dentry)
+bool ecm_nss_multicast_ipv6_debugfs_init(struct dentry *dentry)
 {
 	struct dentry *multicast_dentry;
 
 	multicast_dentry = debugfs_create_u32("multicast_accelerated_count", S_IRUGO, dentry,
-						&ecm_nss_multicast_ipv4_accelerated_count);
+						&ecm_nss_multicast_ipv6_accelerated_count);
 	if (!multicast_dentry) {
-		DEBUG_ERROR("Failed to create ecm nss ipv4 multicast_accelerated_count file in debugfs\n");
+		DEBUG_ERROR("Failed to create ecm nss ipv6 multicast_accelerated_count file in debugfs\n");
 		return false;
 	}
 
@@ -3268,32 +3136,32 @@ bool ecm_nss_multicast_ipv4_debugfs_init(struct dentry *dentry)
 }
 
 /*
- * ecm_nss_multicast_ipv4_init()
+ * ecm_nss_multicast_ipv6_init()
  * 	Register the callbacks for MCS snooper and MFC update
  */
-void ecm_nss_multicast_ipv4_init(void)
+void ecm_nss_multicast_ipv6_init(void)
 {
 	/*
 	 * Register multicast update callback to MCS snooper
 	 */
-	mc_bridge_ipv4_update_callback_register(ecm_br_multicast_update_event_callback);
+	mc_bridge_ipv6_update_callback_register(ecm_nss_multicast_ipv6_br_update_event_callback);
 
 	/*
 	 * Register multicast update callbacks to MFC
 	 */
-	ipmr_register_mfc_event_offload_callback(ecm_mfc_update_event_callback);
+	ip6mr_register_mfc_event_offload_callback(ecm_nss_multicast_ipv6_mfc_update_event_callback);
 }
 
 /*
- * ecm_nss_multicast_ipv4_exit()
+ * ecm_nss_multicast_ipv6_exit()
  * 	De-register the callbacks for MCS snooper and MFC update
  */
-void ecm_nss_multicast_ipv4_exit(void)
+void ecm_nss_multicast_ipv6_exit(void)
 {
 	/*
 	 * De-register multicast update callbacks to
 	 * MFC and MCS snooper
 	 */
-	ipmr_unregister_mfc_event_offload_callback();
-	mc_bridge_ipv4_update_callback_deregister();
+	ip6mr_unregister_mfc_event_offload_callback();
+	mc_bridge_ipv6_update_callback_deregister();
 }

@@ -23,6 +23,8 @@ ecm-y := \
 	 ecm_tracker_tcp.o \
 	 ecm_tracker_datagram.o \
 	 ecm_tracker.o \
+	 frontends/ecm_front_end_ipv4.o \
+	 frontends/ecm_front_end_ipv6.o \
 	 frontends/nss/ecm_nss_ipv4.o \
 	 frontends/nss/ecm_nss_ported_ipv4.o \
 	 ecm_db.o \
@@ -73,6 +75,7 @@ ifneq ($(findstring 3.4, $(KERNELVERSION)),)
 ECM_MULTICAST_ENABLE=y
 endif
 ecm-$(ECM_MULTICAST_ENABLE) += frontends/nss/ecm_nss_multicast_ipv4.o
+ecm-$(ECM_MULTICAST_ENABLE) += frontends/nss/ecm_nss_multicast_ipv6.o
 ccflags-$(ECM_MULTICAST_ENABLE) += -DECM_MULTICAST_ENABLE
 
 # #############################################################################
@@ -91,7 +94,8 @@ ccflags-$(ECM_INTERFACE_IPSEC_ENABLE) += -DECM_INTERFACE_IPSEC_ENABLE
 # Define ECM_IPV6_ENABLE=y in order to enable IPv6 support in the ECM.
 # #############################################################################
 ECM_IPV6_ENABLE=y
-ecm-$(ECM_IPV6_ENABLE) += frontends/nss/ecm_front_end_ipv6.o
+ecm-$(ECM_IPV6_ENABLE) += frontends/nss/ecm_nss_ipv6.o
+ecm-$(ECM_IPV6_ENABLE) += frontends/nss/ecm_nss_ported_ipv6.o
 ccflags-$(ECM_IPV6_ENABLE) += -DECM_IPV6_ENABLE
 
 # #############################################################################
@@ -132,6 +136,7 @@ ccflags-$(ECM_CLASSIFIER_PCC_ENABLE) += -DECM_CLASSIFIER_PCC_ENABLE
 # #############################################################################
 ECM_NON_PORTED_SUPPORT_ENABLE=y
 ecm-$(ECM_NON_PORTED_SUPPORT_ENABLE) += frontends/nss/ecm_nss_non_ported_ipv4.o
+ecm-$(ECM_NON_PORTED_SUPPORT_ENABLE) += frontends/nss/ecm_nss_non_ported_ipv6.o
 ccflags-$(ECM_NON_PORTED_SUPPORT_ENABLE) += -DECM_NON_PORTED_SUPPORT_ENABLE
 
 # #############################################################################
@@ -187,8 +192,17 @@ ccflags-y += -DECM_CLASSIFIER_PCC_DEBUG_LEVEL=1
 ccflags-y += -DECM_CLASSIFIER_NL_DEBUG_LEVEL=1
 ccflags-y += -DECM_CLASSIFIER_DEFAULT_DEBUG_LEVEL=1
 ccflags-y += -DECM_DB_DEBUG_LEVEL=1
+ccflags-y += -DECM_INIT_DEBUG_LEVEL=3
 ccflags-y += -DECM_FRONT_END_IPV4_DEBUG_LEVEL=1
 ccflags-y += -DECM_FRONT_END_IPV6_DEBUG_LEVEL=1
+ccflags-y += -DECM_NSS_IPV4_DEBUG_LEVEL=1
+ccflags-y += -DECM_NSS_PORTED_IPV4_DEBUG_LEVEL=1
+ccflags-y += -DECM_NSS_NON_PORTED_IPV4_DEBUG_LEVEL=1
+ccflags-y += -DECM_NSS_MULTICAST_IPV4_DEBUG_LEVEL=1
+ccflags-y += -DECM_NSS_IPV6_DEBUG_LEVEL=1
+ccflags-y += -DECM_NSS_PORTED_IPV6_DEBUG_LEVEL=1
+ccflags-y += -DECM_NSS_NON_PORTED_IPV6_DEBUG_LEVEL=1
+ccflags-y += -DECM_NSS_MULTICAST_IPV6_DEBUG_LEVEL=1
 ccflags-y += -DECM_CONNTRACK_NOTIFIER_DEBUG_LEVEL=1
 ccflags-y += -DECM_TRACKER_DEBUG_LEVEL=1
 ccflags-y += -DECM_TRACKER_DATAGRAM_DEBUG_LEVEL=1
@@ -198,8 +212,6 @@ ccflags-y += -DECM_BOND_NOTIFIER_DEBUG_LEVEL=1
 ccflags-y += -DECM_INTERFACE_DEBUG_LEVEL=1
 ccflags-y += -DECM_STATE_DEBUG_LEVEL=1
 ccflags-y += -DECM_OPENWRT_SUPPORT=1
-
-ccflags-y += -DECM_NSS
 
 ccflags-y += -I$(obj)/ -I$(obj)/frontends/include -I$(obj)/frontends/nss
 

@@ -14,10 +14,9 @@
  **************************************************************************
  */
 
-#ifdef ECM_NSS
-#define ecm_front_end_ipv4_init ecm_nss_ipv4_init
-#define ecm_front_end_ipv4_exit ecm_nss_ipv4_exit
-#define ecm_front_end_ipv4_stop ecm_nss_ipv4_stop
-#else
-#error "Unrecognized subsystem"
-#endif
+#include "ecm_nss_ipv4.h"
+
+extern void ecm_front_end_ipv4_stop(int num);
+extern int ecm_front_end_ipv4_init(struct dentry *dentry);
+extern void ecm_front_end_ipv4_exit(void);
+

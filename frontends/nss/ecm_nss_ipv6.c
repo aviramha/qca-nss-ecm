@@ -21,26 +21,29 @@
 #include <linux/module.h>
 #include <linux/skbuff.h>
 #include <linux/icmp.h>
-#include <linux/kthread.h>
 #include <linux/debugfs.h>
+#include <linux/kthread.h>
 #include <linux/pkt_sched.h>
 #include <linux/string.h>
-#include <net/route.h>
-#include <net/ip.h>
+#include <net/ip6_route.h>
+#include <net/ip6_fib.h>
+#include <net/addrconf.h>
+#include <net/ipv6.h>
 #include <net/tcp.h>
 #include <asm/unaligned.h>
 #include <asm/uaccess.h>	/* for put_user */
 #include <net/ipv6.h>
 #include <linux/inet.h>
-#include <linux/in.h>
+#include <linux/in6.h>
 #include <linux/udp.h>
 #include <linux/tcp.h>
 #include <linux/ppp_defs.h>
-#include <linux/mroute.h>
+#include <linux/mroute6.h>
+#include <linux/vmalloc.h>
 
 #include <linux/inetdevice.h>
 #include <linux/if_arp.h>
-#include <linux/netfilter_ipv4.h>
+#include <linux/netfilter_ipv6.h>
 #include <linux/netfilter_bridge.h>
 #include <linux/if_bridge.h>
 #include <net/arp.h>
@@ -51,8 +54,8 @@
 #include <net/netfilter/nf_conntrack_l3proto.h>
 #include <net/netfilter/nf_conntrack_zones.h>
 #include <net/netfilter/nf_conntrack_core.h>
-#include <net/netfilter/ipv4/nf_conntrack_ipv4.h>
-#include <net/netfilter/ipv4/nf_defrag_ipv4.h>
+#include <net/netfilter/ipv6/nf_conntrack_ipv6.h>
+#include <net/netfilter/ipv6/nf_defrag_ipv6.h>
 #ifdef ECM_INTERFACE_VLAN_ENABLE
 #include <linux/../../net/8021q/vlan.h>
 #include <linux/if_vlan.h>
@@ -66,9 +69,12 @@
  * 3 = 2 + INFO
  * 4 = 3 + TRACE
  */
-#define DEBUG_LEVEL ECM_NSS_IPV4_DEBUG_LEVEL
+#define DEBUG_LEVEL ECM_NSS_IPV6_DEBUG_LEVEL
 
 #include <nss_api_if.h>
+#ifdef ECM_MULTICAST_ENABLE
+#include <mc_ecm.h>
+#endif
 
 #include "ecm_types.h"
 #include "ecm_db_types.h"
@@ -94,23 +100,23 @@
 #include "ecm_classifier_pcc.h"
 #endif
 #include "ecm_interface.h"
-#include "ecm_nss_ipv4.h"
-#include "ecm_nss_ported_ipv4.h"
+#include "ecm_nss_ipv6.h"
+#include "ecm_nss_ported_ipv6.h"
 #ifdef ECM_MULTICAST_ENABLE
-#include "ecm_nss_multicast_ipv4.h"
+#include "ecm_nss_multicast_ipv6.h"
 #endif
 #ifdef ECM_NON_PORTED_SUPPORT_ENABLE
-#include "ecm_nss_non_ported_ipv4.h"
+#include "ecm_nss_non_ported_ipv6.h"
 #endif
 
 #include "ecm_front_end_common.h"
 
-int ecm_nss_ipv4_no_action_limit_default = 250;		/* Default no-action limit. */
-int ecm_nss_ipv4_driver_fail_limit_default = 250;		/* Default driver fail limit. */
-int ecm_nss_ipv4_nack_limit_default = 250;			/* Default nack limit. */
-int ecm_nss_ipv4_accelerated_count = 0;			/* Total offloads */
-int ecm_nss_ipv4_pending_accel_count = 0;			/* Total pending offloads issued to the NSS / awaiting completion */
-int ecm_nss_ipv4_pending_decel_count = 0;			/* Total pending deceleration requests issued to the NSS / awaiting completion */
+int ecm_nss_ipv6_no_action_limit_default = 250;		/* Default no-action limit. */
+int ecm_nss_ipv6_driver_fail_limit_default = 250;		/* Default driver fail limit. */
+int ecm_nss_ipv6_nack_limit_default = 250;			/* Default nack limit. */
+int ecm_nss_ipv6_accelerated_count = 0;			/* Total offloads */
+int ecm_nss_ipv6_pending_accel_count = 0;			/* Total pending offloads issued to the NSS / awaiting completion */
+int ecm_nss_ipv6_pending_decel_count = 0;			/* Total pending deceleration requests issued to the NSS / awaiting completion */
 
 /*
  * Limiting the acceleration of connections.
@@ -121,48 +127,48 @@ int ecm_nss_ipv4_pending_decel_count = 0;			/* Total pending deceleration reques
  * In this scenario the acceleration engine will begin removal of existing rules to make way for new ones.
  * When the accel_limit_mode is set to FIXED ECM will not permit more rules to be issued than the engine will allow.
  */
-uint32_t ecm_nss_ipv4_accel_limit_mode = ECM_FRONT_END_ACCEL_LIMIT_MODE_UNLIMITED;
+uint32_t ecm_nss_ipv6_accel_limit_mode = ECM_FRONT_END_ACCEL_LIMIT_MODE_UNLIMITED;
 
 /*
  * Locking of the classifier - concurrency control for file global parameters.
  * NOTE: It is safe to take this lock WHILE HOLDING a feci->lock.  The reverse is NOT SAFE.
  */
-DEFINE_SPINLOCK(ecm_nss_ipv4_lock);			/* Protect against SMP access between netfilter, events and private threaded function. */
+DEFINE_SPINLOCK(ecm_nss_ipv6_lock);			/* Protect against SMP access between netfilter, events and private threaded function. */
 
 /*
  * Management thread control
  */
-bool ecm_nss_ipv4_terminate_pending = false;		/* True when the user has signalled we should quit */
+bool ecm_nss_ipv6_terminate_pending = false;		/* True when the user has signalled we should quit */
 
 /*
  * NSS driver linkage
  */
-struct nss_ctx_instance *ecm_nss_ipv4_nss_ipv4_mgr = NULL;
+struct nss_ctx_instance *ecm_nss_ipv6_nss_ipv6_mgr = NULL;
 
-static unsigned long ecm_nss_ipv4_accel_cmd_time_avg_samples = 0;	/* Sum of time taken for the set of accel command samples, used to compute average time for an accel command to complete */
-static unsigned long ecm_nss_ipv4_accel_cmd_time_avg_set = 1;	/* How many samples in the set */
-static unsigned long ecm_nss_ipv4_decel_cmd_time_avg_samples = 0;	/* Sum of time taken for the set of accel command samples, used to compute average time for an accel command to complete */
-static unsigned long ecm_nss_ipv4_decel_cmd_time_avg_set = 1;	/* How many samples in the set */
+static unsigned long ecm_nss_ipv6_accel_cmd_time_avg_samples = 0;	/* Sum of time taken for the set of accel command samples, used to compute average time for an accel command to complete */
+static unsigned long ecm_nss_ipv6_accel_cmd_time_avg_set = 1;	/* How many samples in the set */
+static unsigned long ecm_nss_ipv6_decel_cmd_time_avg_samples = 0;	/* Sum of time taken for the set of accel command samples, used to compute average time for an accel command to complete */
+static unsigned long ecm_nss_ipv6_decel_cmd_time_avg_set = 1;	/* How many samples in the set */
 
 /*
  * Debugfs dentry object.
  */
-static struct dentry *ecm_nss_ipv4_dentry;
+static struct dentry *ecm_nss_ipv6_dentry;
 
 /*
  * General operational control
  */
-static int ecm_nss_ipv4_stopped = 0;			/* When non-zero further traffic will not be processed */
+static int ecm_nss_ipv6_stopped = 0;			/* When non-zero further traffic will not be processed */
 
 /*
- * ecm_nss_ipv4_node_establish_and_ref()
+ * ecm_nss_ipv6_node_establish_and_ref()
  *	Returns a reference to a node, possibly creating one if necessary.
  *
  * The given_node_addr will be used if provided.
  *
  * Returns NULL on failure.
  */
-struct ecm_db_node_instance *ecm_nss_ipv4_node_establish_and_ref(struct net_device *dev, ip_addr_t addr,
+struct ecm_db_node_instance *ecm_nss_ipv6_node_establish_and_ref(struct net_device *dev, ip_addr_t addr,
 							struct ecm_db_iface_instance *interface_list[], int32_t interface_list_first,
 							uint8_t *given_node_addr)
 {
@@ -173,7 +179,7 @@ struct ecm_db_node_instance *ecm_nss_ipv4_node_establish_and_ref(struct net_devi
 	bool done;
 	uint8_t node_addr[ETH_ALEN];
 
-	DEBUG_INFO("Establish node for " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(addr));
+	DEBUG_INFO("Establish node for " ECM_IP_ADDR_OCTAL_FMT "\n", ECM_IP_ADDR_TO_OCTAL(addr));
 
 	/*
 	 * The node is the datalink address, typically a MAC address.
@@ -226,7 +232,7 @@ struct ecm_db_node_instance *ecm_nss_ipv4_node_establish_and_ref(struct net_devi
 		case ECM_DB_IFACE_TYPE_VLAN:
 #ifdef ECM_INTERFACE_VLAN_ENABLE
 			/*
-			 * VLAN handled same along with ethernet, lag, bridge etc.
+			 * VLAN handled same along with bridge etc.
 			 */
 #else
 			DEBUG_TRACE("VLAN interface unsupported\n");
@@ -235,26 +241,24 @@ struct ecm_db_node_instance *ecm_nss_ipv4_node_establish_and_ref(struct net_devi
 		case ECM_DB_IFACE_TYPE_ETHERNET:
 		case ECM_DB_IFACE_TYPE_LAG:
 		case ECM_DB_IFACE_TYPE_BRIDGE:
-		case ECM_DB_IFACE_TYPE_IPSEC_TUNNEL:
 			if (!ecm_interface_mac_addr_get(addr, node_addr, &on_link, gw_addr)) {
-				DEBUG_TRACE("failed to obtain node address for host " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(addr));
-				ecm_interface_send_arp_request(dev, addr, on_link, gw_addr);
-
-				/*
-				 * Unable to get node address at this time.
-				 */
+				DEBUG_TRACE("Failed to obtain mac for host " ECM_IP_ADDR_OCTAL_FMT "\n", ECM_IP_ADDR_TO_OCTAL(addr));
+				if (ecm_front_end_is_bridge_port(dev)) {
+					struct net_device *master;
+					master = ecm_interface_get_and_hold_dev_master(dev);
+					DEBUG_ASSERT(master, "Expected a master\n");
+					ecm_interface_send_neighbour_solicitation(master, addr);
+					dev_put(master);
+				} else {
+					ecm_interface_send_neighbour_solicitation(dev, addr);
+				}
 				return NULL;
 			}
-
 			if (is_multicast_ether_addr(node_addr)) {
-				DEBUG_TRACE("multicast node address for host " ECM_IP_ADDR_DOT_FMT ", node_addr: %pM\n", ECM_IP_ADDR_TO_DOT(addr), node_addr);
+				DEBUG_TRACE("multicast node address for host " ECM_IP_ADDR_OCTAL_FMT ", node_addr: %pM\n", ECM_IP_ADDR_TO_OCTAL(addr), node_addr);
 				return NULL;
 			}
 
-			/*
-			 * Because we are iterating from inner to outer interface, this interface is the
-			 * innermost one that has a node address - take this one.
-			 */
 			done = true;
 			break;
 		default:
@@ -268,7 +272,7 @@ struct ecm_db_node_instance *ecm_nss_ipv4_node_establish_and_ref(struct net_devi
 		}
 	}
 	if (!done) {
-		DEBUG_INFO("Failed to establish node for " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(addr));
+		DEBUG_INFO("Failed to establish node for " ECM_IP_ADDR_OCTAL_FMT "\n", ECM_IP_ADDR_TO_OCTAL(addr));
 		return NULL;
 	}
 
@@ -303,17 +307,17 @@ struct ecm_db_node_instance *ecm_nss_ipv4_node_establish_and_ref(struct net_devi
 	/*
 	 * Add node into the database, atomically to avoid races creating the same thing
 	 */
-	spin_lock_bh(&ecm_nss_ipv4_lock);
+	spin_lock_bh(&ecm_nss_ipv6_lock);
 	ni = ecm_db_node_find_and_ref(node_addr);
 	if (ni) {
-		spin_unlock_bh(&ecm_nss_ipv4_lock);
+		spin_unlock_bh(&ecm_nss_ipv6_lock);
 		ecm_db_node_deref(nni);
 		ecm_db_iface_deref(ii);
 		return ni;
 	}
 
 	ecm_db_node_add(nni, ii, node_addr, NULL, nni);
-	spin_unlock_bh(&ecm_nss_ipv4_lock);
+	spin_unlock_bh(&ecm_nss_ipv6_lock);
 
 	/*
 	 * Don't need iface instance now
@@ -325,17 +329,17 @@ struct ecm_db_node_instance *ecm_nss_ipv4_node_establish_and_ref(struct net_devi
 }
 
 /*
- * ecm_nss_ipv4_host_establish_and_ref()
+ * ecm_nss_ipv6_host_establish_and_ref()
  *	Returns a reference to a host, possibly creating one if necessary.
  *
  * Returns NULL on failure.
  */
-struct ecm_db_host_instance *ecm_nss_ipv4_host_establish_and_ref(ip_addr_t addr)
+struct ecm_db_host_instance *ecm_nss_ipv6_host_establish_and_ref(ip_addr_t addr)
 {
 	struct ecm_db_host_instance *hi;
 	struct ecm_db_host_instance *nhi;
 
-	DEBUG_INFO("Establish host for " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(addr));
+	DEBUG_INFO("Establish host for " ECM_IP_ADDR_OCTAL_FMT "\n", ECM_IP_ADDR_TO_OCTAL(addr));
 
 	/*
 	 * Locate the host
@@ -358,35 +362,35 @@ struct ecm_db_host_instance *ecm_nss_ipv4_host_establish_and_ref(ip_addr_t addr)
 	/*
 	 * Add host into the database, atomically to avoid races creating the same thing
 	 */
-	spin_lock_bh(&ecm_nss_ipv4_lock);
+	spin_lock_bh(&ecm_nss_ipv6_lock);
 	hi = ecm_db_host_find_and_ref(addr);
 	if (hi) {
-		spin_unlock_bh(&ecm_nss_ipv4_lock);
+		spin_unlock_bh(&ecm_nss_ipv6_lock);
 		ecm_db_host_deref(nhi);
 		return hi;
 	}
 
 	ecm_db_host_add(nhi, addr, true, NULL, nhi);
 
-	spin_unlock_bh(&ecm_nss_ipv4_lock);
+	spin_unlock_bh(&ecm_nss_ipv6_lock);
 
 	DEBUG_TRACE("%p: host established\n", nhi);
 	return nhi;
 }
 
 /*
- * ecm_nss_ipv4_mapping_establish_and_ref()
+ * ecm_nss_ipv6_mapping_establish_and_ref()
  *	Returns a reference to a mapping, possibly creating one if necessary.
  *
  * Returns NULL on failure.
  */
-struct ecm_db_mapping_instance *ecm_nss_ipv4_mapping_establish_and_ref(ip_addr_t addr, int port)
+struct ecm_db_mapping_instance *ecm_nss_ipv6_mapping_establish_and_ref(ip_addr_t addr, int port)
 {
 	struct ecm_db_mapping_instance *mi;
 	struct ecm_db_mapping_instance *nmi;
 	struct ecm_db_host_instance *hi;
 
-	DEBUG_INFO("Establish mapping for " ECM_IP_ADDR_DOT_FMT ":%d\n", ECM_IP_ADDR_TO_DOT(addr), port);
+	DEBUG_INFO("Establish mapping for " ECM_IP_ADDR_OCTAL_FMT ":%u\n", ECM_IP_ADDR_TO_OCTAL(addr), port);
 
 	/*
 	 * Locate the mapping
@@ -400,7 +404,7 @@ struct ecm_db_mapping_instance *ecm_nss_ipv4_mapping_establish_and_ref(ip_addr_t
 	/*
 	 * No mapping - establish host existence
 	 */
-	hi = ecm_nss_ipv4_host_establish_and_ref(addr);
+	hi = ecm_nss_ipv6_host_establish_and_ref(addr);
 	if (!hi) {
 		DEBUG_WARN("Failed to establish host\n");
 		return NULL;
@@ -419,10 +423,10 @@ struct ecm_db_mapping_instance *ecm_nss_ipv4_mapping_establish_and_ref(ip_addr_t
 	/*
 	 * Add mapping into the database, atomically to avoid races creating the same thing
 	 */
-	spin_lock_bh(&ecm_nss_ipv4_lock);
+	spin_lock_bh(&ecm_nss_ipv6_lock);
 	mi = ecm_db_mapping_find_and_ref(addr, port);
 	if (mi) {
-		spin_unlock_bh(&ecm_nss_ipv4_lock);
+		spin_unlock_bh(&ecm_nss_ipv6_lock);
 		ecm_db_mapping_deref(nmi);
 		ecm_db_host_deref(hi);
 		return mi;
@@ -430,7 +434,7 @@ struct ecm_db_mapping_instance *ecm_nss_ipv4_mapping_establish_and_ref(ip_addr_t
 
 	ecm_db_mapping_add(nmi, hi, port, NULL, nmi);
 
-	spin_unlock_bh(&ecm_nss_ipv4_lock);
+	spin_unlock_bh(&ecm_nss_ipv6_lock);
 
 	/*
 	 * Don't need the host instance now - the mapping maintains a reference to it now.
@@ -445,10 +449,10 @@ struct ecm_db_mapping_instance *ecm_nss_ipv4_mapping_establish_and_ref(ip_addr_t
 }
 
 /*
- * ecm_nss_ipv4_accel_done_time_update()
+ * ecm_nss_ipv6_accel_done_time_update()
  *	Record how long the command took to complete, updating average samples
  */
-void ecm_nss_ipv4_accel_done_time_update(struct ecm_front_end_connection_instance *feci)
+void ecm_nss_ipv6_accel_done_time_update(struct ecm_front_end_connection_instance *feci)
 {
 	unsigned long delta;
 
@@ -460,17 +464,17 @@ void ecm_nss_ipv4_accel_done_time_update(struct ecm_front_end_connection_instanc
 	delta = feci->stats.cmd_time_completed - feci->stats.cmd_time_begun;
 	spin_unlock_bh(&feci->lock);
 
-	spin_lock_bh(&ecm_nss_ipv4_lock);
-	ecm_nss_ipv4_accel_cmd_time_avg_samples += delta;
-	ecm_nss_ipv4_accel_cmd_time_avg_set++;
-	spin_unlock_bh(&ecm_nss_ipv4_lock);
+	spin_lock_bh(&ecm_nss_ipv6_lock);
+	ecm_nss_ipv6_accel_cmd_time_avg_samples += delta;
+	ecm_nss_ipv6_accel_cmd_time_avg_set++;
+	spin_unlock_bh(&ecm_nss_ipv6_lock);
 }
 
 /*
- * ecm_nss_ipv4_deccel_done_time_update()
+ * ecm_nss_ipv6_deccel_done_time_update()
  *	Record how long the command took to complete, updating average samples
  */
-void ecm_nss_ipv4_decel_done_time_update(struct ecm_front_end_connection_instance *feci)
+void ecm_nss_ipv6_decel_done_time_update(struct ecm_front_end_connection_instance *feci)
 {
 	unsigned long delta;
 
@@ -482,17 +486,17 @@ void ecm_nss_ipv4_decel_done_time_update(struct ecm_front_end_connection_instanc
 	delta = feci->stats.cmd_time_completed - feci->stats.cmd_time_begun;
 	spin_unlock_bh(&feci->lock);
 
-	spin_lock_bh(&ecm_nss_ipv4_lock);
-	ecm_nss_ipv4_decel_cmd_time_avg_samples += delta;
-	ecm_nss_ipv4_decel_cmd_time_avg_set++;
-	spin_unlock_bh(&ecm_nss_ipv4_lock);
+	spin_lock_bh(&ecm_nss_ipv6_lock);
+	ecm_nss_ipv6_decel_cmd_time_avg_samples += delta;
+	ecm_nss_ipv6_decel_cmd_time_avg_set++;
+	spin_unlock_bh(&ecm_nss_ipv6_lock);
 }
 
 /*
- * ecm_nss_ipv4_assign_classifier()
+ * ecm_nss_ipv6_assign_classifier()
  *	Instantiate and assign classifier of type upon the connection, also returning it if it could be allocated.
  */
-struct ecm_classifier_instance *ecm_nss_ipv4_assign_classifier(struct ecm_db_connection_instance *ci, ecm_classifier_type_t type)
+struct ecm_classifier_instance *ecm_nss_ipv6_assign_classifier(struct ecm_db_connection_instance *ci, ecm_classifier_type_t type)
 {
 	DEBUG_TRACE("%p: Assign classifier of type: %d\n", ci, type);
 	DEBUG_ASSERT(type != ECM_CLASSIFIER_TYPE_DEFAULT, "Must never need to instantiate default type in this way");
@@ -559,14 +563,14 @@ struct ecm_classifier_instance *ecm_nss_ipv4_assign_classifier(struct ecm_db_con
 }
 
 /*
- * ecm_nss_ipv4_reclassify()
+ * ecm_nss_ipv6_reclassify()
  *	Signal reclassify upon the assigned classifiers.
  *
  * Classifiers that unassigned themselves we TRY to re-instantiate them.
  * Returns false if the function is not able to instantiate all missing classifiers.
  * This function does not release and references to classifiers in the assignments[].
  */
-bool ecm_nss_ipv4_reclassify(struct ecm_db_connection_instance *ci, int assignment_count, struct ecm_classifier_instance *assignments[])
+bool ecm_nss_ipv6_reclassify(struct ecm_db_connection_instance *ci, int assignment_count, struct ecm_classifier_instance *assignments[])
 {
 	ecm_classifier_type_t classifier_type;
 	int i;
@@ -600,7 +604,7 @@ bool ecm_nss_ipv4_reclassify(struct ecm_db_connection_instance *ci, int assignme
 			DEBUG_TRACE("%p: Instantiate missing type: %d\n", ci, classifier_type);
 			DEBUG_ASSERT(classifier_type < ECM_CLASSIFIER_TYPES, "Algorithm bad");
 
-			naci = ecm_nss_ipv4_assign_classifier(ci, classifier_type);
+			naci = ecm_nss_ipv6_assign_classifier(ci, classifier_type);
 			if (!naci) {
 				full_reclassification = false;
 			} else {
@@ -618,7 +622,7 @@ bool ecm_nss_ipv4_reclassify(struct ecm_db_connection_instance *ci, int assignme
 		struct ecm_classifier_instance *naci;
 		DEBUG_TRACE("%p: Instantiate missing type: %d\n", ci, classifier_type);
 
-		naci = ecm_nss_ipv4_assign_classifier(ci, classifier_type);
+		naci = ecm_nss_ipv6_assign_classifier(ci, classifier_type);
 		if (!naci) {
 			full_reclassification = false;
 		} else {
@@ -631,37 +635,28 @@ bool ecm_nss_ipv4_reclassify(struct ecm_db_connection_instance *ci, int assignme
 }
 
 /*
- * ecm_nss_ipv4_connection_regenerate()
+ * ecm_nss_ipv6_connection_regenerate()
  *	Re-generate a connection.
  *
  * Re-generating a connection involves re-evaluating the interface lists in case interface heirarchies have changed.
  * It also involves the possible triggering of classifier re-evaluation but only if all currently assigned
  * classifiers permit this operation.
  */
-bool ecm_nss_ipv4_connection_regenerate(struct ecm_db_connection_instance *ci, ecm_tracker_sender_type_t sender,
-							struct net_device *out_dev, struct net_device *out_dev_nat,
-							struct net_device *in_dev, struct net_device *in_dev_nat)
+bool ecm_nss_ipv6_connection_regenerate(struct ecm_db_connection_instance *ci, ecm_tracker_sender_type_t sender,
+							struct net_device *out_dev, struct net_device *in_dev)
 {
 	int i;
 	bool reclassify_allowed;
 	int32_t to_list_first;
 	struct ecm_db_iface_instance *to_list[ECM_DB_IFACE_HEIRARCHY_MAX];
-	int32_t to_nat_list_first;
-	struct ecm_db_iface_instance *to_nat_list[ECM_DB_IFACE_HEIRARCHY_MAX];
 	int32_t from_list_first;
 	struct ecm_db_iface_instance *from_list[ECM_DB_IFACE_HEIRARCHY_MAX];
-	int32_t from_nat_list_first;
-	struct ecm_db_iface_instance *from_nat_list[ECM_DB_IFACE_HEIRARCHY_MAX];
 	ip_addr_t ip_src_addr;
 	ip_addr_t ip_dest_addr;
-	ip_addr_t ip_src_addr_nat;
-	ip_addr_t ip_dest_addr_nat;
 	int protocol;
 	bool is_routed;
 	uint8_t src_node_addr[ETH_ALEN];
 	uint8_t dest_node_addr[ETH_ALEN];
-	uint8_t src_node_addr_nat[ETH_ALEN];
-	uint8_t dest_node_addr_nat[ETH_ALEN];
 	int assignment_count;
 	struct ecm_classifier_instance *assignments[ECM_CLASSIFIER_TYPES];
 
@@ -680,10 +675,6 @@ bool ecm_nss_ipv4_connection_regenerate(struct ecm_db_connection_instance *ci, e
 		tmp_dev = out_dev;
 		out_dev = in_dev;
 		in_dev = tmp_dev;
-
-		tmp_dev = out_dev_nat;
-		out_dev_nat = in_dev_nat;
-		in_dev_nat = tmp_dev;
 	}
 
 	/*
@@ -700,53 +691,30 @@ bool ecm_nss_ipv4_connection_regenerate(struct ecm_db_connection_instance *ci, e
 	is_routed = ecm_db_connection_is_routed_get(ci);
 
 	ecm_db_connection_from_address_get(ci, ip_src_addr);
-	ecm_db_connection_from_address_nat_get(ci, ip_src_addr_nat);
 
 	ecm_db_connection_to_address_get(ci, ip_dest_addr);
-	ecm_db_connection_to_address_nat_get(ci, ip_dest_addr_nat);
 
 	ecm_db_connection_from_node_address_get(ci, src_node_addr);
-	ecm_db_connection_from_nat_node_address_get(ci, src_node_addr_nat);
 
 	ecm_db_connection_to_node_address_get(ci, dest_node_addr);
-	ecm_db_connection_to_nat_node_address_get(ci, dest_node_addr_nat);
-
 
 	DEBUG_TRACE("%p: Update the 'from' interface heirarchy list\n", ci);
-	from_list_first = ecm_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, 4, protocol, in_dev, is_routed, in_dev, src_node_addr, dest_node_addr);
+	from_list_first = ecm_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, 6, protocol, in_dev, is_routed, in_dev, src_node_addr, dest_node_addr);
 	if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
-		goto ecm_ipv4_retry_regen;
+		goto ecm_ipv6_retry_regen;
 	}
 
 	ecm_db_connection_from_interfaces_reset(ci, from_list, from_list_first);
 	ecm_db_connection_interfaces_deref(from_list, from_list_first);
 
-	DEBUG_TRACE("%p: Update the 'from NAT' interface heirarchy list\n", ci);
-	from_nat_list_first = ecm_interface_heirarchy_construct(from_nat_list, ip_dest_addr, ip_src_addr_nat, 4, protocol, in_dev_nat, is_routed, in_dev_nat, src_node_addr_nat, dest_node_addr_nat);
-	if (from_nat_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
-		goto ecm_ipv4_retry_regen;
-	}
-
-	ecm_db_connection_from_nat_interfaces_reset(ci, from_nat_list, from_nat_list_first);
-	ecm_db_connection_interfaces_deref(from_nat_list, from_nat_list_first);
-
 	DEBUG_TRACE("%p: Update the 'to' interface heirarchy list\n", ci);
-	to_list_first = ecm_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, 4, protocol, out_dev, is_routed, in_dev, dest_node_addr, src_node_addr);
+	to_list_first = ecm_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, 6, protocol, out_dev, is_routed, in_dev, dest_node_addr, src_node_addr);
 	if (to_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
-		goto ecm_ipv4_retry_regen;
+		goto ecm_ipv6_retry_regen;
 	}
 
 	ecm_db_connection_to_interfaces_reset(ci, to_list, to_list_first);
 	ecm_db_connection_interfaces_deref(to_list, to_list_first);
-
-	DEBUG_TRACE("%p: Update the 'to NAT' interface heirarchy list\n", ci);
-	to_nat_list_first = ecm_interface_heirarchy_construct(to_nat_list, ip_src_addr, ip_dest_addr_nat, 4, protocol, out_dev_nat, is_routed, in_dev, dest_node_addr_nat, src_node_addr_nat);
-	if (to_nat_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
-		goto ecm_ipv4_retry_regen;
-	}
-
-	ecm_db_connection_to_nat_interfaces_reset(ci, to_nat_list, to_nat_list_first);
-	ecm_db_connection_interfaces_deref(to_nat_list, to_nat_list_first);
 
 	/*
 	 * Get list of assigned classifiers to reclassify.
@@ -784,11 +752,11 @@ bool ecm_nss_ipv4_connection_regenerate(struct ecm_db_connection_instance *ci, e
 	 * Reclassify
 	 */
 	DEBUG_INFO("%p: reclassify\n", ci);
-	if (!ecm_nss_ipv4_reclassify(ci, assignment_count, assignments)) {
+	if (!ecm_nss_ipv6_reclassify(ci, assignment_count, assignments)) {
 		/*
 		 * We could not set up the classifiers to reclassify, it is safer to fail out and try again next time
 		 */
-		DEBUG_WARN("%p: Regeneration: reclassify failed\n", ci);
+		DEBUG_WARN("%p: Regeneration failed\n", ci);
 		ecm_db_connection_assignments_release(assignment_count, assignments);
 		return false;
 	}
@@ -800,34 +768,29 @@ bool ecm_nss_ipv4_connection_regenerate(struct ecm_db_connection_instance *ci, e
 	ecm_db_connection_assignments_release(assignment_count, assignments);
 	return true;
 
-ecm_ipv4_retry_regen:
+ecm_ipv6_retry_regen:
 	ecm_db_connection_classifier_generation_change(ci);
 	return false;
 }
 
 /*
- * ecm_nss_ipv4_ip_process()
+ * ecm_nss_ipv6_ip_process()
  *	Process IP datagram skb
  */
-static unsigned int ecm_nss_ipv4_ip_process(struct net_device *out_dev, struct net_device *in_dev,
+static unsigned int ecm_nss_ipv6_ip_process(struct net_device *out_dev, struct net_device *in_dev,
 							uint8_t *src_node_addr, uint8_t *dest_node_addr,
-							bool can_accel, bool is_routed, bool is_l2_encap, struct sk_buff *skb)
+							bool can_accel, bool is_routed, bool is_l2_encap,
+							struct sk_buff *skb)
 {
 	struct ecm_tracker_ip_header ip_hdr;
         struct nf_conn *ct;
         enum ip_conntrack_info ctinfo;
 	struct nf_conntrack_tuple orig_tuple;
 	struct nf_conntrack_tuple reply_tuple;
-	ecm_db_direction_t ecm_dir;
 	ecm_tracker_sender_type_t sender;
+	ecm_db_direction_t ecm_dir = ECM_DB_DIRECTION_EGRESS_NAT;
 	ip_addr_t ip_src_addr;
 	ip_addr_t ip_dest_addr;
-	ip_addr_t ip_src_addr_nat;
-	ip_addr_t ip_dest_addr_nat;
-	struct net_device *out_dev_nat;
-	struct net_device *in_dev_nat;
-	uint8_t *src_node_addr_nat;
-	uint8_t *dest_node_addr_nat;
 
 	/*
 	 * Obtain the IP header from the skb
@@ -848,11 +811,11 @@ static unsigned int ecm_nss_ipv4_ip_process(struct net_device *out_dev, struct n
         ct = nf_ct_get(skb, &ctinfo);
 	if (unlikely(!ct)) {
 		DEBUG_TRACE("%p: no ct\n", skb);
-		ECM_IP_ADDR_TO_NIN4_ADDR(orig_tuple.src.u3.ip, ip_hdr.src_addr);
-		ECM_IP_ADDR_TO_NIN4_ADDR(orig_tuple.dst.u3.ip, ip_hdr.dest_addr);
+		ECM_IP_ADDR_TO_NIN6_ADDR(orig_tuple.src.u3.in6, ip_hdr.src_addr);
+		ECM_IP_ADDR_TO_NIN6_ADDR(orig_tuple.dst.u3.in6, ip_hdr.dest_addr);
 		orig_tuple.dst.protonum = ip_hdr.protocol;
-		reply_tuple.src.u3.ip = orig_tuple.dst.u3.ip;
-		reply_tuple.dst.u3.ip = orig_tuple.src.u3.ip;
+		ECM_IP_ADDR_TO_NIN6_ADDR(reply_tuple.src.u3.in6, ip_hdr.dest_addr);
+		ECM_IP_ADDR_TO_NIN6_ADDR(reply_tuple.dst.u3.in6, ip_hdr.src_addr);
 		sender = ECM_TRACKER_SENDER_TYPE_SRC;
 	} else {
 		if (unlikely(ct == &nf_conntrack_untracked)) {
@@ -899,10 +862,11 @@ static unsigned int ecm_nss_ipv4_ip_process(struct net_device *out_dev, struct n
 	/*
 	 * Check for a multicast Destination address here.
 	 */
-	ECM_NIN4_ADDR_TO_IP_ADDR(ip_dest_addr, orig_tuple.dst.u3.ip);
+	ECM_NIN6_ADDR_TO_IP_ADDR(ip_dest_addr, orig_tuple.dst.u3.in6);
 	if (ecm_ip_addr_is_multicast(ip_dest_addr)) {
-		DEBUG_TRACE("Multicast, Processing: %p\n", skb);
-		return ecm_nss_multicast_ipv4_connection_process(out_dev,
+		DEBUG_TRACE("skb %p multicast daddr " ECM_IP_ADDR_OCTAL_FMT "\n", skb, ECM_IP_ADDR_TO_OCTAL(ip_dest_addr));
+
+		return ecm_nss_multicast_ipv6_connection_process(out_dev,
 				in_dev,
 				src_node_addr,
 				dest_node_addr,
@@ -912,24 +876,12 @@ static unsigned int ecm_nss_ipv4_ip_process(struct net_device *out_dev, struct n
 				&orig_tuple, &reply_tuple);
 	}
 #endif
-
 	/*
-	 * Work out if this packet involves NAT or not.
-	 * If it does involve NAT then work out if this is an ingressing or egressing packet.
+	 * Work out if this packet involves routing or not.
 	 */
-	if (orig_tuple.src.u3.ip != reply_tuple.dst.u3.ip) {
+	if (is_routed) {
 		/*
-		 * Egressing NAT
-		 */
-		ecm_dir = ECM_DB_DIRECTION_EGRESS_NAT;
-	} else if (orig_tuple.dst.u3.ip != reply_tuple.src.u3.ip) {
-		/*
-		 * Ingressing NAT
-		 */
-		ecm_dir = ECM_DB_DIRECTION_INGRESS_NAT;
-	} else if (is_routed) {
-		/*
-		 * Non-NAT
+		 * Non-NAT only supported for IPv6
 		 */
 		ecm_dir = ECM_DB_DIRECTION_NON_NAT;
 	} else {
@@ -939,264 +891,47 @@ static unsigned int ecm_nss_ipv4_ip_process(struct net_device *out_dev, struct n
 		ecm_dir = ECM_DB_DIRECTION_BRIDGED;
 	}
 
-	DEBUG_TRACE("IP Packet ORIGINAL src: %pI4 ORIGINAL dst: %pI4 protocol: %u, sender: %d ecm_dir: %d\n", &orig_tuple.src.u3.ip, &orig_tuple.dst.u3.ip, orig_tuple.dst.protonum, sender, ecm_dir);
-
-	/*
-	 * Get IP addressing information.  This same logic is applied when extracting port information too.
-	 * This is tricky to do as what we are after is src and destination addressing that is non-nat but we also need the nat information too.
-	 * INGRESS connections have their conntrack information reversed!
-	 * We have to keep in mind the connection direction AND the packet direction in order to be able to work out what is what.
-	 *
-	 * ip_src_addr and ip_dest_addr MUST always be the NON-NAT endpoint addresses and reflect PACKET direction and not connection direction 'dir'.
-	 *
-	 * Examples 1 through 4 cater for NAT and NON-NAT in the INGRESS or EGRESS cases.
-	 *
-	 * Example 1:
-	 * An 'original' direction packet to an egress connection from br-lan:192.168.0.133:12345 to eth0:80.132.221.34:80 via NAT'ing router mapping eth0:10.10.10.30:33333 looks like:
-	 *	orig_tuple->src == 192.168.0.133:12345		This becomes ip_src_addr
-	 *	orig_tuple->dst == 80.132.221.34:80		This becomes ip_dest_addr
-	 *	reply_tuple->src == 80.132.221.34:80		This becomes ip_dest_addr_nat
-	 *	reply_tuple->dest == 10.10.10.30:33333		This becomes ip_src_addr_nat
-	 *
-	 *	in_dev would be br-lan - i.e. the device of ip_src_addr
-	 *	out_dev would be eth0 - i.e. the device of ip_dest_addr
-	 *	in_dev_nat would be eth0 - i.e. out_dev, the device of ip_src_addr_nat
-	 *	out_dev_nat would be eth0 - i.e. out_dev, the device of ip_dest_addr_nat
-	 *
-	 *	From a Node address perspective we are at position X in the following topology:
-	 *	LAN_PC======BR-LAN___ETH0====X====WAN_PC
-	 *
-	 *	src_node_addr refers to node address of of ip_src_addr_nat
-	 *	src_node_addr_nat is set to src_node_addr
-	 *	src_node_addr is then set to NULL as there is no node address available here for ip_src_addr
-	 *
-	 *	dest_node_addr refers to node address of ip_dest_addr
-	 *	dest_node_addr_nat is the node of ip_dest_addr_nat which is the same as dest_node_addr
-	 *
-	 * Example 2:
-	 * However an 'original' direction packet to an ingress connection from eth0:80.132.221.34:3321 to a LAN host (e.g. via DMZ) br-lan@192.168.0.133:12345 via NAT'ing router mapping eth0:10.10.10.30:12345 looks like:
-	 *	orig_tuple->src == 80.132.221.34:3321		This becomes ip_src_addr
-	 *	orig_tuple->dst == 10.10.10.30:12345		This becomes ip_dest_addr_nat
-	 *	reply_tuple->src == 192.168.0.133:12345		This becomes ip_dest_addr
-	 *	reply_tuple->dest == 80.132.221.34:3321		This becomes ip_src_addr_nat
-	 *
-	 *	in_dev would be eth0 - i.e. the device of ip_src_addr
-	 *	out_dev would be br-lan - i.e. the device of ip_dest_addr
-	 *	in_dev_nat would be eth0 - i.e. in_dev, the device of ip_src_addr_nat
-	 *	out_dev_nat would be eth0 - i.e. in_dev, the device of ip_dest_addr_nat
-	 *
-	 *	From a Node address perspective we are at position X in the following topology:
-	 *	LAN_PC===X===BR-LAN___ETH0========WAN_PC
-	 *
-	 *	src_node_addr refers to node address of br-lan which is not useful
-	 *	src_node_addr_nat AND src_node_addr become NULL
-	 *
-	 *	dest_node_addr refers to node address of ip_dest_addr
-	 *	dest_node_addr_nat is set to NULL
-	 *
-	 * When dealing with reply packets this confuses things even more.  Reply packets to the above two examples are as follows:
-	 *
-	 * Example 3:
-	 * A 'reply' direction packet to the egress connection above:
-	 *	orig_tuple->src == 192.168.0.133:12345		This becomes ip_dest_addr
-	 *	orig_tuple->dst == 80.132.221.34:80		This becomes ip_src_addr
-	 *	reply_tuple->src == 80.132.221.34:80		This becomes ip_src_addr_nat
-	 *	reply_tuple->dest == 10.10.10.30:33333		This becomes ip_dest_addr_nat
-	 *
-	 *	in_dev would be eth0 - i.e. the device of ip_src_addr
-	 *	out_dev would be br-lan - i.e. the device of ip_dest_addr
-	 *	in_dev_nat would be eth0 - i.e. in_dev, the device of ip_src_addr_nat
-	 *	out_dev_nat would be eth0 - i.e. in_dev, the device of ip_dest_addr_nat
-	 *
-	 *	From a Node address perspective we are at position X in the following topology:
-	 *	LAN_PC===X===BR-LAN___ETH0========WAN_PC
-	 *
-	 *	src_node_addr refers to node address of br-lan which is not useful
-	 *	src_node_addr_nat AND src_node_addr become NULL
-	 *
-	 *	dest_node_addr refers to node address of ip_dest_addr
-	 *	dest_node_addr_nat is set to NULL
-	 *
-	 * Example 4:
-	 * A 'reply' direction packet to the ingress connection above:
-	 *	orig_tuple->src == 80.132.221.34:3321		This becomes ip_dest_addr
-	 *	orig_tuple->dst == 10.10.10.30:12345		This becomes ip_src_addr_nat
-	 *	reply_tuple->src == 192.168.0.133:12345		This becomes ip_src_addr
-	 *	reply_tuple->dest == 80.132.221.34:3321		This becomes ip_dest_addr_nat
-	 *
-	 *	in_dev would be br-lan - i.e. the device of ip_src_addr
-	 *	out_dev would be eth0 - i.e. the device of ip_dest_addr
-	 *	in_dev_nat would be eth0 - i.e. out_dev, the device of ip_src_addr_nat
-	 *	out_dev_nat would be eth0 - i.e. out_dev, the device of ip_dest_addr_nat
-	 *
-	 *	From a Node address perspective we are at position X in the following topology:
-	 *	LAN_PC======BR-LAN___ETH0====X====WAN_PC
-	 *
-	 *	src_node_addr refers to node address of ip_src_addr_nat
-	 *	src_node_addr_nat is set to src_node_addr
-	 *	src_node_addr becomes NULL
-	 *
-	 *	dest_node_addr refers to node address of ip_dest_addr
-	 *	dest_node_addr_nat is set to dest_node_addr also.
-	 *
-	 * The following examples are for BRIDGED cases:
-	 *
-	 * Example 5:
-	 * An 'original' direction packet to an bridged connection from eth1:192.168.0.133:12345 to eth2:192.168.0.244:80 looks like:
-	 *	orig_tuple->src == 192.168.0.133:12345		This becomes ip_src_addr
-	 *	orig_tuple->dst == 192.168.0.244:80		This becomes ip_dest_addr
-	 *	reply_tuple->src == 192.168.0.244:80		This becomes ip_dest_addr_nat
-	 *	reply_tuple->dest == 192.168.0.133:12345	This becomes ip_src_addr_nat
-	 *
-	 *	in_dev would be eth1 - i.e. the device of ip_src_addr
-	 *	out_dev would be eth2 - i.e. the device of ip_dest_addr
-	 *	in_dev_nat would be eth1 - i.e. in_dev, the device of ip_src_addr_nat
-	 *	out_dev_nat would be eth2 - i.e. out_dev, the device of ip_dest_addr_nat
-	 *
-	 *	From a Node address perspective we are at position X in the following topology:
-	 *	LAN PC======ETH1___ETH2====X====LAN PC
-	 *
-	 *	src_node_addr refers to node address of ip_src_addr
-	 *	src_node_addr_nat is set to src_node_addr
-	 *
-	 *	dest_node_addr refers to node address of ip_dest_addr
-	 *	dest_node_addr_nat is set to dest_node_addr
-	 *
-	 * Example 6:
-	 * An 'reply' direction packet to the bridged connection above:
-	 *	orig_tuple->src == 192.168.0.133:12345		This becomes ip_dest_addr
-	 *	orig_tuple->dst == 192.168.0.244:80		This becomes ip_src_addr
-	 *	reply_tuple->src == 192.168.0.244:80		This becomes ip_src_addr_nat
-	 *	reply_tuple->dest == 192.168.0.133:12345	This becomes ip_dest_addr_nat
-	 *
-	 *	in_dev would be eth2 - i.e. the device of ip_src_addr
-	 *	out_dev would be eth1 - i.e. the device of ip_dest_addr
-	 *	in_dev_nat would be eth2 - i.e. in_dev, the device of ip_src_addr_nat
-	 *	out_dev_nat would be eth1 - i.e. out_dev, the device of ip_dest_addr_nat
-	 *
-	 *	From a Node address perspective we are at position X in the following topology:
-	 *	LAN PC===X===ETH1___ETH2========LAN PC
-	 *
-	 *	src_node_addr refers to node address of ip_src_addr
-	 *	src_node_addr_nat is set to src_node_addr
-	 *
-	 *	dest_node_addr refers to node address of ip_dest_addr
-	 *	dest_node_addr_nat is set to dest_node_addr
-	 */
 	if (sender == ECM_TRACKER_SENDER_TYPE_SRC) {
-		if ((ecm_dir == ECM_DB_DIRECTION_EGRESS_NAT) || (ecm_dir == ECM_DB_DIRECTION_NON_NAT)) {
-			/*
-			 * Example 1
-			 */
-			ECM_NIN4_ADDR_TO_IP_ADDR(ip_src_addr, orig_tuple.src.u3.ip);
-			ECM_NIN4_ADDR_TO_IP_ADDR(ip_dest_addr, orig_tuple.dst.u3.ip);
-			ECM_NIN4_ADDR_TO_IP_ADDR(ip_dest_addr_nat, reply_tuple.src.u3.ip);
-			ECM_NIN4_ADDR_TO_IP_ADDR(ip_src_addr_nat, reply_tuple.dst.u3.ip);
-
-			in_dev_nat = out_dev;
-			out_dev_nat = out_dev;
-
-			src_node_addr_nat = src_node_addr;
-			src_node_addr = NULL;
-
-			dest_node_addr_nat = dest_node_addr;
-		} else if (ecm_dir == ECM_DB_DIRECTION_INGRESS_NAT) {
-			/*
-			 * Example 2
-			 */
-			ECM_NIN4_ADDR_TO_IP_ADDR(ip_src_addr, orig_tuple.src.u3.ip);
-			ECM_NIN4_ADDR_TO_IP_ADDR(ip_dest_addr_nat, orig_tuple.dst.u3.ip);
-			ECM_NIN4_ADDR_TO_IP_ADDR(ip_dest_addr, reply_tuple.src.u3.ip);
-			ECM_NIN4_ADDR_TO_IP_ADDR(ip_src_addr_nat, reply_tuple.dst.u3.ip);
-
-			in_dev_nat = in_dev;
-			out_dev_nat = in_dev;
+		if (ecm_dir == ECM_DB_DIRECTION_NON_NAT) {
+			ECM_NIN6_ADDR_TO_IP_ADDR(ip_src_addr, orig_tuple.src.u3.in6);
+			ECM_NIN6_ADDR_TO_IP_ADDR(ip_dest_addr, orig_tuple.dst.u3.in6);
 
 			src_node_addr = NULL;
-			src_node_addr_nat = NULL;
-
-			dest_node_addr_nat = NULL;
 		} else if (ecm_dir == ECM_DB_DIRECTION_BRIDGED) {
-			/*
-			 * Example 5
-			 */
-			ECM_NIN4_ADDR_TO_IP_ADDR(ip_src_addr, orig_tuple.src.u3.ip);
-			ECM_NIN4_ADDR_TO_IP_ADDR(ip_dest_addr, orig_tuple.dst.u3.ip);
-			ECM_NIN4_ADDR_TO_IP_ADDR(ip_dest_addr_nat, reply_tuple.src.u3.ip);
-			ECM_NIN4_ADDR_TO_IP_ADDR(ip_src_addr_nat, reply_tuple.dst.u3.ip);
-
-			in_dev_nat = in_dev;
-			out_dev_nat = out_dev;
-
-			src_node_addr_nat = src_node_addr;
-
-			dest_node_addr_nat = dest_node_addr;
+			ECM_NIN6_ADDR_TO_IP_ADDR(ip_src_addr, orig_tuple.src.u3.in6);
+			ECM_NIN6_ADDR_TO_IP_ADDR(ip_dest_addr, orig_tuple.dst.u3.in6);
 		} else {
 			DEBUG_ASSERT(false, "Unhandled ecm_dir: %d\n", ecm_dir);
 		}
 	} else {
-		if ((ecm_dir == ECM_DB_DIRECTION_EGRESS_NAT) || (ecm_dir == ECM_DB_DIRECTION_NON_NAT)) {
-			/*
-			 * Example 3
-			 */
-			ECM_NIN4_ADDR_TO_IP_ADDR(ip_dest_addr, orig_tuple.src.u3.ip);
-			ECM_NIN4_ADDR_TO_IP_ADDR(ip_src_addr, orig_tuple.dst.u3.ip);
-			ECM_NIN4_ADDR_TO_IP_ADDR(ip_src_addr_nat, reply_tuple.src.u3.ip);
-			ECM_NIN4_ADDR_TO_IP_ADDR(ip_dest_addr_nat, reply_tuple.dst.u3.ip);
-
-			in_dev_nat  = in_dev;
-			out_dev_nat = in_dev;
+		if (ecm_dir == ECM_DB_DIRECTION_NON_NAT) {
+			ECM_NIN6_ADDR_TO_IP_ADDR(ip_dest_addr, orig_tuple.src.u3.in6);
+			ECM_NIN6_ADDR_TO_IP_ADDR(ip_src_addr, orig_tuple.dst.u3.in6);
 
 			src_node_addr = NULL;
-			src_node_addr_nat = NULL;
-
-			dest_node_addr_nat = NULL;
-		} else if (ecm_dir == ECM_DB_DIRECTION_INGRESS_NAT) {
-			/*
-			 * Example 4
-			 */
-			ECM_NIN4_ADDR_TO_IP_ADDR(ip_dest_addr, orig_tuple.src.u3.ip);
-			ECM_NIN4_ADDR_TO_IP_ADDR(ip_src_addr_nat, orig_tuple.dst.u3.ip);
-			ECM_NIN4_ADDR_TO_IP_ADDR(ip_src_addr, reply_tuple.src.u3.ip);
-			ECM_NIN4_ADDR_TO_IP_ADDR(ip_dest_addr_nat, reply_tuple.dst.u3.ip);
-
-			in_dev_nat = out_dev;
-			out_dev_nat = out_dev;
-
-			src_node_addr_nat = src_node_addr;
-			src_node_addr = NULL;
-
-			dest_node_addr_nat = dest_node_addr;
 		} else if (ecm_dir == ECM_DB_DIRECTION_BRIDGED) {
-			/*
-			 * Example 6
-			 */
-			ECM_NIN4_ADDR_TO_IP_ADDR(ip_dest_addr, orig_tuple.src.u3.ip);
-			ECM_NIN4_ADDR_TO_IP_ADDR(ip_src_addr, orig_tuple.dst.u3.ip);
-			ECM_NIN4_ADDR_TO_IP_ADDR(ip_src_addr_nat, reply_tuple.src.u3.ip);
-			ECM_NIN4_ADDR_TO_IP_ADDR(ip_dest_addr_nat, reply_tuple.dst.u3.ip);
-
-			in_dev_nat  = in_dev;
-			out_dev_nat = out_dev;
-
-			src_node_addr_nat = src_node_addr;
-
-			dest_node_addr_nat = dest_node_addr;
+			ECM_NIN6_ADDR_TO_IP_ADDR(ip_dest_addr, orig_tuple.src.u3.in6);
+			ECM_NIN6_ADDR_TO_IP_ADDR(ip_src_addr, orig_tuple.dst.u3.in6);
 		} else {
 			DEBUG_ASSERT(false, "Unhandled ecm_dir: %d\n", ecm_dir);
 		}
 	}
+
+	DEBUG_TRACE("IP Packet src: " ECM_IP_ADDR_OCTAL_FMT "dst: " ECM_IP_ADDR_OCTAL_FMT " protocol: %u, sender: %d ecm_dir: %d\n",
+				ECM_IP_ADDR_TO_OCTAL(ip_src_addr),
+				ECM_IP_ADDR_TO_OCTAL(ip_dest_addr),
+				orig_tuple.dst.protonum, sender, ecm_dir);
 
 	/*
 	 * Non-unicast source or destination packets are ignored
 	 * NOTE: Only need to check the non-nat src/dest addresses here.
 	 */
 	if (unlikely(ecm_ip_addr_is_non_unicast(ip_dest_addr))) {
-		DEBUG_TRACE("skb %p non-unicast daddr " ECM_IP_ADDR_DOT_FMT "\n", skb, ECM_IP_ADDR_TO_DOT(ip_dest_addr));
+		DEBUG_TRACE("skb %p non-unicast daddr " ECM_IP_ADDR_OCTAL_FMT "\n", skb, ECM_IP_ADDR_TO_OCTAL(ip_dest_addr));
 		return NF_ACCEPT;
 	}
 	if (unlikely(ecm_ip_addr_is_non_unicast(ip_src_addr))) {
-		DEBUG_TRACE("skb %p non-unicast saddr " ECM_IP_ADDR_DOT_FMT "\n", skb, ECM_IP_ADDR_TO_DOT(ip_src_addr));
+		DEBUG_TRACE("skb %p non-unicast saddr " ECM_IP_ADDR_OCTAL_FMT "\n", skb, ECM_IP_ADDR_TO_OCTAL(ip_src_addr));
 		return NF_ACCEPT;
 	}
 
@@ -1205,43 +940,41 @@ static unsigned int ecm_nss_ipv4_ip_process(struct net_device *out_dev, struct n
 	 * TCP and UDP are the most likliest protocols.
 	 */
 	if (likely(orig_tuple.dst.protonum == IPPROTO_TCP) || likely(orig_tuple.dst.protonum == IPPROTO_UDP)) {
-		return ecm_nss_ported_ipv4_process(out_dev, out_dev_nat,
-				in_dev, in_dev_nat,
-				src_node_addr, src_node_addr_nat,
-				dest_node_addr, dest_node_addr_nat,
+		return ecm_nss_ported_ipv6_process(out_dev, in_dev,
+				src_node_addr,
+				dest_node_addr,
 				can_accel, is_routed, is_l2_encap, skb,
 				&ip_hdr,
 				ct, sender, ecm_dir,
 				&orig_tuple, &reply_tuple,
-				ip_src_addr, ip_dest_addr, ip_src_addr_nat, ip_dest_addr_nat);
+				ip_src_addr, ip_dest_addr);
 	}
 #ifdef ECM_NON_PORTED_SUPPORT_ENABLE
-	return ecm_nss_non_ported_ipv4_process(out_dev, out_dev_nat,
-				in_dev, in_dev_nat,
-				src_node_addr, src_node_addr_nat,
-				dest_node_addr, dest_node_addr_nat,
+	return ecm_nss_non_ported_ipv6_process(out_dev, in_dev,
+				src_node_addr,
+				dest_node_addr,
 				can_accel, is_routed, is_l2_encap, skb,
 				&ip_hdr,
 				ct, sender, ecm_dir,
 				&orig_tuple, &reply_tuple,
-				ip_src_addr, ip_dest_addr, ip_src_addr_nat, ip_dest_addr_nat);
+				ip_src_addr, ip_dest_addr);
 #else
 	return NF_ACCEPT;
 #endif
 }
 
 /*
- * ecm_nss_ipv4_post_routing_hook()
+ * ecm_nss_ipv6_post_routing_hook()
  *	Called for IP packets that are going out to interfaces after IP routing stage.
  */
 #if (LINUX_VERSION_CODE <= KERNEL_VERSION(3,6,0))
-static unsigned int ecm_nss_ipv4_post_routing_hook(unsigned int hooknum,
+static unsigned int ecm_nss_ipv6_post_routing_hook(unsigned int hooknum,
 				struct sk_buff *skb,
 				const struct net_device *in_unused,
 				const struct net_device *out,
 				int (*okfn)(struct sk_buff *))
 #else
-static unsigned int ecm_nss_ipv4_post_routing_hook(const struct nf_hook_ops *ops,
+static unsigned int ecm_nss_ipv6_post_routing_hook(const struct nf_hook_ops *ops,
 				struct sk_buff *skb,
 				const struct net_device *in_unused,
 				const struct net_device *out,
@@ -1257,13 +990,13 @@ static unsigned int ecm_nss_ipv4_post_routing_hook(const struct nf_hook_ops *ops
 	/*
 	 * If operations have stopped then do not process packets
 	 */
-	spin_lock_bh(&ecm_nss_ipv4_lock);
-	if (unlikely(ecm_nss_ipv4_stopped)) {
-		spin_unlock_bh(&ecm_nss_ipv4_lock);
+	spin_lock_bh(&ecm_nss_ipv6_lock);
+	if (unlikely(ecm_nss_ipv6_stopped)) {
+		spin_unlock_bh(&ecm_nss_ipv6_lock);
 		DEBUG_TRACE("Front end stopped\n");
 		return NF_ACCEPT;
 	}
-	spin_unlock_bh(&ecm_nss_ipv4_lock);
+	spin_unlock_bh(&ecm_nss_ipv6_lock);
 
 	/*
 	 * Don't process broadcast or multicast
@@ -1300,19 +1033,18 @@ static unsigned int ecm_nss_ipv4_post_routing_hook(const struct nf_hook_ops *ops
 		return NF_ACCEPT;
 	}
 
-	DEBUG_TRACE("Post routing process skb %p, out: %p (%s), in: %p (%s)\n", skb, out, out->name, in, in->name);
-	result = ecm_nss_ipv4_ip_process((struct net_device *)out, in, NULL, NULL,
-							can_accel, true, false, skb);
+	DEBUG_TRACE("Post routing process skb %p, out: %p, in: %p\n", skb, out, in);
+	result = ecm_nss_ipv6_ip_process((struct net_device *)out, in, NULL, NULL, can_accel, true, false, skb);
 	dev_put(in);
 	return result;
 }
 
 /*
- * ecm_front_end_ipv4_pppoe_bridge_process()
+ * ecm_nss_ipv6_pppoe_bridge_process()
  *	Called for PPPoE session packets that are going
  *	out to one of the bridge physical interfaces.
  */
-static unsigned int ecm_front_end_ipv4_pppoe_bridge_process(struct net_device *out,
+static unsigned int ecm_nss_ipv6_pppoe_bridge_process(struct net_device *out,
 						     struct net_device *in,
 						     struct ethhdr *skb_eth_hdr,
 						     bool can_accel,
@@ -1324,39 +1056,39 @@ static unsigned int ecm_front_end_ipv4_pppoe_bridge_process(struct net_device *o
 	uint32_t encap_header_len = 0;
 
 	ppp_proto = ntohs(ppp_proto);
-	if (ppp_proto != PPP_IP) {
+	if (ppp_proto != PPP_IPV6) {
 		return NF_ACCEPT;
 	}
 
 	encap_header_len = ecm_front_end_l2_encap_header_len(skb);
 	ecm_front_end_pull_l2_encap_header(skb, encap_header_len);
-	skb->protocol = htons(ETH_P_IP);
+	skb->protocol = htons(ETH_P_IPV6);
 
-	result = ecm_nss_ipv4_ip_process(out, in, skb_eth_hdr->h_source,
+	result = ecm_nss_ipv6_ip_process(out, in, skb_eth_hdr->h_source,
 					 skb_eth_hdr->h_dest, can_accel,
 					 false, true, skb);
 
-	ecm_front_end_push_l2_encap_header(skb, encap_header_len);
+	 ecm_front_end_push_l2_encap_header(skb, encap_header_len);
 	skb->protocol = htons(ETH_P_PPP_SES);
 
 	return result;
 }
 
 /*
- * ecm_nss_ipv4_bridge_post_routing_hook()
+ * ecm_nss_ipv6_bridge_post_routing_hook()
  *	Called for packets that are going out to one of the bridge physical interfaces.
  *
  * These may have come from another bridged interface or from a non-bridged interface.
  * Conntrack information may be available or not if this skb is bridged.
  */
 #if (LINUX_VERSION_CODE <= KERNEL_VERSION(3,6,0))
-static unsigned int ecm_nss_ipv4_bridge_post_routing_hook(unsigned int hooknum,
+static unsigned int ecm_nss_ipv6_bridge_post_routing_hook(unsigned int hooknum,
 					struct sk_buff *skb,
 					const struct net_device *in_unused,
 					const struct net_device *out,
 					int (*okfn)(struct sk_buff *))
 #else
-static unsigned int ecm_nss_ipv4_bridge_post_routing_hook(const struct nf_hook_ops *ops,
+static unsigned int ecm_nss_ipv6_bridge_post_routing_hook(const struct nf_hook_ops *ops,
 					struct sk_buff *skb,
 					const struct net_device *in_unused,
 					const struct net_device *out,
@@ -1375,13 +1107,13 @@ static unsigned int ecm_nss_ipv4_bridge_post_routing_hook(const struct nf_hook_o
 	/*
 	 * If operations have stopped then do not process packets
 	 */
-	spin_lock_bh(&ecm_nss_ipv4_lock);
-	if (unlikely(ecm_nss_ipv4_stopped)) {
-		spin_unlock_bh(&ecm_nss_ipv4_lock);
+	spin_lock_bh(&ecm_nss_ipv6_lock);
+	if (unlikely(ecm_nss_ipv6_stopped)) {
+		spin_unlock_bh(&ecm_nss_ipv6_lock);
 		DEBUG_TRACE("Front end stopped\n");
 		return NF_ACCEPT;
 	}
-	spin_unlock_bh(&ecm_nss_ipv4_lock);
+	spin_unlock_bh(&ecm_nss_ipv6_lock);
 
 	/*
 	 * Don't process broadcast or multicast
@@ -1416,7 +1148,7 @@ static unsigned int ecm_nss_ipv4_bridge_post_routing_hook(const struct nf_hook_o
 		return NF_ACCEPT;
 	}
 	eth_type = ntohs(skb_eth_hdr->h_proto);
-	if (unlikely((eth_type != 0x0800) && (eth_type != ETH_P_PPP_SES))) {
+	if (unlikely((eth_type != 0x86DD) && (eth_type != ETH_P_PPP_SES))) {
 		DEBUG_TRACE("%p: Not IP/PPPoE session\n", skb);
 		return NF_ACCEPT;
 	}
@@ -1493,19 +1225,19 @@ static unsigned int ecm_nss_ipv4_bridge_post_routing_hook(const struct nf_hook_o
 			return NF_ACCEPT;
 		}
 	}
+
 	DEBUG_TRACE("Bridge process skb: %p, bridge: %p (%s), In: %p (%s), Out: %p (%s)\n",
 			skb, bridge, bridge->name, in, in->name, out, out->name);
 
-	if (unlikely(eth_type != 0x0800)) {
-		result = ecm_front_end_ipv4_pppoe_bridge_process((struct net_device *)out, in, skb_eth_hdr, can_accel, skb);
+	if (unlikely(eth_type != 0x86DD)) {
+		result = ecm_nss_ipv6_pppoe_bridge_process((struct net_device *)out, in, skb_eth_hdr, can_accel, skb);
 		dev_put(in);
 		dev_put(bridge);
 		return result;
 	}
 
-	result = ecm_nss_ipv4_ip_process((struct net_device *)out, in,
-				skb_eth_hdr->h_source, skb_eth_hdr->h_dest, can_accel, false, false, skb);
-
+	result = ecm_nss_ipv6_ip_process((struct net_device *)out, in,
+							skb_eth_hdr->h_source, skb_eth_hdr->h_dest, can_accel, false, false, skb);
 
 	dev_put(in);
 	dev_put(bridge);
@@ -1513,36 +1245,36 @@ static unsigned int ecm_nss_ipv4_bridge_post_routing_hook(const struct nf_hook_o
 }
 
 /*
- * ecm_nss_ipv4_neigh_get()
+ * ecm_nss_ipv6_neigh_get()
  * 	Returns neighbour reference for a given IP address which must be released when you are done with it.
  *
  * Returns NULL on fail.
  */
-static struct neighbour *ecm_nss_ipv4_neigh_get(ip_addr_t addr)
+static struct neighbour *ecm_nss_ipv6_neigh_get(ip_addr_t addr)
 {
 	struct neighbour *neigh;
-	struct rtable *rt;
+	struct rt6_info *rt;
 	struct dst_entry *dst;
-	__be32 ipv4_addr;
+	struct in6_addr ipv6_addr;
 
-	ECM_IP_ADDR_TO_NIN4_ADDR(ipv4_addr, addr);
-	rt = ip_route_output(&init_net, ipv4_addr, 0, 0, 0);
-	if (IS_ERR(rt)) {
+	ECM_IP_ADDR_TO_NIN6_ADDR(ipv6_addr, addr);
+	rt = rt6_lookup(&init_net, &ipv6_addr, NULL, 0, 0);
+	if (!rt) {
 		return NULL;
 	}
 	dst = (struct dst_entry *)rt;
-	neigh = dst_neigh_lookup(dst, &ipv4_addr);
-	ip_rt_put(rt);
+	neigh = dst_neigh_lookup(dst, &ipv6_addr);
+	dst_release(dst);
 	return neigh;
 }
 
 /*
- * ecm_nss_ipv4_net_dev_callback()
+ * ecm_nss_ipv6_net_dev_callback()
  *	Callback handler from the NSS.
  */
-static void ecm_nss_ipv4_net_dev_callback(void *app_data, struct nss_ipv4_msg *nim)
+static void ecm_nss_ipv6_net_dev_callback(void *app_data, struct nss_ipv6_msg *nim)
 {
-	struct nss_ipv4_conn_sync *sync;
+	struct nss_ipv6_conn_sync *sync;
 	struct nf_conntrack_tuple_hash *h;
 	struct nf_conntrack_tuple tuple;
 	struct nf_conn *ct;
@@ -1550,52 +1282,41 @@ static void ecm_nss_ipv4_net_dev_callback(void *app_data, struct nss_ipv4_msg *n
 	struct ecm_db_connection_instance *ci;
 	struct ecm_front_end_connection_instance *feci;
 	struct neighbour *neigh;
-	ip_addr_t flow_ip;
-	ip_addr_t return_ip_xlate;
-	ip_addr_t return_ip;
 	struct ecm_classifier_instance *assignments[ECM_CLASSIFIER_TYPES];
 	int aci_index;
 	int assignment_count;
+	ip_addr_t flow_ip;
+	ip_addr_t return_ip;
+	struct in6_addr group6 __attribute__((unused));
+	struct in6_addr origin6 __attribute__((unused));
 
 	/*
 	 * Only respond to sync messages
 	 */
-	if (nim->cm.type != NSS_IPV4_RX_CONN_STATS_SYNC_MSG) {
+	if (nim->cm.type != NSS_IPV6_RX_CONN_STATS_SYNC_MSG) {
 		DEBUG_TRACE("Ignoring nim: %p - not sync: %d", nim, nim->cm.type);
 		return;
 	}
 	sync = &nim->msg.conn_stats;
+
+	ECM_NSS_IPV6_ADDR_TO_IP_ADDR(flow_ip, sync->flow_ip);
+	ECM_NSS_IPV6_ADDR_TO_IP_ADDR(return_ip, sync->return_ip);
 
 	/*
 	 * Look up ecm connection with a view to synchronising the connection, classifier and data tracker.
 	 * Note that we use _xlate versions for destination - for egressing connections this would be the wan IP address,
 	 * but for ingressing this would be the LAN side (non-nat'ed) address and is what we need for lookup of our connection.
 	 */
-	DEBUG_INFO("%p: NSS Sync, lookup connection using\n"
+	DEBUG_INFO("%p: NSS Sync, lookup connection using\n" \
 			"Protocol: %d\n" \
-			"src_addr: %pI4h:%d\n" \
-			"dest_addr: %pI4h:%d\n",
+			"src_addr: " ECM_IP_ADDR_OCTAL_FMT ":%d\n" \
+			"dest_addr: " ECM_IP_ADDR_OCTAL_FMT ":%d\n",
 			sync,
 			(int)sync->protocol,
-			&sync->flow_ip, (int)sync->flow_ident,
-			&sync->return_ip_xlate, (int)sync->return_ident_xlate);
+			ECM_IP_ADDR_TO_OCTAL(flow_ip), (int)sync->flow_ident,
+			ECM_IP_ADDR_TO_OCTAL(return_ip), (int)sync->return_ident);
 
-	ECM_HIN4_ADDR_TO_IP_ADDR(flow_ip, sync->flow_ip);
-	ECM_HIN4_ADDR_TO_IP_ADDR(return_ip_xlate, sync->return_ip_xlate);
-	ECM_HIN4_ADDR_TO_IP_ADDR(return_ip, sync->return_ip);
-
-#ifdef ECM_MULTICAST_ENABLE
-	/*
-	 * Check for multicast flow
-	 */
-	if (ecm_ip_addr_is_multicast(return_ip)) {
-		ci = ecm_db_connection_find_and_ref(flow_ip, return_ip, sync->protocol, (int)sync->flow_ident, (int)sync->return_ident);
-	} else {
-		ci = ecm_db_connection_find_and_ref(flow_ip, return_ip_xlate, sync->protocol, (int)sync->flow_ident, (int)sync->return_ident_xlate);
-	}
-#else
-	ci = ecm_db_connection_find_and_ref(flow_ip, return_ip_xlate, sync->protocol, (int)sync->flow_ident, (int)sync->return_ident_xlate);
-#endif
+	ci = ecm_db_connection_find_and_ref(flow_ip, return_ip, sync->protocol, (int)sync->flow_ident, (int)sync->return_ident);
 	if (!ci) {
 		DEBUG_TRACE("%p: NSS Sync: no connection\n", sync);
 		goto sync_conntrack;
@@ -1616,33 +1337,33 @@ static void ecm_nss_ipv4_net_dev_callback(void *app_data, struct nss_ipv4_msg *n
 	feci = ecm_db_connection_front_end_get_and_ref(ci);
 
 	if (sync->flow_tx_packet_count || sync->return_tx_packet_count) {
-		DEBUG_TRACE("%p: flow_rx_packet_count: %u, flow_rx_byte_count: %u, return_rx_packet_count: %u, return_rx_byte_count: %u\n",
-				ci, sync->flow_rx_packet_count, sync->flow_rx_byte_count, sync->return_rx_packet_count, sync->return_rx_byte_count);
+		DEBUG_TRACE("%p: flow_tx_packet_count: %u, flow_tx_byte_count: %u, return_tx_packet_count: %u, , return_tx_byte_count: %u\n",
+				ci, sync->flow_tx_packet_count, sync->flow_tx_byte_count, sync->return_tx_packet_count, sync->return_tx_byte_count);
 #ifdef ECM_MULTICAST_ENABLE
 		if (ecm_ip_addr_is_multicast(return_ip)) {
 			/*
 			 * The amount of data *sent* by the ECM multicast connection 'from' side is the amount the NSS has *received* in the 'flow' direction.
 			 */
 			ecm_db_multicast_connection_data_totals_update(ci, true, sync->flow_rx_byte_count, sync->flow_rx_packet_count);
-			ecm_db_multicast_connection_data_totals_update(ci, false, sync->return_rx_byte_count, sync->return_rx_packet_count);
+			ecm_db_multicast_connection_data_totals_update(ci, true, sync->return_rx_byte_count, sync->return_rx_packet_count);
 			ecm_db_multicast_connection_interface_heirarchy_stats_update(ci, sync->flow_rx_byte_count, sync->flow_rx_packet_count);
-
-			/*
-			 * As packets have been accelerated we have seen some action.
-			 */
-			feci->action_seen(feci);
 
 			/*
 			 * Update interface statistics
 			 */
 			ecm_interface_multicast_stats_update(ci, sync->flow_tx_packet_count, sync->flow_tx_byte_count, sync->flow_rx_packet_count, sync->flow_rx_byte_count,
 										sync->return_tx_packet_count, sync->return_tx_byte_count, sync->return_rx_packet_count, sync->return_rx_byte_count);
+
+			ECM_IP_ADDR_TO_NIN6_ADDR(origin6, flow_ip);
+			ECM_IP_ADDR_TO_NIN6_ADDR(group6, return_ip);
+
 			/*
 			 * Update IP multicast routing cache stats
 			 */
-			ipmr_mfc_stats_update(&init_net, htonl(flow_ip[0]), htonl(return_ip[0]), sync->flow_rx_packet_count,
-										 sync->flow_rx_byte_count, sync->flow_rx_packet_count, sync->flow_rx_byte_count);
+			ip6mr_mfc_stats_update(&init_net, &origin6, &group6, sync->flow_rx_packet_count,
+								 sync->flow_rx_byte_count, sync->flow_rx_packet_count, sync->flow_rx_byte_count);
 		} else {
+
 			/*
 			 * The amount of data *sent* by the ECM connection 'from' side is the amount the NSS has *received* in the 'flow' direction.
 			 */
@@ -1654,17 +1375,16 @@ static void ecm_nss_ipv4_net_dev_callback(void *app_data, struct nss_ipv4_msg *n
 			ecm_db_connection_data_totals_update(ci, false, sync->return_rx_byte_count, sync->return_rx_packet_count);
 
 			/*
-			 * As packets have been accelerated we have seen some action.
-			 */
-			feci->action_seen(feci);
-
-			/*
 			 * Update interface statistics
 			 */
 			ecm_interface_stats_update(ci, sync->flow_tx_packet_count, sync->flow_tx_byte_count, sync->flow_rx_packet_count, sync->flow_rx_byte_count,
-							sync->return_tx_packet_count, sync->return_tx_byte_count, sync->return_rx_packet_count, sync->return_rx_byte_count);
+						sync->return_tx_packet_count, sync->return_tx_byte_count, sync->return_rx_packet_count, sync->return_rx_byte_count);
 		}
 
+		/*
+		 * As packets have been accelerated we have seen some action.
+		 */
+		feci->action_seen(feci);
 #else
 		/*
 		 * The amount of data *sent* by the ECM connection 'from' side is the amount the NSS has *received* in the 'flow' direction.
@@ -1698,12 +1418,12 @@ static void ecm_nss_ipv4_net_dev_callback(void *app_data, struct nss_ipv4_msg *n
 
 		aci = assignments[aci_index];
 		DEBUG_TRACE("%p: sync to: %p, type: %d\n", feci, aci, aci->type_get(aci));
-		aci->sync_to_v4(aci, sync);
+		aci->sync_to_v6(aci, sync);
 	}
 	ecm_db_connection_assignments_release(assignment_count, assignments);
 
 	switch(sync->reason) {
-	case NSS_IPV4_SYNC_REASON_DESTROY:
+	case NSS_IPV6_SYNC_REASON_DESTROY:
 		/*
 		 * This is the final sync from the NSS for a connection whose acceleration was
 		 * terminated by the ecm.
@@ -1711,12 +1431,12 @@ static void ecm_nss_ipv4_net_dev_callback(void *app_data, struct nss_ipv4_msg *n
 		 */
 		DEBUG_INFO("%p: ECM initiated final sync seen: %d\n", ci, sync->reason);
 		break;
-	case NSS_IPV4_SYNC_REASON_FLUSH:
-	case NSS_IPV4_SYNC_REASON_EVICT:
+	case NSS_IPV6_SYNC_REASON_FLUSH:
+	case NSS_IPV6_SYNC_REASON_EVICT:
 		/*
 		 * NSS has ended acceleration without instruction from the ECM.
 		 */
-		DEBUG_INFO("%p: NSS Initiated final sync seen: %d cause:%d\n", ci, sync->reason, sync->cause);
+		DEBUG_INFO("%p: NSS Initiated final sync seen: %d\n", ci, sync->reason);
 
 		/*
 		 * NSS Decelerated the connection
@@ -1728,11 +1448,11 @@ static void ecm_nss_ipv4_net_dev_callback(void *app_data, struct nss_ipv4_msg *n
 		/*
 		 * Update the neighbour entry for source IP address
 		 */
-		neigh = ecm_nss_ipv4_neigh_get(flow_ip);
+		neigh = ecm_nss_ipv6_neigh_get(flow_ip);
 		if (!neigh) {
-			DEBUG_WARN("Neighbour entry for %pI4h not found\n", &sync->flow_ip);
+			DEBUG_WARN("Neighbour entry for " ECM_IP_ADDR_OCTAL_FMT " not found\n", ECM_IP_ADDR_TO_OCTAL(flow_ip));
 		} else {
-			DEBUG_TRACE("Neighbour entry for %pI4h update: %p\n", &sync->flow_ip, neigh);
+			DEBUG_TRACE("Neighbour entry for " ECM_IP_ADDR_OCTAL_FMT " update: %p\n", ECM_IP_ADDR_TO_OCTAL(flow_ip), neigh);
 			neigh_update(neigh, NULL, neigh->nud_state, NEIGH_UPDATE_F_WEAK_OVERRIDE);
 			neigh_release(neigh);
 		}
@@ -1742,11 +1462,11 @@ static void ecm_nss_ipv4_net_dev_callback(void *app_data, struct nss_ipv4_msg *n
 		 * Update the neighbour entry for destination IP address
 		 */
 		if (!ecm_ip_addr_is_multicast(return_ip)) {
-			neigh = ecm_nss_ipv4_neigh_get(return_ip);
+			neigh = ecm_nss_ipv6_neigh_get(return_ip);
 			if (!neigh) {
-				DEBUG_WARN("Neighbour entry for %pI4h not found\n", &sync->return_ip);
+				DEBUG_WARN("Neighbour entry for " ECM_IP_ADDR_OCTAL_FMT " not found\n", ECM_IP_ADDR_TO_OCTAL(return_ip));
 			} else {
-				DEBUG_TRACE("Neighbour entry for %pI4h update: %p\n", &sync->return_ip, neigh);
+				DEBUG_TRACE("Neighbour entry for " ECM_IP_ADDR_OCTAL_FMT " update: %p\n", ECM_IP_ADDR_TO_OCTAL(return_ip), neigh);
 				neigh_update(neigh, NULL, neigh->nud_state, NEIGH_UPDATE_F_WEAK_OVERRIDE);
 				neigh_release(neigh);
 			}
@@ -1755,11 +1475,11 @@ static void ecm_nss_ipv4_net_dev_callback(void *app_data, struct nss_ipv4_msg *n
 		/*
 		 * Update the neighbour entry for destination IP address
 		 */
-		neigh = ecm_nss_ipv4_neigh_get(return_ip);
+		neigh = ecm_nss_ipv6_neigh_get(return_ip);
 		if (!neigh) {
-			DEBUG_WARN("Neighbour entry for %pI4h not found\n", &sync->return_ip);
+			DEBUG_WARN("Neighbour entry for " ECM_IP_ADDR_OCTAL_FMT " not found\n", ECM_IP_ADDR_TO_OCTAL(return_ip));
 		} else {
-			DEBUG_TRACE("Neighbour entry for %pI4h update: %p\n", &sync->return_ip, neigh);
+			DEBUG_TRACE("Neighbour entry for " ECM_IP_ADDR_OCTAL_FMT " update: %p\n", ECM_IP_ADDR_TO_OCTAL(return_ip), neigh);
 			neigh_update(neigh, NULL, neigh->nud_state, NEIGH_UPDATE_F_WEAK_OVERRIDE);
 			neigh_release(neigh);
 		}
@@ -1784,22 +1504,22 @@ sync_conntrack:
 	 * Create a tuple so as to be able to look up a conntrack connection
 	 */
 	memset(&tuple, 0, sizeof(tuple));
-	tuple.src.u3.ip = htonl(sync->flow_ip);
+	ECM_IP_ADDR_TO_NIN6_ADDR(tuple.src.u3.in6, flow_ip)
 	tuple.src.u.all = (__be16)htons(sync->flow_ident);
-	tuple.src.l3num = AF_INET;
+	tuple.src.l3num = AF_INET6;
 
-	tuple.dst.u3.ip = htonl(sync->return_ip);
+	ECM_IP_ADDR_TO_NIN6_ADDR(tuple.dst.u3.in6, return_ip);
 	tuple.dst.dir = IP_CT_DIR_ORIGINAL;
 	tuple.dst.protonum = (uint8_t)sync->protocol;
 	tuple.dst.u.all = (__be16)htons(sync->return_ident);
 
 	DEBUG_TRACE("Conntrack sync, lookup conntrack connection using\n"
 			"Protocol: %d\n"
-			"src_addr: %pI4:%d\n"
-			"dest_addr: %pI4:%d\n",
+			"src_addr: " ECM_IP_ADDR_OCTAL_FMT ":%d\n"
+			"dest_addr: " ECM_IP_ADDR_OCTAL_FMT ":%d\n",
 			(int)tuple.dst.protonum,
-			&tuple.src.u3.ip, (int)tuple.src.u.all,
-			&tuple.dst.u3.ip, (int)tuple.dst.u.all);
+			ECM_IP_ADDR_TO_OCTAL(flow_ip), (int)tuple.src.u.all,
+			ECM_IP_ADDR_TO_OCTAL(return_ip), (int)tuple.dst.u.all);
 
 	/*
 	 * Look up conntrack connection
@@ -1833,7 +1553,6 @@ sync_conntrack:
 		ct->timeout.expires += delta_jiffies;
 		spin_unlock_bh(&ct->lock);
 	}
-
 #if (LINUX_VERSION_CODE <= KERNEL_VERSION(3,6,0))
 	acct = nf_conn_acct_find(ct);
 #else
@@ -1881,19 +1600,19 @@ sync_conntrack:
 }
 
 /*
- * struct nf_hook_ops ecm_nss_ipv4_netfilter_hooks[]
+ * struct nf_hook_ops ecm_nss_ipv6_netfilter_hooks[]
  *	Hooks into netfilter packet monitoring points.
  */
-static struct nf_hook_ops ecm_nss_ipv4_netfilter_hooks[] __read_mostly = {
+static struct nf_hook_ops ecm_nss_ipv6_netfilter_hooks[] __read_mostly = {
 	/*
 	 * Post routing hook is used to monitor packets going to interfaces that are NOT bridged in some way, e.g. packets to the WAN.
 	 */
 	{
-		.hook           = ecm_nss_ipv4_post_routing_hook,
+		.hook           = ecm_nss_ipv6_post_routing_hook,
 		.owner          = THIS_MODULE,
-		.pf             = PF_INET,
+		.pf             = PF_INET6,
 		.hooknum        = NF_INET_POST_ROUTING,
-		.priority       = NF_IP_PRI_NAT_SRC + 1,
+		.priority       = NF_IP6_PRI_NAT_SRC + 1,
 	},
 
 	/*
@@ -1901,7 +1620,7 @@ static struct nf_hook_ops ecm_nss_ipv4_netfilter_hooks[] __read_mostly = {
 	 * For example Wireles LAN (WLAN) and Wired LAN (LAN).
 	 */
 	{
-		.hook		= ecm_nss_ipv4_bridge_post_routing_hook,
+		.hook		= ecm_nss_ipv6_bridge_post_routing_hook,
 		.owner		= THIS_MODULE,
 		.pf		= PF_BRIDGE,
 		.hooknum	= NF_BR_POST_ROUTING,
@@ -1910,10 +1629,10 @@ static struct nf_hook_ops ecm_nss_ipv4_netfilter_hooks[] __read_mostly = {
 };
 
 /*
- * ecm_nss_ipv4_connection_from_ct_get_and_ref()
+ * ecm_nss_ipv6_connection_from_ct_get_and_ref()
  *	Return, if any, a connection given a ct
  */
-static struct ecm_db_connection_instance *ecm_nss_ipv4_connection_from_ct_get_and_ref(struct nf_conn *ct)
+static struct ecm_db_connection_instance *ecm_nss_ipv6_connection_from_ct_get_and_ref(struct nf_conn *ct)
 {
 	struct nf_conntrack_tuple orig_tuple;
 	struct nf_conntrack_tuple reply_tuple;
@@ -1928,8 +1647,8 @@ static struct ecm_db_connection_instance *ecm_nss_ipv4_connection_from_ct_get_an
 	 */
 	orig_tuple = ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple;
 	reply_tuple = ct->tuplehash[IP_CT_DIR_REPLY].tuple;
-	ECM_NIN4_ADDR_TO_IP_ADDR(host1_addr, orig_tuple.src.u3.ip);
-	ECM_NIN4_ADDR_TO_IP_ADDR(host2_addr, reply_tuple.src.u3.ip);
+	ECM_NIN6_ADDR_TO_IP_ADDR(host1_addr, orig_tuple.src.u3.in6);
+	ECM_NIN6_ADDR_TO_IP_ADDR(host2_addr, reply_tuple.src.u3.in6);
 	protocol = orig_tuple.dst.protonum;
 	if (protocol == IPPROTO_TCP) {
 		host1_port = ntohs(orig_tuple.src.u.tcp.port);
@@ -1937,7 +1656,7 @@ static struct ecm_db_connection_instance *ecm_nss_ipv4_connection_from_ct_get_an
 	} else if (protocol == IPPROTO_UDP) {
 		host1_port = ntohs(orig_tuple.src.u.udp.port);
 		host2_port = ntohs(reply_tuple.src.u.udp.port);
-	} else if ((protocol == IPPROTO_IPV6) || (protocol == IPPROTO_ESP)) {
+	} else if ((protocol == IPPROTO_IPIP)) {
 		host1_port = 0;
 		host2_port = 0;
 	} else {
@@ -1945,13 +1664,13 @@ static struct ecm_db_connection_instance *ecm_nss_ipv4_connection_from_ct_get_an
 		host2_port = -protocol;
 	}
 
-	DEBUG_TRACE("%p: lookup src: " ECM_IP_ADDR_DOT_FMT ":%d, "
-		    "dest: " ECM_IP_ADDR_DOT_FMT ":%d, "
+	DEBUG_TRACE("%p: lookup src: " ECM_IP_ADDR_OCTAL_FMT ":%d, "
+		    "dest: " ECM_IP_ADDR_OCTAL_FMT ":%d, "
 		    "protocol %d\n",
 		    ct,
-		    ECM_IP_ADDR_TO_DOT(host1_addr),
+		    ECM_IP_ADDR_TO_OCTAL(host1_addr),
 		    host1_port,
-		    ECM_IP_ADDR_TO_DOT(host2_addr),
+		    ECM_IP_ADDR_TO_OCTAL(host2_addr),
 		    host2_port,
 		    protocol);
 
@@ -1963,17 +1682,17 @@ static struct ecm_db_connection_instance *ecm_nss_ipv4_connection_from_ct_get_an
 }
 
 /*
- * ecm_nss_ipv4_conntrack_event_destroy()
+ * ecm_nss_ipv6_conntrack_event_destroy()
  *	Handles conntrack destroy events
  */
-static void ecm_nss_ipv4_conntrack_event_destroy(struct nf_conn *ct)
+static void ecm_nss_ipv6_conntrack_event_destroy(struct nf_conn *ct)
 {
 	struct ecm_db_connection_instance *ci;
 	struct ecm_front_end_connection_instance *feci;
 
 	DEBUG_INFO("Destroy event for ct: %p\n", ct);
 
-	ci = ecm_nss_ipv4_connection_from_ct_get_and_ref(ct);
+	ci = ecm_nss_ipv6_connection_from_ct_get_and_ref(ct);
 	if (!ci) {
 		DEBUG_TRACE("%p: not found\n", ct);
 		return;
@@ -1995,10 +1714,10 @@ static void ecm_nss_ipv4_conntrack_event_destroy(struct nf_conn *ct)
 }
 
 /*
- * ecm_nss_ipv4_conntrack_event_mark()
+ * ecm_nss_ipv6_conntrack_event_mark()
  *	Handles conntrack mark events
  */
-static void ecm_nss_ipv4_conntrack_event_mark(struct nf_conn *ct)
+static void ecm_nss_ipv6_conntrack_event_mark(struct nf_conn *ct)
 {
 	struct ecm_db_connection_instance *ci;
 	struct ecm_classifier_instance *__attribute__((unused))cls;
@@ -2012,7 +1731,7 @@ static void ecm_nss_ipv4_conntrack_event_mark(struct nf_conn *ct)
 		return;
 	}
 
-	ci = ecm_nss_ipv4_connection_from_ct_get_and_ref(ct);
+	ci = ecm_nss_ipv6_connection_from_ct_get_and_ref(ct);
 	if (!ci) {
 		DEBUG_TRACE("%p: not found\n", ct);
 		return;
@@ -2029,7 +1748,6 @@ static void ecm_nss_ipv4_conntrack_event_mark(struct nf_conn *ct)
 		cls->deref(cls);
 	}
 #endif
-
 	/*
 	 * All done
 	 */
@@ -2037,21 +1755,21 @@ static void ecm_nss_ipv4_conntrack_event_mark(struct nf_conn *ct)
 }
 
 /*
- * ecm_nss_ipv4_conntrack_event()
+ * ecm_nss_ipv6_conntrack_event()
  *	Callback event invoked when conntrack connection state changes, currently we handle destroy events to quickly release state
  */
-int ecm_nss_ipv4_conntrack_event(unsigned long events, struct nf_conn *ct)
+int ecm_nss_ipv6_conntrack_event(unsigned long events, struct nf_conn *ct)
 {
 	/*
 	 * If operations have stopped then do not process event
 	 */
-	spin_lock_bh(&ecm_nss_ipv4_lock);
-	if (unlikely(ecm_nss_ipv4_stopped)) {
+	spin_lock_bh(&ecm_nss_ipv6_lock);
+	if (unlikely(ecm_nss_ipv6_stopped)) {
 		DEBUG_WARN("Ignoring event - stopped\n");
-		spin_unlock_bh(&ecm_nss_ipv4_lock);
+		spin_unlock_bh(&ecm_nss_ipv6_lock);
 		return NOTIFY_DONE;
 	}
-	spin_unlock_bh(&ecm_nss_ipv4_lock);
+	spin_unlock_bh(&ecm_nss_ipv6_lock);
 
 	if (!ct) {
 		DEBUG_WARN("Error: no ct\n");
@@ -2063,7 +1781,7 @@ int ecm_nss_ipv4_conntrack_event(unsigned long events, struct nf_conn *ct)
 	 */
 	if (events & (1 << IPCT_DESTROY)) {
 		DEBUG_TRACE("%p: Event is destroy\n", ct);
-		ecm_nss_ipv4_conntrack_event_destroy(ct);
+		ecm_nss_ipv6_conntrack_event_destroy(ct);
 	}
 
 	/*
@@ -2071,46 +1789,46 @@ int ecm_nss_ipv4_conntrack_event(unsigned long events, struct nf_conn *ct)
 	 */
 	if (events & (1 << IPCT_MARK)) {
 		DEBUG_TRACE("%p: Event is mark\n", ct);
-		ecm_nss_ipv4_conntrack_event_mark(ct);
+		ecm_nss_ipv6_conntrack_event_mark(ct);
 	}
 
 	return NOTIFY_DONE;
 }
-EXPORT_SYMBOL(ecm_nss_ipv4_conntrack_event);
+EXPORT_SYMBOL(ecm_nss_ipv6_conntrack_event);
 
-void ecm_nss_ipv4_stop(int num)
+void ecm_nss_ipv6_stop(int num)
 {
-	ecm_nss_ipv4_stopped = num;
+	ecm_nss_ipv6_stopped = num;
 }
-EXPORT_SYMBOL(ecm_nss_ipv4_stop);
+EXPORT_SYMBOL(ecm_nss_ipv6_stop);
 
 /*
- * ecm_nss_ipv4_get_accel_limit_mode()
+ * ecm_nss_ipv6_get_accel_limit_mode()
  */
-static int ecm_nss_ipv4_get_accel_limit_mode(void *data, u64 *val)
+static int ecm_nss_ipv6_get_accel_limit_mode(void *data, u64 *val)
 {
-	*val = ecm_nss_ipv4_accel_limit_mode;
+	*val = ecm_nss_ipv6_accel_limit_mode;
 
 	return 0;
 }
 
 /*
- * ecm_nss_ipv4_set_accel_limit_mode()
+ * ecm_nss_ipv6_set_accel_limit_mode()
  */
-static int ecm_nss_ipv4_set_accel_limit_mode(void *data, u64 val)
+static int ecm_nss_ipv6_set_accel_limit_mode(void *data, u64 val)
 {
-	DEBUG_TRACE("ecm_nss_ipv4_accel_limit_mode = %x\n", (int)val);
+	DEBUG_TRACE("ecm_nss_ipv6_accel_limit_mode = %x\n", (int)val);
 
 	/*
 	 * Check that only valid bits are set.
 	 * It's fine for no bits to be set as that suggests no modes are wanted.
 	 */
 	if (val && (val ^ (ECM_FRONT_END_ACCEL_LIMIT_MODE_FIXED | ECM_FRONT_END_ACCEL_LIMIT_MODE_UNLIMITED))) {
-		DEBUG_WARN("ecm_nss_ipv4_accel_limit_mode = %x bad\n", (int)val);
+		DEBUG_WARN("ecm_nss_ipv6_accel_limit_mode = %x bad\n", (int)val);
 		return -EINVAL;
 	}
 
-	ecm_nss_ipv4_accel_limit_mode = (int)val;
+	ecm_nss_ipv6_accel_limit_mode = (int)val;
 
 	return 0;
 }
@@ -2118,11 +1836,12 @@ static int ecm_nss_ipv4_set_accel_limit_mode(void *data, u64 val)
 /*
  * Debugfs attribute for accel limit mode.
  */
-DEFINE_SIMPLE_ATTRIBUTE(ecm_nss_ipv4_accel_limit_mode_fops, ecm_nss_ipv4_get_accel_limit_mode, ecm_nss_ipv4_set_accel_limit_mode, "%llu\n");
+DEFINE_SIMPLE_ATTRIBUTE(ecm_nss_ipv6_accel_limit_mode_fops, ecm_nss_ipv6_get_accel_limit_mode, ecm_nss_ipv6_set_accel_limit_mode, "%llu\n");
+
 /*
- * ecm_nss_ipv4_get_accel_cmd_avg_millis()
+ * ecm_nss_ipv6_get_accel_cmd_average_millis()
  */
-static ssize_t ecm_nss_ipv4_get_accel_cmd_avg_millis(struct file *file,
+static ssize_t ecm_nss_ipv6_get_accel_cmd_avg_millis(struct file *file,
 								char __user *user_buf,
 								size_t sz, loff_t *ppos)
 {
@@ -2141,13 +1860,13 @@ static ssize_t ecm_nss_ipv4_get_accel_cmd_avg_millis(struct file *file,
 	 * Operate under our locks.
 	 * Compute the average of the samples taken and seed the next set of samples with the result of this one.
 	 */
-	spin_lock_bh(&ecm_nss_ipv4_lock);
-	samples = ecm_nss_ipv4_accel_cmd_time_avg_samples;
-	set = ecm_nss_ipv4_accel_cmd_time_avg_set;
-	ecm_nss_ipv4_accel_cmd_time_avg_samples /= ecm_nss_ipv4_accel_cmd_time_avg_set;
-	ecm_nss_ipv4_accel_cmd_time_avg_set = 1;
-	avg = ecm_nss_ipv4_accel_cmd_time_avg_samples;
-	spin_unlock_bh(&ecm_nss_ipv4_lock);
+	spin_lock_bh(&ecm_nss_ipv6_lock);
+	samples = ecm_nss_ipv6_accel_cmd_time_avg_samples;
+	set = ecm_nss_ipv6_accel_cmd_time_avg_set;
+	ecm_nss_ipv6_accel_cmd_time_avg_samples /= ecm_nss_ipv6_accel_cmd_time_avg_set;
+	ecm_nss_ipv6_accel_cmd_time_avg_set = 1;
+	avg = ecm_nss_ipv6_accel_cmd_time_avg_samples;
+	spin_unlock_bh(&ecm_nss_ipv6_lock);
 
 	/*
 	 * Convert average jiffies to milliseconds
@@ -2169,14 +1888,14 @@ static ssize_t ecm_nss_ipv4_get_accel_cmd_avg_millis(struct file *file,
 /*
  * File operations for accel command average time.
  */
-static struct file_operations ecm_nss_ipv4_accel_cmd_avg_millis_fops = {
-	.read = ecm_nss_ipv4_get_accel_cmd_avg_millis,
+static struct file_operations ecm_nss_ipv6_accel_cmd_avg_millis_fops = {
+	.read = ecm_nss_ipv6_get_accel_cmd_avg_millis,
 };
 
 /*
- * ecm_nss_ipv4_get_decel_average_millis()
+ * ecm_nss_ipv6_get_decel_cmd_average_millis()
  */
-static ssize_t ecm_nss_ipv4_get_decel_cmd_avg_millis(struct file *file,
+static ssize_t ecm_nss_ipv6_get_decel_cmd_avg_millis(struct file *file,
 								char __user *user_buf,
 								size_t sz, loff_t *ppos)
 {
@@ -2195,13 +1914,13 @@ static ssize_t ecm_nss_ipv4_get_decel_cmd_avg_millis(struct file *file,
 	 * Operate under our locks.
 	 * Compute the average of the samples taken and seed the next set of samples with the result of this one.
 	 */
-	spin_lock_bh(&ecm_nss_ipv4_lock);
-	samples = ecm_nss_ipv4_decel_cmd_time_avg_samples;
-	set = ecm_nss_ipv4_decel_cmd_time_avg_set;
-	ecm_nss_ipv4_decel_cmd_time_avg_samples /= ecm_nss_ipv4_decel_cmd_time_avg_set;
-	ecm_nss_ipv4_decel_cmd_time_avg_set = 1;
-	avg = ecm_nss_ipv4_decel_cmd_time_avg_samples;
-	spin_unlock_bh(&ecm_nss_ipv4_lock);
+	spin_lock_bh(&ecm_nss_ipv6_lock);
+	samples = ecm_nss_ipv6_decel_cmd_time_avg_samples;
+	set = ecm_nss_ipv6_decel_cmd_time_avg_set;
+	ecm_nss_ipv6_decel_cmd_time_avg_samples /= ecm_nss_ipv6_decel_cmd_time_avg_set;
+	ecm_nss_ipv6_decel_cmd_time_avg_set = 1;
+	avg = ecm_nss_ipv6_decel_cmd_time_avg_samples;
+	spin_unlock_bh(&ecm_nss_ipv6_lock);
 
 	/*
 	 * Convert average jiffies to milliseconds
@@ -2223,99 +1942,99 @@ static ssize_t ecm_nss_ipv4_get_decel_cmd_avg_millis(struct file *file,
 /*
  * File operations for decel command average time.
  */
-static struct file_operations ecm_nss_ipv4_decel_cmd_avg_millis_fops = {
-	.read = ecm_nss_ipv4_get_decel_cmd_avg_millis,
+static struct file_operations ecm_nss_ipv6_decel_cmd_avg_millis_fops = {
+	.read = ecm_nss_ipv6_get_decel_cmd_avg_millis,
 };
 
 /*
- * ecm_nss_ipv4_init()
+ * ecm_nss_ipv6_init()
  */
-int ecm_nss_ipv4_init(struct dentry *dentry)
+int ecm_nss_ipv6_init(struct dentry *dentry)
 {
 	int result = -1;
 
-	DEBUG_INFO("ECM NSS IPv4 init\n");
+	DEBUG_INFO("ECM NSS IPv6 init\n");
 
-	ecm_nss_ipv4_dentry = debugfs_create_dir("ecm_nss_ipv4", dentry);
-	if (!ecm_nss_ipv4_dentry) {
-		DEBUG_ERROR("Failed to create ecm nss ipv4 directory in debugfs\n");
+	ecm_nss_ipv6_dentry = debugfs_create_dir("ecm_nss_ipv6", dentry);
+	if (!ecm_nss_ipv6_dentry) {
+		DEBUG_ERROR("Failed to create ecm nss ipv6 directory in debugfs\n");
 		return result;
 	}
 
-	if (!debugfs_create_u32("stop", S_IRUGO | S_IWUSR, ecm_nss_ipv4_dentry,
-					(u32 *)&ecm_nss_ipv4_stopped)) {
-		DEBUG_ERROR("Failed to create ecm nss ipv4 stop file in debugfs\n");
+	if (!debugfs_create_u32("stop", S_IRUGO | S_IWUSR, ecm_nss_ipv6_dentry,
+					(u32 *)&ecm_nss_ipv6_stopped)) {
+		DEBUG_ERROR("Failed to create ecm nss ipv6 stop file in debugfs\n");
 		goto task_cleanup;
 	}
 
-	if (!debugfs_create_u32("no_action_limit_default", S_IRUGO | S_IWUSR, ecm_nss_ipv4_dentry,
-					(u32 *)&ecm_nss_ipv4_no_action_limit_default)) {
-		DEBUG_ERROR("Failed to create ecm nss ipv4 no_action_limit_default file in debugfs\n");
+	if (!debugfs_create_u32("no_action_limit_default", S_IRUGO | S_IWUSR, ecm_nss_ipv6_dentry,
+					(u32 *)&ecm_nss_ipv6_no_action_limit_default)) {
+		DEBUG_ERROR("Failed to create ecm nss ipv6 no_action_limit_default file in debugfs\n");
 		goto task_cleanup;
 	}
 
-	if (!debugfs_create_u32("driver_fail_limit_default", S_IRUGO | S_IWUSR, ecm_nss_ipv4_dentry,
-					(u32 *)&ecm_nss_ipv4_driver_fail_limit_default)) {
-		DEBUG_ERROR("Failed to create ecm nss ipv4 driver_fail_limit_default file in debugfs\n");
+	if (!debugfs_create_u32("driver_fail_limit_default", S_IRUGO | S_IWUSR, ecm_nss_ipv6_dentry,
+					(u32 *)&ecm_nss_ipv6_driver_fail_limit_default)) {
+		DEBUG_ERROR("Failed to create ecm nss ipv6 driver_fail_limit_default file in debugfs\n");
 		goto task_cleanup;
 	}
 
-	if (!debugfs_create_u32("nack_limit_default", S_IRUGO | S_IWUSR, ecm_nss_ipv4_dentry,
-					(u32 *)&ecm_nss_ipv4_nack_limit_default)) {
-		DEBUG_ERROR("Failed to create ecm nss ipv4 nack_limit_default file in debugfs\n");
+	if (!debugfs_create_u32("nack_limit_default", S_IRUGO | S_IWUSR, ecm_nss_ipv6_dentry,
+					(u32 *)&ecm_nss_ipv6_nack_limit_default)) {
+		DEBUG_ERROR("Failed to create ecm nss ipv6 nack_limit_default file in debugfs\n");
 		goto task_cleanup;
 	}
 
-	if (!debugfs_create_u32("accelerated_count", S_IRUGO, ecm_nss_ipv4_dentry,
-					(u32 *)&ecm_nss_ipv4_accelerated_count)) {
-		DEBUG_ERROR("Failed to create ecm nss ipv4 accelerated_count file in debugfs\n");
+	if (!debugfs_create_u32("accelerated_count", S_IRUGO, ecm_nss_ipv6_dentry,
+					(u32 *)&ecm_nss_ipv6_accelerated_count)) {
+		DEBUG_ERROR("Failed to create ecm nss ipv6 accelerated_count file in debugfs\n");
 		goto task_cleanup;
 	}
 
-	if (!debugfs_create_u32("pending_accel_count", S_IRUGO, ecm_nss_ipv4_dentry,
-					(u32 *)&ecm_nss_ipv4_pending_accel_count)) {
-		DEBUG_ERROR("Failed to create ecm nss ipv4 pending_accel_count file in debugfs\n");
+	if (!debugfs_create_u32("pending_accel_count", S_IRUGO, ecm_nss_ipv6_dentry,
+					(u32 *)&ecm_nss_ipv6_pending_accel_count)) {
+		DEBUG_ERROR("Failed to create ecm nss ipv6 pending_accel_count file in debugfs\n");
 		goto task_cleanup;
 	}
 
-	if (!debugfs_create_u32("pending_decel_count", S_IRUGO, ecm_nss_ipv4_dentry,
-					(u32 *)&ecm_nss_ipv4_pending_decel_count)) {
-		DEBUG_ERROR("Failed to create ecm nss ipv4 pending_decel_count file in debugfs\n");
+	if (!debugfs_create_u32("pending_decel_count", S_IRUGO, ecm_nss_ipv6_dentry,
+					(u32 *)&ecm_nss_ipv6_pending_decel_count)) {
+		DEBUG_ERROR("Failed to create ecm nss ipv6 pending_decel_count file in debugfs\n");
 		goto task_cleanup;
 	}
 
-	if (!debugfs_create_file("accel_limit_mode", S_IRUGO | S_IWUSR, ecm_nss_ipv4_dentry,
-					NULL, &ecm_nss_ipv4_accel_limit_mode_fops)) {
-		DEBUG_ERROR("Failed to create ecm nss ipv4 accel_limit_mode file in debugfs\n");
+	if (!debugfs_create_file("accel_limit_mode", S_IRUGO | S_IWUSR, ecm_nss_ipv6_dentry,
+					NULL, &ecm_nss_ipv6_accel_limit_mode_fops)) {
+		DEBUG_ERROR("Failed to create ecm nss ipv6 accel_limit_mode file in debugfs\n");
 		goto task_cleanup;
 	}
 
-	if (!debugfs_create_file("accel_cmd_avg_millis", S_IRUGO, ecm_nss_ipv4_dentry,
-					NULL, &ecm_nss_ipv4_accel_cmd_avg_millis_fops)) {
-		DEBUG_ERROR("Failed to create ecm nss ipv4 accel_cmd_avg_millis file in debugfs\n");
+	if (!debugfs_create_file("accel_cmd_avg_millis", S_IRUGO, ecm_nss_ipv6_dentry,
+					NULL, &ecm_nss_ipv6_accel_cmd_avg_millis_fops)) {
+		DEBUG_ERROR("Failed to create ecm nss ipv6 accel_cmd_avg_millis file in debugfs\n");
 		goto task_cleanup;
 	}
 
-	if (!debugfs_create_file("decel_cmd_avg_millis", S_IRUGO, ecm_nss_ipv4_dentry,
-					NULL, &ecm_nss_ipv4_decel_cmd_avg_millis_fops)) {
-		DEBUG_ERROR("Failed to create ecm nss ipv4 decel_cmd_avg_millis file in debugfs\n");
+	if (!debugfs_create_file("decel_cmd_avg_millis", S_IRUGO, ecm_nss_ipv6_dentry,
+					NULL, &ecm_nss_ipv6_decel_cmd_avg_millis_fops)) {
+		DEBUG_ERROR("Failed to create ecm nss ipv6 decel_cmd_avg_millis file in debugfs\n");
 		goto task_cleanup;
 	}
 
-	if (!ecm_nss_ported_ipv4_debugfs_init(ecm_nss_ipv4_dentry)) {
+	if (!ecm_nss_ported_ipv6_debugfs_init(ecm_nss_ipv6_dentry)) {
 		DEBUG_ERROR("Failed to create ecm ported files in debugfs\n");
 		goto task_cleanup;
 	}
 
 #ifdef ECM_NON_PORTED_SUPPORT_ENABLE
-	if (!ecm_nss_non_ported_ipv4_debugfs_init(ecm_nss_ipv4_dentry)) {
+	if (!ecm_nss_non_ported_ipv6_debugfs_init(ecm_nss_ipv6_dentry)) {
 		DEBUG_ERROR("Failed to create ecm non-ported files in debugfs\n");
 		goto task_cleanup;
 	}
 #endif
 
 #ifdef ECM_MULTICAST_ENABLE
-	if (!ecm_nss_multicast_ipv4_debugfs_init(ecm_nss_ipv4_dentry)) {
+	if (!ecm_nss_multicast_ipv6_debugfs_init(ecm_nss_ipv6_dentry)) {
 		DEBUG_ERROR("Failed to create ecm multicast files in debugfs\n");
 		goto task_cleanup;
 	}
@@ -2324,61 +2043,60 @@ int ecm_nss_ipv4_init(struct dentry *dentry)
 	/*
 	 * Register netfilter hooks
 	 */
-	result = nf_register_hooks(ecm_nss_ipv4_netfilter_hooks, ARRAY_SIZE(ecm_nss_ipv4_netfilter_hooks));
+	result = nf_register_hooks(ecm_nss_ipv6_netfilter_hooks, ARRAY_SIZE(ecm_nss_ipv6_netfilter_hooks));
 	if (result < 0) {
 		DEBUG_ERROR("Can't register netfilter hooks.\n");
 		goto task_cleanup;
 	}
 
 #ifdef ECM_MULTICAST_ENABLE
-	ecm_nss_multicast_ipv4_init();
+	ecm_nss_multicast_ipv6_init();
 #endif
 
 	/*
 	 * Register this module with the Linux NSS Network driver
 	 */
-	ecm_nss_ipv4_nss_ipv4_mgr = nss_ipv4_notify_register(ecm_nss_ipv4_net_dev_callback, NULL);
+	ecm_nss_ipv6_nss_ipv6_mgr = nss_ipv6_notify_register(ecm_nss_ipv6_net_dev_callback, NULL);
 
 	return 0;
 
 task_cleanup:
 
-	debugfs_remove_recursive(ecm_nss_ipv4_dentry);
+	debugfs_remove_recursive(ecm_nss_ipv6_dentry);
 	return result;
 }
-EXPORT_SYMBOL(ecm_nss_ipv4_init);
+EXPORT_SYMBOL(ecm_nss_ipv6_init);
 
 /*
- * ecm_nss_ipv4_exit()
+ * ecm_nss_ipv6_exit()
  */
-void ecm_nss_ipv4_exit(void)
+void ecm_nss_ipv6_exit(void)
 {
-	DEBUG_INFO("ECM NSS IPv4 Module exit\n");
-
-	spin_lock_bh(&ecm_nss_ipv4_lock);
-	ecm_nss_ipv4_terminate_pending = true;
-	spin_unlock_bh(&ecm_nss_ipv4_lock);
+	DEBUG_INFO("ECM NSS IPv6 Module exit\n");
+	spin_lock_bh(&ecm_nss_ipv6_lock);
+	ecm_nss_ipv6_terminate_pending = true;
+	spin_unlock_bh(&ecm_nss_ipv6_lock);
 
 	/*
 	 * Stop the network stack hooks
 	 */
-	nf_unregister_hooks(ecm_nss_ipv4_netfilter_hooks,
-			    ARRAY_SIZE(ecm_nss_ipv4_netfilter_hooks));
+	nf_unregister_hooks(ecm_nss_ipv6_netfilter_hooks,
+			    ARRAY_SIZE(ecm_nss_ipv6_netfilter_hooks));
 
 	/*
 	 * Unregister from the Linux NSS Network driver
 	 */
-	nss_ipv4_notify_unregister();
+	nss_ipv6_notify_unregister();
 
 	/*
 	 * Remove the debugfs files recursively.
 	 */
-	if (ecm_nss_ipv4_dentry) {
-		debugfs_remove_recursive(ecm_nss_ipv4_dentry);
+	if (ecm_nss_ipv6_dentry) {
+		debugfs_remove_recursive(ecm_nss_ipv6_dentry);
 	}
 
 #ifdef ECM_MULTICAST_ENABLE
-	ecm_nss_multicast_ipv4_exit();
+	ecm_nss_multicast_ipv6_exit();
 #endif
 }
-EXPORT_SYMBOL(ecm_nss_ipv4_exit);
+EXPORT_SYMBOL(ecm_nss_ipv6_exit);
