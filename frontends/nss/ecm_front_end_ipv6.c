@@ -3799,8 +3799,9 @@ static void ecm_front_end_ipv6_connection_udp_front_end_decelerate(struct ecm_fr
 	 * Right place to free the tuple_instance and multicast
 	 * destination interfaces list.
 	 */
-	if(ecm_ip_addr_is_multicast(dest_ip)){
+	if (ecm_ip_addr_is_multicast(dest_ip)) {
 		struct ecm_db_multicast_tuple_instance *tuple_instance;
+		spin_lock_bh(&ecm_front_end_ipv6_lock);
 		tuple_instance = ecm_db_multicast_tuple_instance_find_and_ref(src_ip, dest_ip);
 		if (tuple_instance) {
 			ecm_db_multicast_connection_to_interfaces_clear(feci->ci);
@@ -3815,7 +3816,7 @@ static void ecm_front_end_ipv6_connection_udp_front_end_decelerate(struct ecm_fr
 			 */
 			ecm_db_multicast_tuple_instance_deref(tuple_instance);
 		}
-
+		spin_unlock_bh(&ecm_front_end_ipv6_lock);
 	}
 #endif
 	/*
@@ -6511,7 +6512,7 @@ static unsigned int ecm_front_end_ipv6_udp_process(struct net_device *out_dev,
 	 * Deny acceleration for L2TP-over-UDP tunnel
 	 */
 	if (skb->sk) {
-		if(skb->sk->sk_protocol == IPPROTO_UDP) {
+		if (skb->sk->sk_protocol == IPPROTO_UDP) {
 			struct udp_sock *usk = udp_sk(skb->sk);
 			if (usk) {
 				if (unlikely(usk->encap_type == UDP_ENCAP_L2TPINUDP)) {
@@ -7732,11 +7733,9 @@ static int ecm_front_end_ipv6_multicast_connection_update_accelerate(struct ecm_
 			case ECM_DB_IFACE_TYPE_ETHERNET:
 				 DEBUG_TRACE("%p: Ethernet\n", fecumi);
 				if (interface_type_counts[ii_type] != 0) {
-
 					/*
 					 * Ignore additional mac addresses, these are usually as a result of address propagation
 					 * from bridges down to ports etc. */
-
 					DEBUG_TRACE("%p: Ethernet - ignore additional\n", fecumi);
 					break;
 				}
@@ -7785,7 +7784,6 @@ static int ecm_front_end_ipv6_multicast_connection_update_accelerate(struct ecm_
 #ifdef ECM_INTERFACE_VLAN_ENABLE
 				DEBUG_TRACE("%p: VLAN\n", fecumi);
 				if (interface_type_counts[ii_type] > 1) {
-
 					/*
 					 * Can only support two vlans
 					 */
@@ -7838,13 +7836,11 @@ static int ecm_front_end_ipv6_multicast_connection_update_accelerate(struct ecm_
 			create->if_rule[valid_vif_idx].if_mtu = to_mtu;
 
 			if (rp->if_join_idx[vif]) {
-
 				/*
 				 * The interface has joined the group
 				 */
 				create->if_rule[valid_vif_idx].rule_flags |= NSS_IPV6_MC_RULE_CREATE_IF_FLAG_JOIN;
 			} else if (rp->if_leave_idx[vif]) {
-
 				/*
 				 * The interface has left the group
 				 */
@@ -8049,7 +8045,6 @@ static void ecm_front_end_ipv6_multicast_connection_create_callback(void *app_da
 	 */
 	DEBUG_TRACE("%p: response: %d\n", fecumi, nim->cm.response);
 	if (nim->cm.response != NSS_CMN_RESPONSE_ACK) {
-
 		/*
 		 * Creation command failed (specific reason ignored).
 		 */
@@ -8144,7 +8139,6 @@ static void ecm_front_end_ipv6_multicast_connection_create_callback(void *app_da
 	 * If decelerate is pending then we need to begin deceleration :-(
 	 */
 	if (!fecumi->base.stats.decelerate_pending) {
-
 		/*
 		 * Increement the no-action counter, this is reset if offload action is seen
 		 */
@@ -8289,7 +8283,6 @@ static void ecm_front_end_ipv6_multicast_connection_udp_front_end_accelerate(str
 		case ECM_DB_IFACE_TYPE_VLAN:
 			DEBUG_TRACE("%p: VLAN\n", fecumi);
 			if (interface_type_counts[ii_type] > 1) {
-
 				/*
 				 * Can only support two vlans
 				 */
@@ -8365,13 +8358,11 @@ static void ecm_front_end_ipv6_multicast_connection_udp_front_end_accelerate(str
 				uint32_t vlan_prio = 0;
 
 			case ECM_DB_IFACE_TYPE_BRIDGE:
-
 				/*
 				 * TODO: Find and set the bridge/route flag for this interface
 				 */
 				DEBUG_TRACE("%p: Bridge\n", fecumi);
 				if (interface_type_counts[ii_type] != 0) {
-
 					/*
 					 * Cannot cascade bridges
 					 */
@@ -8385,7 +8376,6 @@ static void ecm_front_end_ipv6_multicast_connection_udp_front_end_accelerate(str
 			case ECM_DB_IFACE_TYPE_ETHERNET:
 				DEBUG_TRACE("%p: Ethernet\n", fecumi);
 				if (interface_type_counts[ii_type] != 0) {
-
 					/*
 					 * Ignore additional mac addresses, these are usually as a result of address propagation
 					 * from bridges down to ports etc.
@@ -8437,7 +8427,6 @@ static void ecm_front_end_ipv6_multicast_connection_udp_front_end_accelerate(str
 #ifdef ECM_INTERFACE_VLAN_ENABLE
 				DEBUG_TRACE("%p: VLAN\n", fecumi);
 				if (interface_type_counts[ii_type] > 1) {
-
 					/*
 					 * Can only support two vlans
 					 */
@@ -8569,7 +8558,7 @@ static void ecm_front_end_ipv6_multicast_connection_udp_front_end_accelerate(str
 	 */
 	ecm_db_multicast_connection_to_interfaces_deref_all(to_ifaces, to_ifaces_first);
 
-	for (vif = 0; vif < valid_vif_idx ; vif++){
+	for (vif = 0; vif < valid_vif_idx ; vif++) {
 		DEBUG_TRACE("%p: UDP Accelerate connection %p\n"
 			"Vif: %d\n"
 			"Protocol: %d\n"
@@ -8724,16 +8713,22 @@ static unsigned int ecm_front_end_ipv6_mcast_process(struct net_device *out_dev,
 	memset(mc_dest_if, 0, sizeof(mc_dest_if));
 
 	mc_if_cnt =  ip6mr_find_mfc_entry(&init_net, &origin6, &group6, ECM_DB_MULTICAST_IF_MAX, mc_dest_if);
-	if (mc_if_cnt <= 0){
-		DEBUG_WARN("Not found a valid vif count %d\n", mc_if_cnt);
-		return NF_ACCEPT;
-	}
-
 	if (is_routed) {
+		/*
+		 * This is a routed flow, hence look for a valid MFC rule
+		 */
+		if (mc_if_cnt <= 0) {
+			DEBUG_WARN("Not found a valid vif count %d\n", mc_if_cnt);
+			return NF_ACCEPT;
+		}
+
+		/*
+		 * Check for the presence of a bridge device in the destination
+		 * interface list given to us by MFC
+		 */
 		br_dev_found_in_mfc = ecm_interface_multicast_check_for_br_dev(mc_dest_if, mc_if_cnt);
 	} else {
 		if (mc_if_cnt > 0) {
-
 			/*
 			 *  In case of Bridge + Route there is chance that Bridge post routing hook called first and
 			 *  is_route flag is false. To make sure this is a routed flow, query the MFC and if MFC if_cnt
@@ -8742,13 +8737,13 @@ static unsigned int ecm_front_end_ipv6_mcast_process(struct net_device *out_dev,
 			is_routed = true;
 			br_dev_found_in_mfc = ecm_interface_multicast_check_for_br_dev(mc_dest_if, mc_if_cnt);
 		} else {
-
 			/*
-			 * Packet flow is pure bridge
+			 * Packet flow is pure bridge. Try to query the snooper for the destination
+			 * interface list
 			 */
 			mc_if_cnt = mc_bridge_ipv6_get_if(out_dev->master, &origin6, &group6, ECM_DB_MULTICAST_IF_MAX, mc_dest_if);
-			if (mc_if_cnt <= 0){
-				DEBUG_WARN("Not found a valid vif count %d\n", mc_if_cnt);
+			if (mc_if_cnt <= 0) {
+				DEBUG_WARN("Not found a valid MCS if count %d\n", mc_if_cnt);
 				return NF_ACCEPT;
 			}
 		}
@@ -8795,7 +8790,6 @@ static unsigned int ecm_front_end_ipv6_mcast_process(struct net_device *out_dev,
 		if (ecm_front_end_ipv6_terminate_pending) {
 			spin_unlock_bh(&ecm_front_end_ipv6_lock);
 			DEBUG_WARN("Terminating\n");
-
 			/*
 			 * As we are terminating we just allow the packet to pass - it's no longer our concern
 			 */
@@ -9088,7 +9082,7 @@ static unsigned int ecm_front_end_ipv6_mcast_process(struct net_device *out_dev,
 		 * destination interface heirarchy and re-accelerate the connection.
 		 */
 		is_dest_interface_list_empty = ecm_db_multicast_connection_to_interfaces_set_check(ci);
-		if (is_dest_interface_list_empty){
+		if (!is_dest_interface_list_empty) {
 			struct ecm_db_iface_instance *to_list;
 			struct ecm_db_iface_instance *to_list_temp[ECM_DB_IFACE_HEIRARCHY_MAX];
 			struct ecm_db_iface_instance *to_list_single;
@@ -9165,7 +9159,6 @@ static unsigned int ecm_front_end_ipv6_mcast_process(struct net_device *out_dev,
 	 * Do we need to action generation change?
 	 */
 	if (unlikely(ecm_db_connection_classifier_generation_changed(ci))) {
-
 		/*
 		 * TODO: Will add support for multicast connection re-generation here.
 		 */
@@ -9336,13 +9329,13 @@ static unsigned int ecm_front_end_ipv6_mcast_process(struct net_device *out_dev,
 	 * than create one.
 	 */
 	tuple_instance = ecm_db_multicast_tuple_instance_find_and_ref(ip_src_addr, ip_dest_addr);
-	if (!tuple_instance){
+	if (!tuple_instance) {
 		tuple_instance = ecm_db_multicast_tuple_instance_alloc(ip_src_addr, ip_dest_addr, src_port, dest_port);
-		if (!tuple_instance){
+		if (!tuple_instance) {
 			ecm_db_connection_deref(ci);
 			return NF_ACCEPT;
 		}
-		if(br_dev_found_in_mfc){
+		if (br_dev_found_in_mfc) {
 			ecm_db_multicast_tuple_instance_flags_set(tuple_instance, ECM_DB_MULTICAST_CONNECTION_BRIDGE_DEV_SET_FLAG);
 		}
 
@@ -9449,7 +9442,7 @@ static unsigned int ecm_front_end_ipv6_ip_process(struct net_device *out_dev, st
 	 * Check for a multicast Destination address here.
 	 */
 	ECM_NIN6_ADDR_TO_IP_ADDR(ip_dest_addr, orig_tuple.dst.u3.in6);
-	if (ecm_ip_addr_is_multicast(ip_dest_addr)){
+	if (ecm_ip_addr_is_multicast(ip_dest_addr)) {
 		DEBUG_TRACE("skb %p multicast daddr " ECM_IP_ADDR_OCTAL_FMT "\n", skb, ECM_IP_ADDR_TO_OCTAL(ip_dest_addr));
 
 		return ecm_front_end_ipv6_mcast_process(out_dev,
@@ -9799,21 +9792,23 @@ static unsigned int ecm_front_end_ipv6_bridge_post_routing_hook(const struct nf_
 		return NF_ACCEPT;
 	}
 
-	/*
-	 * Process the packet, if we have this mac address in the fdb table.
-	 * TODO: For the kernel versions later than 3.6.x, the API needs vlan id.
-	 * 	 For now, we are passing 0, but this needs to be handled later.
-	 */
+	if (!is_multicast_ether_addr(skb_eth_hdr->h_dest)) {
+		/*
+		 * Process the packet, if we have this mac address in the fdb table.
+		 * TODO: For the kernel versions later than 3.6.x, the API needs vlan id.
+		 * 	 For now, we are passing 0, but this needs to be handled later.
+		 */
 #if (LINUX_VERSION_CODE <= KERNEL_VERSION(3,6,0))
-	if (!br_fdb_has_entry((struct net_device *)out, skb_eth_hdr->h_dest)) {
+		if (!br_fdb_has_entry((struct net_device *)out, skb_eth_hdr->h_dest)) {
 #else
-	if (!br_fdb_has_entry((struct net_device *)out, skb_eth_hdr->h_dest, 0)) {
+		if (!br_fdb_has_entry((struct net_device *)out, skb_eth_hdr->h_dest, 0)) {
 #endif
-		DEBUG_WARN("skb: %p, No fdb entry for this mac address %pM in the bridge: %p (%s)\n",
-				skb, skb_eth_hdr->h_dest, bridge, bridge->name);
-		dev_put(in);
-		dev_put(bridge);
-		return NF_ACCEPT;
+			DEBUG_WARN("skb: %p, No fdb entry for this mac address %pM in the bridge: %p (%s)\n",
+					skb, skb_eth_hdr->h_dest, bridge, bridge->name);
+			dev_put(in);
+			dev_put(bridge);
+			return NF_ACCEPT;
+		}
 	}
 
 	DEBUG_TRACE("Bridge process skb: %p, bridge: %p (%s), In: %p (%s), Out: %p (%s)\n",
@@ -10247,6 +10242,7 @@ static void ecm_ipv6_br_multicast_update_event_callback(struct net_device *brdev
 	struct ecm_db_iface_instance *to_list_temp[ECM_DB_IFACE_HEIRARCHY_MAX];
 	struct ecm_multicast_if_update mc_sync;
 	ip_addr_t dest_ip;
+	ip_addr_t grp_ip;
 	ip_addr_t src_ip;
 	struct in6_addr group6;
 	struct in6_addr origin6;
@@ -10254,7 +10250,7 @@ static void ecm_ipv6_br_multicast_update_event_callback(struct net_device *brdev
 	int i, ret;
 	uint32_t if_cnt, mc_flags = 0;
 	bool mc_update;
-	uint32_t if_num;
+	int32_t if_num;
 	uint32_t mc_max_dst = ECM_DB_MULTICAST_IF_MAX;
 	uint32_t mc_dst_dev[ECM_DB_MULTICAST_IF_MAX];
 
@@ -10276,12 +10272,23 @@ static void ecm_ipv6_br_multicast_update_event_callback(struct net_device *brdev
 	spin_lock_bh(&ecm_front_end_ipv6_lock);
 
 	while (tuple_instance) {
-
 		/*
 		 * We now have a 5-tuple which has been accelerated. Query the MCS bridge to receive a list
 		 * of interfaces left or joined a group for a source.
 		 */
 		memset(mc_dst_dev, 0, sizeof(mc_dst_dev));
+
+		/*
+		 * Get the group IP address stored in tuple_instance and match this with
+		 * the group IP received from MCS update callback.
+		 */
+		ecm_db_multicast_tuple_instance_group_ip_get(tuple_instance, grp_ip);
+		if (!ECM_IP_ADDR_MATCH(grp_ip, dest_ip)) {
+			tuple_instance_next = ecm_db_multicast_tuple_instance_get_and_ref_next(tuple_instance);
+			ecm_db_multicast_tuple_instance_deref(tuple_instance);
+			tuple_instance = tuple_instance_next;
+			continue;
+		}
 
 		/*
 		 * Get the source IP address for this entry for the group
@@ -10293,9 +10300,8 @@ static void ecm_ipv6_br_multicast_update_event_callback(struct net_device *brdev
 		 * Query bridge snooper for the destination list when given the group and source
 		 */
 		if_num = mc_bridge_ipv6_get_if (brdev, &origin6, &group6, mc_max_dst, mc_dst_dev);
-		if (!if_num) {
+		if (if_num <= 0) {
 			DEBUG_TRACE("No valid bridge slaves for the group/source\n");
-
 			/*
 			 * This may a valid case when all the interface has left a multicast group.
 			 * In this case the MCS will return if_num 0, But we may have an oudated
@@ -10313,7 +10319,6 @@ static void ecm_ipv6_br_multicast_update_event_callback(struct net_device *brdev
 		 */
 		ci = ecm_db_multicast_connection_find_and_ref(tuple_instance);
 		if (!ci) {
-
 			/*
 			 * TODO: Should this be an assert?
 			 */
@@ -10335,7 +10340,6 @@ static void ecm_ipv6_br_multicast_update_event_callback(struct net_device *brdev
 		 */
 		mc_update = ecm_interface_multicast_find_updates_to_iface_list(ci, &mc_sync, mc_flags, true, mc_dst_dev, if_num);
 		if (!mc_update) {
-
 			/*
 			 * No updates to this multicast flow. Move on to the next
 			 * flow for the same group
@@ -10343,6 +10347,7 @@ static void ecm_ipv6_br_multicast_update_event_callback(struct net_device *brdev
 			tuple_instance_next = ecm_db_multicast_tuple_instance_get_and_ref_next(tuple_instance);
 			ecm_db_multicast_tuple_instance_deref(tuple_instance);
 			tuple_instance = tuple_instance_next;
+			ecm_db_connection_deref(ci);
 			continue;
 		}
 
@@ -10431,14 +10436,12 @@ static void ecm_ipv6_br_multicast_update_event_callback(struct net_device *brdev
 		 * Release the interfaces that may have left the connection
 		 */
 		for (i = 0; i < ECM_DB_MULTICAST_IF_MAX && mc_sync.if_leave_cnt; i++) {
-
 			/*
 			 * Is this entry marked? If yes, then the corresponding entry
 			 * in the 'to_mcast_interfaces' array in the ci has left the
 			 * connection
 			 */
 			if (mc_sync.if_leave_idx[i]) {
-
 				/*
 				 * Release the interface heirarchy for this
 				 * interface since it has left the group
@@ -10514,6 +10517,7 @@ static void ecm_mfc_ipv6_update_event_callback(struct in6_addr *group, struct in
 	 */
 	ci = ecm_db_multicast_connection_find_and_ref(tuple_instance);
 	if (!ci) {
+		DEBUG_ASSERT(false, "%p: Bad connection instance for routed mcast flow\n", tuple_instance);
 		ecm_db_multicast_tuple_instance_deref(tuple_instance);
 		return;
 	}
@@ -10553,7 +10557,7 @@ static void ecm_mfc_ipv6_update_event_callback(struct in6_addr *group, struct in
 		 * that have left seperately.
 		 */
 		mc_update = ecm_interface_multicast_find_updates_to_iface_list(ci, &mc_sync, mc_flags, false, to_dev_idx, max_to_dev);
-		if (!mc_update){
+		if (!mc_update) {
 			spin_unlock_bh(&ecm_front_end_ipv6_lock);
 			ecm_db_multicast_tuple_instance_deref(tuple_instance);
 			ecm_db_connection_deref(ci);
@@ -10655,7 +10659,6 @@ static void ecm_mfc_ipv6_update_event_callback(struct in6_addr *group, struct in
 		 * Release the interfaces that may have left the connection
 		 */
 		for (i = 0; i < ECM_DB_MULTICAST_IF_MAX && mc_sync.if_leave_cnt; i++) {
-
 			/*
 			 * Is this entry marked? If yes, then the corresponding entry
 			 * in the 'to_mcast_interfaces' array in the ci has left the

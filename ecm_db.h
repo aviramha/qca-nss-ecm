@@ -331,6 +331,7 @@ struct ecm_db_multicast_tuple_instance *ecm_db_multicast_tuple_instance_find_and
 struct ecm_db_multicast_tuple_instance *ecm_db_multicast_tuple_instance_get_and_ref_first(ip_addr_t group);
 struct ecm_db_multicast_tuple_instance *ecm_db_multicast_tuple_instance_get_and_ref_next(struct ecm_db_multicast_tuple_instance *ti);
 void ecm_db_multicast_tuple_instance_source_ip_get(struct ecm_db_multicast_tuple_instance *ti, ip_addr_t origin);
+void ecm_db_multicast_tuple_instance_group_ip_get(struct ecm_db_multicast_tuple_instance *ti, ip_addr_t group);
 uint32_t ecm_db_multicast_tuple_instance_flags_get(struct ecm_db_multicast_tuple_instance *ti);
 void ecm_db_multicast_tuple_instance_flags_set(struct ecm_db_multicast_tuple_instance *ti, uint32_t flags);
 void ecm_db_multicast_tuple_instance_flags_clear(struct ecm_db_multicast_tuple_instance *ti, uint32_t flags);

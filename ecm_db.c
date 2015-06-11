@@ -9933,6 +9933,17 @@ void ecm_db_multicast_tuple_instance_source_ip_get(struct ecm_db_multicast_tuple
 EXPORT_SYMBOL(ecm_db_multicast_tuple_instance_source_ip_get);
 
 /*
+ * ecm_db_multicast_tuple_instance_group_ip_get()
+ * 	This function return the group IP for a connection object
+ */
+void ecm_db_multicast_tuple_instance_group_ip_get(struct ecm_db_multicast_tuple_instance *ti, ip_addr_t group)
+{
+	DEBUG_CHECK_MAGIC(ti, ECM_DB_MULTICAST_INSTANCE_MAGIC, "%p: magic failed", ti);
+	ECM_IP_ADDR_COPY(group, ti->grp_ip);
+}
+EXPORT_SYMBOL(ecm_db_multicast_tuple_instance_group_ip_get);
+
+/*
  * ecm_db_multicast_tuple_instance_flags_get()
  * 	Return flags related to Multicast connection
  */
@@ -10093,10 +10104,6 @@ struct ecm_db_connection_instance *ecm_db_multicast_connection_find_and_ref(stru
 {
 	struct ecm_db_connection_instance *ci;
 	ci = ecm_db_connection_find_and_ref(ti->src_ip, ti->grp_ip, ti->proto, (int)ti->src_port, (int)ti->dst_port);
-	if (!ci) {
-		DEBUG_ASSERT(false, "%p: Bad connection instance \n", ti);
-	}
-
 	return ci;
 }
 EXPORT_SYMBOL(ecm_db_multicast_connection_find_and_ref);

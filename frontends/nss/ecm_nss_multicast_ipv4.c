@@ -550,12 +550,10 @@ static int ecm_nss_multicast_ipv4_connection_update_accelerate(struct ecm_front_
 			case ECM_DB_IFACE_TYPE_ETHERNET:
 				 DEBUG_TRACE("%p: Ethernet\n", nmci);
 				if (interface_type_counts[ii_type] != 0) {
-
 					/*
 					 * Ignore additional mac addresses, these are usually as a result of address propagation
 					 * from bridges down to ports etc.
 					 */
-
 					DEBUG_TRACE("%p: Ethernet - ignore additional\n", nmci);
 					break;
 				}
@@ -602,7 +600,6 @@ static int ecm_nss_multicast_ipv4_connection_update_accelerate(struct ecm_front_
 #ifdef ECM_INTERFACE_VLAN_ENABLE
 				DEBUG_TRACE("%p: VLAN\n", nmci);
 				if (interface_type_counts[ii_type] > 1) {
-
 					/*
 					 * Can only support two vlans
 					 */
@@ -655,13 +652,11 @@ static int ecm_nss_multicast_ipv4_connection_update_accelerate(struct ecm_front_
 			create->if_rule[valid_vif_idx].if_mtu = to_mtu;
 
 			if (rp->if_join_idx[vif]) {
-
 				/*
 				 * The interface has joined the group
 				 */
 				create->if_rule[valid_vif_idx].rule_flags |= NSS_IPV4_MC_RULE_CREATE_IF_FLAG_JOIN;
 			} else if (rp->if_leave_idx[vif]) {
-
 				/*
 				 * The interface has left the group
 				 */
@@ -857,7 +852,6 @@ static void ecm_nss_multicast_ipv4_connection_accelerate(struct ecm_front_end_co
 
 	/*
 	 * If acceleration mode is anything other than "not accelerated" then ignore.
-	 *
 	 */
 	if (feci->accel_mode != ECM_FRONT_END_ACCELERATION_MODE_DECEL) {
 		spin_unlock_bh(&feci->lock);
@@ -934,7 +928,6 @@ static void ecm_nss_multicast_ipv4_connection_accelerate(struct ecm_front_end_co
 #ifdef ECM_INTERFACE_VLAN_ENABLE
 			DEBUG_TRACE("%p: VLAN\n", nmci);
 			if (interface_type_counts[ii_type] > 1) {
-
 				/*
 				 * Can only support two vlans
 				 */
@@ -1048,7 +1041,6 @@ static void ecm_nss_multicast_ipv4_connection_accelerate(struct ecm_front_end_co
 				 */
 				DEBUG_TRACE("%p: Bridge\n", nmci);
 				if (interface_type_counts[ii_type] != 0) {
-
 					/*
 					 * Cannot cascade bridges
 					 */
@@ -1062,7 +1054,6 @@ static void ecm_nss_multicast_ipv4_connection_accelerate(struct ecm_front_end_co
 			case ECM_DB_IFACE_TYPE_ETHERNET:
 				DEBUG_TRACE("%p: Ethernet\n", nmci);
 				if (interface_type_counts[ii_type] != 0) {
-
 					/*
 					 * Ignore additional mac addresses, these are usually as a result of address propagation
 					 * from bridges down to ports etc.
@@ -1310,7 +1301,6 @@ static void ecm_nss_multicast_ipv4_connection_accelerate(struct ecm_front_end_co
 	 */
 	nss_tx_status = nss_ipv4_tx(ecm_nss_ipv4_nss_ipv4_mgr, nim);
 	if (nss_tx_status == NSS_TX_SUCCESS) {
-
 		/*
 		 * Reset the driver_fail count - transmission was okay here.
 		 */
@@ -1555,9 +1545,9 @@ static void ecm_nss_multicast_ipv4_connection_decelerate(struct ecm_front_end_co
 	 * Right place to free the tuple_instance and multicast
 	 * destination interfaces list.
 	 */
+	spin_lock_bh(&ecm_nss_ipv4_lock);
 	tuple_instance = ecm_db_multicast_tuple_instance_find_and_ref(src_addr, group_addr);
 	if (tuple_instance) {
-
 		ecm_db_multicast_connection_to_interfaces_clear(feci->ci);
 
 		/*
@@ -1570,6 +1560,7 @@ static void ecm_nss_multicast_ipv4_connection_decelerate(struct ecm_front_end_co
 		 */
 		ecm_db_multicast_tuple_instance_deref(tuple_instance);
 	}
+	spin_unlock_bh(&ecm_nss_ipv4_lock);
 
 	/*
 	 * Take a ref to the feci->ci so that it will persist until we get a response from the NSS.
@@ -1882,7 +1873,7 @@ static int ecm_nss_multicast_ipv4_connection_state_get(struct ecm_front_end_conn
 		return result;
 	}
 
- 	return ecm_state_prefix_remove(sfi);
+	return ecm_state_prefix_remove(sfi);
 }
 #endif
 
@@ -2029,16 +2020,22 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 	 */
 	memset(dst_dev, 0, sizeof(dst_dev));
 	if_cnt =  ipmr_find_mfc_entry(&init_net, ip_src, ip_grp, ECM_DB_MULTICAST_IF_MAX, dst_dev);
-	if (if_cnt <= 0) {
-		DEBUG_WARN("Not found a valid vif count %d\n", if_cnt);
-		return NF_ACCEPT;
-	}
-
 	if (is_routed) {
+		/*
+		 * This is a routed flow, hence look for a valid MFC rule
+		 */
+		if (if_cnt <= 0) {
+			DEBUG_WARN("Not found a valid vif count %d\n", if_cnt);
+			return NF_ACCEPT;
+		}
+
+		/*
+		 * Check for the presence of a bridge device in the destination
+		 * interface list given to us by MFC
+		 */
 		br_dev_found_in_mfc = ecm_interface_multicast_check_for_br_dev(dst_dev, if_cnt);
 	} else {
 		if (if_cnt > 0) {
-
 			/*
 			 *  In case of Bridge + Route there is chance that Bridge post routing hook called first and
 			 *  is_route flag is false. To make sure this is a routed flow, query the MFC and if MFC if_cnt
@@ -2047,11 +2044,15 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 			is_routed = true;
 			br_dev_found_in_mfc = ecm_interface_multicast_check_for_br_dev(dst_dev, if_cnt);
 		} else {
-
 			/*
-			 * Packet flow is pure bridge
+			 * Packet flow is pure bridge. Try to query the snooper for the destination
+			 * interface list
 			 */
 			if_cnt = mc_bridge_ipv4_get_if(out_dev->master, ip_src, ip_grp, ECM_DB_MULTICAST_IF_MAX, dst_dev);
+			if (if_cnt <= 0) {
+				DEBUG_WARN("Not found a valid MCS if count %d\n", if_cnt);
+				return NF_ACCEPT;
+			}
 		}
 	}
 
@@ -2189,11 +2190,17 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 
 		to_list = (struct ecm_db_iface_instance *)kzalloc(ECM_DB_TO_MCAST_INTERFACES_SIZE, GFP_ATOMIC | __GFP_NOWARN);
 		if (!to_list) {
+			DEBUG_WARN("%p: Failed to alloc memory for multicast dest interface hierarchies\n", nci);
+			ecm_db_node_deref(src_ni);
+			ecm_db_connection_deref(nci);
 			return NF_ACCEPT;
 		}
 
-		to_list_first = (int32_t *)kzalloc(ECM_DB_MULTICAST_IF_MAX, GFP_ATOMIC | __GFP_NOWARN);
+		to_list_first = (int32_t *)kzalloc(sizeof(int32_t *) * ECM_DB_MULTICAST_IF_MAX, GFP_ATOMIC | __GFP_NOWARN);
 		if (!to_list_first) {
+			DEBUG_WARN("%p: Failed to alloc memory for multicast dest interfaces first list\n", nci);
+			ecm_db_node_deref(src_ni);
+			ecm_db_connection_deref(nci);
 			kfree(to_list);
 			return NF_ACCEPT;
 		}
@@ -2328,6 +2335,7 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 			DEBUG_WARN("Failed to establish from nat mapping\n");
 			return NF_ACCEPT;
 		}
+
 		/*
 		 * Connection must have a front end instance associated with it
 		 */
@@ -2411,6 +2419,7 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 				return NF_ACCEPT;
 			}
 		}
+
 		/*
 		 * Now add the connection into the database.
 		 * NOTE: In an SMP situation such as ours there is a possibility that more than one packet for the same
@@ -2421,7 +2430,6 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 		spin_lock_bh(&ecm_nss_ipv4_lock);
 		ci = ecm_db_connection_find_and_ref(ip_src_addr, ip_dest_addr, protocol, src_port, dest_port);
 		if (ci) {
-
 			/*
 			 * Another cpu created the same connection before us - use the one we just found
 			 */
@@ -2489,14 +2497,13 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 			int32_t *to_list_first;
 			int32_t *to_first;
 			int32_t i, interface_idx_cnt;
-
 			to_list = (struct ecm_db_iface_instance *)kzalloc(ECM_DB_TO_MCAST_INTERFACES_SIZE, GFP_ATOMIC | __GFP_NOWARN);
 			if (!to_list) {
 				ecm_db_connection_deref(ci);
 				return NF_ACCEPT;
 			}
 
-			to_list_first = (int32_t *)kzalloc(ECM_DB_MULTICAST_IF_MAX, GFP_ATOMIC | __GFP_NOWARN);
+			to_list_first = (int32_t *)kzalloc(sizeof(int32_t *) * ECM_DB_MULTICAST_IF_MAX, GFP_ATOMIC | __GFP_NOWARN);
 			if (!to_list_first) {
 				ecm_db_connection_deref(ci);
 				kfree(to_list);
@@ -2559,7 +2566,6 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 	 * Do we need to action generation change?
 	 */
 	if (unlikely(ecm_db_connection_classifier_generation_changed(ci))) {
-
 		/*
 		 * TODO: Will add support for multicast connection re-generation here.
 		 */
@@ -2789,12 +2795,13 @@ static void ecm_br_multicast_update_event_callback(struct net_device *brdev, uin
 	struct ecm_db_iface_instance *to_list_single;
 	struct ecm_db_iface_instance *to_list_temp[ECM_DB_IFACE_HEIRARCHY_MAX];
 	ip_addr_t dest_ip;
+	ip_addr_t grp_ip;
 	ip_addr_t src_ip;
 	int32_t to_list_first[ECM_DB_MULTICAST_IF_MAX];
 	int i, ret;
 	uint32_t mc_dst_dev[4];
 	uint32_t if_cnt;
-	uint32_t if_num;
+	int32_t if_num;
 	uint32_t mc_flags = 0;
 	uint32_t mc_max_dst = 4;
 	bool if_update;
@@ -2815,12 +2822,23 @@ static void ecm_br_multicast_update_event_callback(struct net_device *brdev, uin
 	spin_lock_bh(&ecm_nss_ipv4_lock);
 
 	while (tuple_instance) {
-
 		/*
 		 * We now have a 5-tuple which has been accelerated. Query the MCS bridge to receive a list
 		 * of interfaces left or joined a group for a source.
 		 */
 		memset(mc_dst_dev, 0, sizeof(mc_dst_dev));
+
+		/*
+		 * Get the group IP address stored in tuple_instance and match this with
+		 * the group IP received from MCS update callback.
+		 */
+		ecm_db_multicast_tuple_instance_group_ip_get(tuple_instance, grp_ip);
+		if (!ECM_IP_ADDR_MATCH(grp_ip, dest_ip)) {
+			tuple_instance_next = ecm_db_multicast_tuple_instance_get_and_ref_next(tuple_instance);
+			ecm_db_multicast_tuple_instance_deref(tuple_instance);
+			tuple_instance = tuple_instance_next;
+			continue;
+		}
 
 		/*
 		 * Get the source IP address for this entry for the group
@@ -2831,9 +2849,8 @@ static void ecm_br_multicast_update_event_callback(struct net_device *brdev, uin
 		 * Query bridge snooper for the destination list when given the group and source
 		 */
 		if_num = mc_bridge_ipv4_get_if(brdev, htonl(src_ip[0]), htonl(dest_ip[0]), mc_max_dst, mc_dst_dev);
-		if (!if_num) {
+		if (if_num <= 0) {
 			DEBUG_TRACE("No valid bridge slaves for the group/source\n");
-
 			/*
 			 * This may a valid case when all the interface has left a multicast group.
 			 * In this case the MCS will return if_num 0, But we may have an oudated
@@ -2851,7 +2868,6 @@ static void ecm_br_multicast_update_event_callback(struct net_device *brdev, uin
 		 */
 		ci = ecm_db_multicast_connection_find_and_ref(tuple_instance);
 		if (!ci) {
-
 			/*
 			 * TODO: Should this be an assert?
 			 */
@@ -2873,7 +2889,6 @@ static void ecm_br_multicast_update_event_callback(struct net_device *brdev, uin
 		 */
 		if_update = ecm_interface_multicast_find_updates_to_iface_list(ci, &mc_update, mc_flags, true ,mc_dst_dev, if_num);
 		if (!if_update) {
-
 			/*
 			 * No updates to this multicast flow. Move on to the next
 			 * flow for the same group
@@ -2881,6 +2896,7 @@ static void ecm_br_multicast_update_event_callback(struct net_device *brdev, uin
 			tuple_instance_next = ecm_db_multicast_tuple_instance_get_and_ref_next(tuple_instance);
 			ecm_db_multicast_tuple_instance_deref(tuple_instance);
 			tuple_instance = tuple_instance_next;
+			ecm_db_connection_deref(ci);
 			continue;
 		}
 
@@ -2890,7 +2906,6 @@ static void ecm_br_multicast_update_event_callback(struct net_device *brdev, uin
 		 * Do we have any new interfaces that have joined?
 		 */
 		if (mc_update.if_join_cnt > 0) {
-
 			to_list = (struct ecm_db_iface_instance *)kzalloc(ECM_DB_TO_MCAST_INTERFACES_SIZE, GFP_ATOMIC | __GFP_NOWARN);
 			if (!to_list) {
 				spin_unlock_bh(&ecm_nss_ipv4_lock);
@@ -2976,14 +2991,12 @@ static void ecm_br_multicast_update_event_callback(struct net_device *brdev, uin
 		 * Release the interfaces that may have left the connection
 		 */
 		for (i = 0; i < ECM_DB_MULTICAST_IF_MAX && mc_update.if_leave_cnt; i++) {
-
 			/*
 			 * Is this entry marked? If yes, then the corresponding entry
 			 * in the 'to_mcast_interfaces' array in the ci has left the
 			 * connection
 			 */
 			if (mc_update.if_leave_idx[i]) {
-
 				/*
 				 * Release the interface heirarchy for this
 				 * interface since it has left the group
@@ -3055,6 +3068,7 @@ static void ecm_mfc_update_event_callback(__be32 group, __be32 origin, uint32_t 
 	 */
 	ci = ecm_db_multicast_connection_find_and_ref(tuple_instance);
 	if (!ci) {
+		DEBUG_ASSERT(false, "%p: Bad connection instance for routed mcast flow\n", tuple_instance);
 		ecm_db_multicast_tuple_instance_deref(tuple_instance);
 		return;
 	}
@@ -3111,7 +3125,6 @@ static void ecm_mfc_update_event_callback(__be32 group, __be32 origin, uint32_t 
 		 * Do we have any new interfaces that have joined?
 		 */
 		if (mc_update.if_join_cnt > 0) {
-
 			to_list = (struct ecm_db_iface_instance *)kzalloc(ECM_DB_TO_MCAST_INTERFACES_SIZE, GFP_ATOMIC | __GFP_NOWARN);
 			if (!to_list) {
 				spin_unlock_bh(&ecm_nss_ipv4_lock);
@@ -3119,7 +3132,6 @@ static void ecm_mfc_update_event_callback(__be32 group, __be32 origin, uint32_t 
 				ecm_db_connection_deref(ci);
 				return;
 			}
-
 
 			/*
 			 * Initialize the heirarchy's indices for the 'to_list'
@@ -3142,7 +3154,6 @@ static void ecm_mfc_update_event_callback(__be32 group, __be32 origin, uint32_t 
 				kfree(to_list);
 				return;
 			}
-
 
 			/*
 			 * Append the interface heirarchy array of the new joinees to the existing destination list
@@ -3200,14 +3211,12 @@ static void ecm_mfc_update_event_callback(__be32 group, __be32 origin, uint32_t 
 		 * Release the interfaces that may have left the connection
 		 */
 		for (i = 0; i < ECM_DB_MULTICAST_IF_MAX && mc_update.if_leave_cnt; i++) {
-
 			/*
 			 * Is this entry marked? If yes, then the corresponding entry
 			 * in the 'to_mcast_interfaces' array in the ci has left the
 			 * connection
 			 */
 			if (mc_update.if_leave_idx[i]) {
-
 				/*
 				 * Release the interface heirarchy for this
 				 * interface since it has left the group
