@@ -320,7 +320,7 @@ struct ecm_db_interface_info_tunipip6 {			/* type == ECM_DB_IFACE_TYPE_TUNIPIP6 
  * For a connection the ci->mi->hi->ni->ii records the interfaces that the connection 'sees' for the from/to paths.  I.e. Innermost.
  * But heirarchy lists record the path from the ii to the actual outward facing interface - well, as far as is possible to detect.
  * A heirarchy list is recorded in reverse so in the example here it would list eth0 followed by eth0.1.
- * Therefore the first interface in the list is the outermost interface, which is for acceleration, hopefully an NSS supported interface.
+ * Therefore the first interface in the list is the outermost interface, which is for acceleration, hopefully an accel engine supported interface.
  * Lists have a finite size.
  */
 #define ECM_DB_IFACE_HEIRARCHY_MAX 10		/* This is the number of interfaces allowed in a heirarchy */

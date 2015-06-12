@@ -47,12 +47,12 @@ void ecm_interface_send_neighbour_solicitation(struct net_device *dev, ip_addr_t
 #endif
 void ecm_interface_send_arp_request(struct net_device *dest_dev, ip_addr_t dest_addr, bool on_link, ip_addr_t gw_addr);
 bool ecm_interface_skip_l2tp_pptp(struct sk_buff *skb, const struct net_device *out);
-struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct net_device *dev);
+struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct ecm_front_end_connection_instance *feci, struct net_device *dev);
 
 #ifdef ECM_MULTICAST_ENABLE
-int32_t ecm_interface_multicast_heirarchy_construct_routed(struct ecm_db_iface_instance *interfaces, struct net_device *in_dev, ip_addr_t packet_src_addr, ip_addr_t packet_dest_addr, uint8_t maxvif, uint32_t *dst_dev, uint32_t *to_interface_first);
+int32_t ecm_interface_multicast_heirarchy_construct_routed(struct ecm_front_end_connection_instance *feci, struct ecm_db_iface_instance *interfaces, struct net_device *in_dev, ip_addr_t packet_src_addr, ip_addr_t packet_dest_addr, uint8_t maxvif, uint32_t *dst_dev, uint32_t *to_interface_first);
 
-int32_t ecm_interface_multicast_heirarchy_construct_bridged(struct ecm_db_iface_instance *interfaces, struct net_device *br_dev, ip_addr_t src_addr, ip_addr_t dest_addr, uint8_t mc_max_dst, int32_t *mc_dst_dev, uint32_t *to_interface_first);
+int32_t ecm_interface_multicast_heirarchy_construct_bridged(struct ecm_front_end_connection_instance *feci, struct ecm_db_iface_instance *interfaces, struct net_device *br_dev, ip_addr_t src_addr, ip_addr_t dest_addr, uint8_t mc_max_dst, int32_t *mc_dst_dev, uint32_t *to_interface_first);
 
 void ecm_interface_multicast_stats_update(struct ecm_db_connection_instance *ci, uint32_t from_tx_packets, uint32_t from_tx_bytes, uint32_t from_rx_packets, uint32_t from_rx_bytes, uint32_t to_tx_packets, uint32_t to_tx_bytes, uint32_t to_rx_packets, uint32_t to_rx_bytes);
 
@@ -61,7 +61,8 @@ bool ecm_interface_multicast_find_updates_to_iface_list(struct ecm_db_connection
 bool ecm_interface_multicast_check_for_br_dev(uint32_t dest_if[], uint8_t max_if);
 #endif
 
-int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfaces[],
+int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instance *feci,
+					struct ecm_db_iface_instance *interfaces[],
 					ip_addr_t packet_src_addr, ip_addr_t packet_dest_addr,
 					int ip_version, int packet_protocol,
 					struct net_device *given_dest_dev, bool is_routed,

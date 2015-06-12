@@ -36,7 +36,6 @@
 #include <linux/in.h>
 #include <linux/udp.h>
 #include <linux/tcp.h>
-
 #include <linux/netfilter_ipv4.h>
 #include <linux/netfilter_bridge.h>
 #include <net/netfilter/nf_conntrack.h>
@@ -165,6 +164,14 @@ static int ecm_db_iface_table_lengths[ECM_DB_IFACE_HASH_SLOTS];
 static int ecm_db_iface_count = 0;			/* Number of interfaces allocated */
 typedef uint32_t ecm_db_iface_hash_t;
 
+
+#define ECM_DB_IFACE_ID_HASH_SLOTS 8
+static struct ecm_db_iface_instance *ecm_db_iface_id_table[ECM_DB_IFACE_ID_HASH_SLOTS];
+							/* Slots of the interface id hash table */
+static int ecm_db_iface_id_table_lengths[ECM_DB_IFACE_ID_HASH_SLOTS];
+							/* Tracks how long each chain is */
+typedef uint32_t ecm_db_iface_id_hash_t;
+
 /*
  * Listeners
  */
@@ -192,9 +199,13 @@ struct ecm_db_iface_instance {
 	uint32_t time_added;				/* RO: DB time stamp when the Interface was added into the database */
 
 	int32_t interface_identifier;			/* RO: The operating system dependent identifier of this interface */
-	int32_t nss_interface_identifier;		/* RO: The NSS identifier of this interface */
+	int32_t ae_interface_identifier;		/* RO: The accel engine identifier of this interface */
 	char name[IFNAMSIZ];				/* Name of interface */
 	int32_t mtu;					/* Interface MTU */
+
+	struct ecm_db_iface_instance *iface_id_hash_next;	/* Next interface in the chain of interface id table */
+	struct ecm_db_iface_instance *iface_id_hash_prev;	/* Previous interface in the chain of interface id table */
+	ecm_db_iface_id_hash_t iface_id_hash_index;		/* Hash index value of chains */
 
 #ifdef ECM_DB_ADVANCED_STATS_ENABLE
 	uint64_t from_data_total;			/* Total of data sent by this Interface */
@@ -213,7 +224,7 @@ struct ecm_db_iface_instance {
 	 * from them and to them.
 	 * In fact the same connection could be listed as from & to on the same interface (think: WLAN<>WLAN AP function)
 	 * Interfaces keep this information for rapid iteration of connections e.g. when an interface 'goes down' we
-	 * can defunct all associated connections or destroy any NSS rules.
+	 * can defunct all associated connections or destroy any accel engine rules.
 	 */
 	struct ecm_db_connection_instance *from_connections;		/* list of connections made from this interface */
 	struct ecm_db_connection_instance *to_connections;		/* list of connections made to this interface */
@@ -294,7 +305,7 @@ struct ecm_db_node_instance {
 	 * For convenience nodes keep lists of connections that have been established from them and to them.
 	 * In fact the same connection could be listed as from & to on the same interface (think: WLAN<>WLAN AP function)
 	 * Nodes keep this information for rapid iteration of connections e.g. when a node 'goes down' we
-	 * can defunct all associated connections or destroy any NSS rules.
+	 * can defunct all associated connections or destroy any accel engine rules.
 	 */
 	struct ecm_db_connection_instance *from_connections;		/* list of connections made from this node */
 	struct ecm_db_connection_instance *to_connections;		/* list of connections made to this node */
@@ -410,7 +421,7 @@ struct ecm_db_mapping_instance {
 	 * For convenience mappings keep lists of connections that have been established from them and to them.
 	 * In fact the same connection could be listed as from & to on the same interface (think: WLAN<>WLAN AP function)
 	 * Mappings keep this information for rapid iteration of connections e.g. given a mapping we
-	 * can defunct all associated connections or destroy any NSS rules.
+	 * can defunct all associated connections or destroy any accel engine rules.
 	 */
 	struct ecm_db_connection_instance *from_connections;		/* list of connections made from this host mapping */
 	struct ecm_db_connection_instance *to_connections;		/* list of connections made to this host mapping */
@@ -894,15 +905,15 @@ int ecm_db_connection_count_by_protocol_get(int protocol)
 EXPORT_SYMBOL(ecm_db_connection_count_by_protocol_get);
 
 /*
- * ecm_db_iface_nss_interface_identifier_get()
- *	Return the NSS interface number of this ecm interface
+ * ecm_db_iface_ae_interface_identifier_get()
+ *	Return the accel engine interface number of this ecm interface
  */
-int32_t ecm_db_iface_nss_interface_identifier_get(struct ecm_db_iface_instance *ii)
+int32_t ecm_db_iface_ae_interface_identifier_get(struct ecm_db_iface_instance *ii)
 {
 	DEBUG_CHECK_MAGIC(ii, ECM_DB_IFACE_INSTANCE_MAGIC, "%p: magic failed", ii);
-	return ii->nss_interface_identifier;
+	return ii->ae_interface_identifier;
 }
-EXPORT_SYMBOL(ecm_db_iface_nss_interface_identifier_get);
+EXPORT_SYMBOL(ecm_db_iface_ae_interface_identifier_get);
 
 /*
  * ecm_db_iface_interface_identifier_get()
@@ -3422,6 +3433,23 @@ int ecm_db_iface_deref(struct ecm_db_iface_instance *ii)
 		ii->hash_prev = NULL;
 		ecm_db_iface_table_lengths[ii->hash_index]--;
 		DEBUG_ASSERT(ecm_db_iface_table_lengths[ii->hash_index] >= 0, "%p: invalid table len %d\n", ii, ecm_db_iface_table_lengths[ii->hash_index]);
+
+		/*
+		 * Link out of interface identifier hash table
+		 */
+		if (!ii->iface_id_hash_prev) {
+			DEBUG_ASSERT(ecm_db_iface_id_table[ii->iface_id_hash_index] == ii, "%p: hash table bad got %p for hash index %u\n", ii, ecm_db_iface_id_table[ii->iface_id_hash_index], ii->iface_id_hash_index);
+			ecm_db_iface_id_table[ii->iface_id_hash_index] = ii->iface_id_hash_next;
+		} else {
+			ii->iface_id_hash_prev->iface_id_hash_next = ii->iface_id_hash_next;
+		}
+		if (ii->iface_id_hash_next) {
+			ii->iface_id_hash_next->iface_id_hash_prev = ii->iface_id_hash_prev;
+		}
+		ii->iface_id_hash_next = NULL;
+		ii->iface_id_hash_prev = NULL;
+		ecm_db_iface_id_table_lengths[ii->iface_id_hash_index]--;
+		DEBUG_ASSERT(ecm_db_iface_id_table_lengths[ii->iface_id_hash_index] >= 0, "%p: invalid table len %d\n", ii, ecm_db_iface_id_table_lengths[ii->iface_id_hash_index]);
 		spin_unlock_bh(&ecm_db_lock);
 
 		/*
@@ -3662,6 +3690,18 @@ static inline ecm_db_node_hash_t ecm_db_node_generate_hash_index(uint8_t *addres
 	return (ecm_db_node_hash_t)hash_val;
 }
 
+/*
+ * ecm_db_iface_id_generate_hash_index()
+ *	Calculate the hash index based on interface identifier.
+ */
+static inline ecm_db_iface_id_hash_t ecm_db_iface_id_generate_hash_index(int32_t interface_id)
+{
+	uint32_t hash_val;
+
+	hash_val = (uint32_t)jhash_1word((uint32_t)interface_id, ecm_db_jhash_rnd);
+	return (ecm_db_iface_id_hash_t)(hash_val & (ECM_DB_IFACE_ID_HASH_SLOTS - 1));
+}
+
 #ifdef ECM_INTERFACE_SIT_ENABLE
 /*
  * ecm_db_iface_generate_hash_index_sit()
@@ -3863,6 +3903,56 @@ void ecm_db_iface_bridge_address_get(struct ecm_db_iface_instance *ii, uint8_t *
 	spin_unlock_bh(&ecm_db_lock);
 }
 EXPORT_SYMBOL(ecm_db_iface_bridge_address_get);
+
+/*
+ * ecm_db_iface_find_and_ref_by_interface_identifier()
+ *	Return an interface based on a hlos interface identifier
+ */
+struct ecm_db_iface_instance *ecm_db_iface_find_and_ref_by_interface_identifier(int32_t interface_id)
+{
+	ecm_db_iface_id_hash_t hash_index;
+	struct ecm_db_iface_instance *ii;
+
+	DEBUG_TRACE("Lookup database iface with interface_id %d\n", interface_id);
+
+	/*
+	 * Compute the hash chain index and prepare to walk the chain
+	 */
+	hash_index = ecm_db_iface_id_generate_hash_index(interface_id);
+
+	/*
+	 * Iterate the chain looking for a host with matching details
+	 */
+	spin_lock_bh(&ecm_db_lock);
+	ii = ecm_db_iface_id_table[hash_index];
+	if (ii) {
+		_ecm_db_iface_ref(ii);
+	}
+	spin_unlock_bh(&ecm_db_lock);
+	while (ii) {
+		struct ecm_db_iface_instance *iin;
+
+		if (ii->interface_identifier == interface_id) {
+			DEBUG_TRACE("iface found %p\n", ii);
+			return ii;
+		}
+
+		/*
+		 * Try next
+		 */
+		spin_lock_bh(&ecm_db_lock);
+		iin = ii->iface_id_hash_next;
+		if (iin) {
+			_ecm_db_iface_ref(iin);
+		}
+		spin_unlock_bh(&ecm_db_lock);
+		ecm_db_iface_deref(ii);
+		ii = iin;
+	}
+	DEBUG_TRACE("Iface not found\n");
+	return NULL;
+}
+EXPORT_SYMBOL(ecm_db_iface_find_and_ref_by_interface_identifier);
 
 /*
  * ecm_db_iface_ifidx_find_and_ref_ethernet()
@@ -7052,7 +7142,7 @@ static int ecm_db_iface_state_get_base(struct ecm_db_iface_instance *ii, struct 
 #endif
 	uint32_t time_added;
 	int32_t interface_identifier;
-	int32_t nss_interface_identifier;
+	int32_t ae_interface_identifier;
 	char name[IFNAMSIZ];
 	int32_t mtu;
 	ecm_db_iface_type_t type;
@@ -7080,7 +7170,7 @@ static int ecm_db_iface_state_get_base(struct ecm_db_iface_instance *ii, struct 
 	time_added = ii->time_added;
 	type = ii->type;
 	interface_identifier = ii->interface_identifier;
-	nss_interface_identifier = ii->nss_interface_identifier;
+	ae_interface_identifier = ii->ae_interface_identifier;
 	spin_lock_bh(&ecm_db_lock);
 	strcpy(name, ii->name);
 	mtu = ii->mtu;
@@ -7120,7 +7210,7 @@ static int ecm_db_iface_state_get_base(struct ecm_db_iface_instance *ii, struct 
 		return result;
 	}
 
-	if ((result = ecm_state_write(sfi, "nss_interface_identifier", "%d", nss_interface_identifier))) {
+	if ((result = ecm_state_write(sfi, "ae_interface_identifier", "%d", ae_interface_identifier))) {
 		return result;
 	}
 
@@ -8406,10 +8496,11 @@ EXPORT_SYMBOL(ecm_db_protocol_get_first);
  *	Add a iface instance into the database
  */
 void ecm_db_iface_add_ethernet(struct ecm_db_iface_instance *ii, uint8_t *address, char *name, int32_t mtu,
-					int32_t interface_identifier, int32_t nss_interface_identifier,
+					int32_t interface_identifier, int32_t ae_interface_identifier,
 					ecm_db_iface_final_callback_t final, void *arg)
 {
 	ecm_db_iface_hash_t hash_index;
+	ecm_db_iface_id_hash_t iface_id_hash_index;
 	struct ecm_db_listener_instance *li;
 	struct ecm_db_interface_info_ethernet *type_info;
 
@@ -8435,7 +8526,7 @@ void ecm_db_iface_add_ethernet(struct ecm_db_iface_instance *ii, uint8_t *addres
 	strcpy(ii->name, name);
 	ii->mtu = mtu;
 	ii->interface_identifier = interface_identifier;
-	ii->nss_interface_identifier = nss_interface_identifier;
+	ii->ae_interface_identifier = ae_interface_identifier;
 
 	/*
 	 * Type specific info
@@ -8448,6 +8539,9 @@ void ecm_db_iface_add_ethernet(struct ecm_db_iface_instance *ii, uint8_t *addres
 	 */
 	hash_index = ecm_db_iface_generate_hash_index_ethernet(address);
 	ii->hash_index = hash_index;
+
+	iface_id_hash_index = ecm_db_iface_id_generate_hash_index(interface_identifier);
+	ii->iface_id_hash_index = iface_id_hash_index;
 
 	/*
 	 * Add into the global list
@@ -8473,6 +8567,17 @@ void ecm_db_iface_add_ethernet(struct ecm_db_iface_instance *ii, uint8_t *addres
 	DEBUG_ASSERT(ecm_db_iface_table_lengths[hash_index] > 0, "%p: invalid table len %d\n", ii, ecm_db_iface_table_lengths[hash_index]);
 
 	DEBUG_INFO("%p: interface inserted at hash index %u, hash prev is %p, type: %d\n", ii, ii->hash_index, ii->hash_prev, ii->type);
+
+	/*
+	 * Insert into interface identifier chain
+	 */
+	ii->iface_id_hash_next = ecm_db_iface_id_table[iface_id_hash_index];
+	if (ecm_db_iface_id_table[iface_id_hash_index]) {
+		ecm_db_iface_id_table[iface_id_hash_index]->iface_id_hash_prev = ii;
+	}
+	ecm_db_iface_id_table[iface_id_hash_index] = ii;
+	ecm_db_iface_id_table_lengths[iface_id_hash_index]++;
+	DEBUG_ASSERT(ecm_db_iface_id_table_lengths[iface_id_hash_index] > 0, "%p: invalid iface id table len %d\n", ii, ecm_db_iface_id_table_lengths[iface_id_hash_index]);
 
 	/*
 	 * Set time of addition
@@ -8507,10 +8612,11 @@ EXPORT_SYMBOL(ecm_db_iface_add_ethernet);
  *	Add a iface instance into the database
  */
 void ecm_db_iface_add_lag(struct ecm_db_iface_instance *ii, uint8_t *address, char *name, int32_t mtu,
-					int32_t interface_identifier, int32_t nss_interface_identifier,
+					int32_t interface_identifier, int32_t ae_interface_identifier,
 					ecm_db_iface_final_callback_t final, void *arg)
 {
 	ecm_db_iface_hash_t hash_index;
+	ecm_db_iface_id_hash_t iface_id_hash_index;
 	struct ecm_db_listener_instance *li;
 	struct ecm_db_interface_info_lag *type_info;
 
@@ -8536,7 +8642,7 @@ void ecm_db_iface_add_lag(struct ecm_db_iface_instance *ii, uint8_t *address, ch
 	strcpy(ii->name, name);
 	ii->mtu = mtu;
 	ii->interface_identifier = interface_identifier;
-	ii->nss_interface_identifier = nss_interface_identifier;
+	ii->ae_interface_identifier = ae_interface_identifier;
 
 	/*
 	 * Type specific info
@@ -8549,6 +8655,9 @@ void ecm_db_iface_add_lag(struct ecm_db_iface_instance *ii, uint8_t *address, ch
 	 */
 	hash_index = ecm_db_iface_generate_hash_index_ethernet(address);
 	ii->hash_index = hash_index;
+
+	iface_id_hash_index = ecm_db_iface_id_generate_hash_index(interface_identifier);
+	ii->iface_id_hash_index = iface_id_hash_index;
 
 	/*
 	 * Add into the global list
@@ -8574,6 +8683,17 @@ void ecm_db_iface_add_lag(struct ecm_db_iface_instance *ii, uint8_t *address, ch
 	DEBUG_ASSERT(ecm_db_iface_table_lengths[hash_index] > 0, "%p: invalid table len %d\n", ii, ecm_db_iface_table_lengths[hash_index]);
 
 	DEBUG_INFO("%p: interface inserted at hash index %u, hash prev is %p, type: %d\n", ii, ii->hash_index, ii->hash_prev, ii->type);
+
+	/*
+	 * Insert into interface identifier chain
+	 */
+	ii->iface_id_hash_next = ecm_db_iface_id_table[iface_id_hash_index];
+	if (ecm_db_iface_id_table[iface_id_hash_index]) {
+		ecm_db_iface_id_table[iface_id_hash_index]->iface_id_hash_prev = ii;
+	}
+	ecm_db_iface_id_table[iface_id_hash_index] = ii;
+	ecm_db_iface_id_table_lengths[iface_id_hash_index]++;
+	DEBUG_ASSERT(ecm_db_iface_id_table_lengths[iface_id_hash_index] > 0, "%p: invalid iface id table len %d\n", ii, ecm_db_iface_id_table_lengths[iface_id_hash_index]);
 
 	/*
 	 * Set time of addition
@@ -8608,10 +8728,11 @@ EXPORT_SYMBOL(ecm_db_iface_add_lag);
  *	Add a iface instance into the database
  */
 void ecm_db_iface_add_bridge(struct ecm_db_iface_instance *ii, uint8_t *address, char *name, int32_t mtu,
-					int32_t interface_identifier, int32_t nss_interface_identifier,
+					int32_t interface_identifier, int32_t ae_interface_identifier,
 					ecm_db_iface_final_callback_t final, void *arg)
 {
 	ecm_db_iface_hash_t hash_index;
+	ecm_db_iface_id_hash_t iface_id_hash_index;
 	struct ecm_db_listener_instance *li;
 	struct ecm_db_interface_info_bridge *type_info;
 
@@ -8637,7 +8758,7 @@ void ecm_db_iface_add_bridge(struct ecm_db_iface_instance *ii, uint8_t *address,
 	strcpy(ii->name, name);
 	ii->mtu = mtu;
 	ii->interface_identifier = interface_identifier;
-	ii->nss_interface_identifier = nss_interface_identifier;
+	ii->ae_interface_identifier = ae_interface_identifier;
 
 	/*
 	 * Type specific info
@@ -8650,6 +8771,9 @@ void ecm_db_iface_add_bridge(struct ecm_db_iface_instance *ii, uint8_t *address,
 	 */
 	hash_index = ecm_db_iface_generate_hash_index_ethernet(address);
 	ii->hash_index = hash_index;
+
+	iface_id_hash_index = ecm_db_iface_id_generate_hash_index(interface_identifier);
+	ii->iface_id_hash_index = iface_id_hash_index;
 
 	/*
 	 * Add into the global list
@@ -8675,6 +8799,17 @@ void ecm_db_iface_add_bridge(struct ecm_db_iface_instance *ii, uint8_t *address,
 	DEBUG_ASSERT(ecm_db_iface_table_lengths[hash_index] > 0, "%p: invalid table len %d\n", ii, ecm_db_iface_table_lengths[hash_index]);
 
 	DEBUG_INFO("%p: interface inserted at hash index %u, hash prev is %p, type: %d\n", ii, ii->hash_index, ii->hash_prev, ii->type);
+
+	/*
+	 * Insert into interface identifier chain
+	 */
+	ii->iface_id_hash_next = ecm_db_iface_id_table[iface_id_hash_index];
+	if (ecm_db_iface_id_table[iface_id_hash_index]) {
+		ecm_db_iface_id_table[iface_id_hash_index]->iface_id_hash_prev = ii;
+	}
+	ecm_db_iface_id_table[iface_id_hash_index] = ii;
+	ecm_db_iface_id_table_lengths[iface_id_hash_index]++;
+	DEBUG_ASSERT(ecm_db_iface_id_table_lengths[iface_id_hash_index] > 0, "%p: invalid iface id table len %d\n", ii, ecm_db_iface_id_table_lengths[iface_id_hash_index]);
 
 	/*
 	 * Set time of addition
@@ -8709,10 +8844,11 @@ EXPORT_SYMBOL(ecm_db_iface_add_bridge);
  *	Add a iface instance into the database
  */
 void ecm_db_iface_add_vlan(struct ecm_db_iface_instance *ii, uint8_t *address, uint16_t vlan_tag, uint16_t vlan_tpid, char *name, int32_t mtu,
-					int32_t interface_identifier, int32_t nss_interface_identifier,
+					int32_t interface_identifier, int32_t ae_interface_identifier,
 					ecm_db_iface_final_callback_t final, void *arg)
 {
 	ecm_db_iface_hash_t hash_index;
+	ecm_db_iface_id_hash_t iface_id_hash_index;
 	struct ecm_db_listener_instance *li;
 	struct ecm_db_interface_info_vlan *type_info;
 
@@ -8738,7 +8874,7 @@ void ecm_db_iface_add_vlan(struct ecm_db_iface_instance *ii, uint8_t *address, u
 	strcpy(ii->name, name);
 	ii->mtu = mtu;
 	ii->interface_identifier = interface_identifier;
-	ii->nss_interface_identifier = nss_interface_identifier;
+	ii->ae_interface_identifier = ae_interface_identifier;
 
 	/*
 	 * Type specific info
@@ -8753,6 +8889,9 @@ void ecm_db_iface_add_vlan(struct ecm_db_iface_instance *ii, uint8_t *address, u
 	 */
 	hash_index = ecm_db_iface_generate_hash_index_ethernet(address);
 	ii->hash_index = hash_index;
+
+	iface_id_hash_index = ecm_db_iface_id_generate_hash_index(interface_identifier);
+	ii->iface_id_hash_index = iface_id_hash_index;
 
 	/*
 	 * Add into the global list
@@ -8778,6 +8917,17 @@ void ecm_db_iface_add_vlan(struct ecm_db_iface_instance *ii, uint8_t *address, u
 	DEBUG_ASSERT(ecm_db_iface_table_lengths[hash_index] > 0, "%p: invalid table len %d\n", ii, ecm_db_iface_table_lengths[hash_index]);
 
 	DEBUG_INFO("%p: interface inserted at hash index %u, hash prev is %p, type: %d\n", ii, ii->hash_index, ii->hash_prev, ii->type);
+
+	/*
+	 * Insert into interface identifier chain
+	 */
+	ii->iface_id_hash_next = ecm_db_iface_id_table[iface_id_hash_index];
+	if (ecm_db_iface_id_table[iface_id_hash_index]) {
+		ecm_db_iface_id_table[iface_id_hash_index]->iface_id_hash_prev = ii;
+	}
+	ecm_db_iface_id_table[iface_id_hash_index] = ii;
+	ecm_db_iface_id_table_lengths[iface_id_hash_index]++;
+	DEBUG_ASSERT(ecm_db_iface_id_table_lengths[iface_id_hash_index] > 0, "%p: invalid iface id table len %d\n", ii, ecm_db_iface_id_table_lengths[iface_id_hash_index]);
 
 	/*
 	 * Set time of addition
@@ -8814,10 +8964,11 @@ EXPORT_SYMBOL(ecm_db_iface_add_vlan);
  */
 void ecm_db_iface_add_pppoe(struct ecm_db_iface_instance *ii, uint16_t pppoe_session_id, uint8_t *remote_mac,
 					char *name, int32_t mtu, int32_t interface_identifier,
-					int32_t nss_interface_identifier, ecm_db_iface_final_callback_t final,
+					int32_t ae_interface_identifier, ecm_db_iface_final_callback_t final,
 					void *arg)
 {
 	ecm_db_iface_hash_t hash_index;
+	ecm_db_iface_id_hash_t iface_id_hash_index;
 	struct ecm_db_listener_instance *li;
 	struct ecm_db_interface_info_pppoe *type_info;
 
@@ -8842,7 +8993,7 @@ void ecm_db_iface_add_pppoe(struct ecm_db_iface_instance *ii, uint16_t pppoe_ses
 	strcpy(ii->name, name);
 	ii->mtu = mtu;
 	ii->interface_identifier = interface_identifier;
-	ii->nss_interface_identifier = nss_interface_identifier;
+	ii->ae_interface_identifier = ae_interface_identifier;
 
 	/*
 	 * Type specific info
@@ -8856,6 +9007,9 @@ void ecm_db_iface_add_pppoe(struct ecm_db_iface_instance *ii, uint16_t pppoe_ses
 	 */
 	hash_index = ecm_db_iface_generate_hash_index_pppoe(pppoe_session_id);
 	ii->hash_index = hash_index;
+
+	iface_id_hash_index = ecm_db_iface_id_generate_hash_index(interface_identifier);
+	ii->iface_id_hash_index = iface_id_hash_index;
 
 	/*
 	 * Add into the global list
@@ -8881,6 +9035,17 @@ void ecm_db_iface_add_pppoe(struct ecm_db_iface_instance *ii, uint16_t pppoe_ses
 	DEBUG_ASSERT(ecm_db_iface_table_lengths[hash_index] > 0, "%p: invalid table len %d\n", ii, ecm_db_iface_table_lengths[hash_index]);
 
 	DEBUG_INFO("%p: interface inserted at hash index %u, hash prev is %p, type: %d\n", ii, ii->hash_index, ii->hash_prev, ii->type);
+
+	/*
+	 * Insert into interface identifier chain
+	 */
+	ii->iface_id_hash_next = ecm_db_iface_id_table[iface_id_hash_index];
+	if (ecm_db_iface_id_table[iface_id_hash_index]) {
+		ecm_db_iface_id_table[iface_id_hash_index]->iface_id_hash_prev = ii;
+	}
+	ecm_db_iface_id_table[iface_id_hash_index] = ii;
+	ecm_db_iface_id_table_lengths[iface_id_hash_index]++;
+	DEBUG_ASSERT(ecm_db_iface_id_table_lengths[iface_id_hash_index] > 0, "%p: invalid iface id table len %d\n", ii, ecm_db_iface_id_table_lengths[iface_id_hash_index]);
 
 	/*
 	 * Set time of addition
@@ -8915,10 +9080,11 @@ EXPORT_SYMBOL(ecm_db_iface_add_pppoe);
  *	Add a iface instance into the database
  */
 void ecm_db_iface_add_unknown(struct ecm_db_iface_instance *ii, uint32_t os_specific_ident, char *name, int32_t mtu,
-					int32_t interface_identifier, int32_t nss_interface_identifier,
+					int32_t interface_identifier, int32_t ae_interface_identifier,
 					ecm_db_iface_final_callback_t final, void *arg)
 {
 	ecm_db_iface_hash_t hash_index;
+	ecm_db_iface_id_hash_t iface_id_hash_index;
 	struct ecm_db_listener_instance *li;
 	struct ecm_db_interface_info_unknown *type_info;
 
@@ -8943,7 +9109,7 @@ void ecm_db_iface_add_unknown(struct ecm_db_iface_instance *ii, uint32_t os_spec
 	strcpy(ii->name, name);
 	ii->mtu = mtu;
 	ii->interface_identifier = interface_identifier;
-	ii->nss_interface_identifier = nss_interface_identifier;
+	ii->ae_interface_identifier = ae_interface_identifier;
 
 	/*
 	 * Type specific info
@@ -8956,6 +9122,9 @@ void ecm_db_iface_add_unknown(struct ecm_db_iface_instance *ii, uint32_t os_spec
 	 */
 	hash_index = ecm_db_iface_generate_hash_index_unknown(os_specific_ident);
 	ii->hash_index = hash_index;
+
+	iface_id_hash_index = ecm_db_iface_id_generate_hash_index(interface_identifier);
+	ii->iface_id_hash_index = iface_id_hash_index;
 
 	/*
 	 * Add into the global list
@@ -8981,6 +9150,17 @@ void ecm_db_iface_add_unknown(struct ecm_db_iface_instance *ii, uint32_t os_spec
 	DEBUG_ASSERT(ecm_db_iface_table_lengths[hash_index] > 0, "%p: invalid table len %d\n", ii, ecm_db_iface_table_lengths[hash_index]);
 
 	DEBUG_INFO("%p: interface inserted at hash index %u, hash prev is %p, type: %d\n", ii, ii->hash_index, ii->hash_prev, ii->type);
+
+	/*
+	 * Insert into interface identifier chain
+	 */
+	ii->iface_id_hash_next = ecm_db_iface_id_table[iface_id_hash_index];
+	if (ecm_db_iface_id_table[iface_id_hash_index]) {
+		ecm_db_iface_id_table[iface_id_hash_index]->iface_id_hash_prev = ii;
+	}
+	ecm_db_iface_id_table[iface_id_hash_index] = ii;
+	ecm_db_iface_id_table_lengths[iface_id_hash_index]++;
+	DEBUG_ASSERT(ecm_db_iface_id_table_lengths[iface_id_hash_index] > 0, "%p: invalid iface id table len %d\n", ii, ecm_db_iface_id_table_lengths[iface_id_hash_index]);
 
 	/*
 	 * Set time of addition
@@ -9014,10 +9194,11 @@ EXPORT_SYMBOL(ecm_db_iface_add_unknown);
  *	Add a iface instance into the database
  */
 void ecm_db_iface_add_loopback(struct ecm_db_iface_instance *ii, uint32_t os_specific_ident, char *name, int32_t mtu,
-					int32_t interface_identifier, int32_t nss_interface_identifier,
+					int32_t interface_identifier, int32_t ae_interface_identifier,
 					ecm_db_iface_final_callback_t final, void *arg)
 {
 	ecm_db_iface_hash_t hash_index;
+	ecm_db_iface_id_hash_t iface_id_hash_index;
 	struct ecm_db_listener_instance *li;
 	struct ecm_db_interface_info_loopback *type_info;
 
@@ -9042,7 +9223,7 @@ void ecm_db_iface_add_loopback(struct ecm_db_iface_instance *ii, uint32_t os_spe
 	strcpy(ii->name, name);
 	ii->mtu = mtu;
 	ii->interface_identifier = interface_identifier;
-	ii->nss_interface_identifier = nss_interface_identifier;
+	ii->ae_interface_identifier = ae_interface_identifier;
 
 	/*
 	 * Type specific info
@@ -9055,6 +9236,9 @@ void ecm_db_iface_add_loopback(struct ecm_db_iface_instance *ii, uint32_t os_spe
 	 */
 	hash_index = ecm_db_iface_generate_hash_index_loopback(os_specific_ident);
 	ii->hash_index = hash_index;
+
+	iface_id_hash_index = ecm_db_iface_id_generate_hash_index(interface_identifier);
+	ii->iface_id_hash_index = iface_id_hash_index;
 
 	/*
 	 * Add into the global list
@@ -9080,6 +9264,17 @@ void ecm_db_iface_add_loopback(struct ecm_db_iface_instance *ii, uint32_t os_spe
 	DEBUG_ASSERT(ecm_db_iface_table_lengths[hash_index] > 0, "%p: invalid table len %d\n", ii, ecm_db_iface_table_lengths[hash_index]);
 
 	DEBUG_INFO("%p: interface inserted at hash index %u, hash prev is %p, type: %d\n", ii, ii->hash_index, ii->hash_prev, ii->type);
+
+	/*
+	 * Insert into interface identifier chain
+	 */
+	ii->iface_id_hash_next = ecm_db_iface_id_table[iface_id_hash_index];
+	if (ecm_db_iface_id_table[iface_id_hash_index]) {
+		ecm_db_iface_id_table[iface_id_hash_index]->iface_id_hash_prev = ii;
+	}
+	ecm_db_iface_id_table[iface_id_hash_index] = ii;
+	ecm_db_iface_id_table_lengths[iface_id_hash_index]++;
+	DEBUG_ASSERT(ecm_db_iface_id_table_lengths[iface_id_hash_index] > 0, "%p: invalid iface id table len %d\n", ii, ecm_db_iface_id_table_lengths[iface_id_hash_index]);
 
 	/*
 	 * Set time of addition
@@ -9124,10 +9319,11 @@ EXPORT_SYMBOL(ecm_db_iface_sit_daddr_is_null);
  *	Add a iface instance into the database
  */
 void ecm_db_iface_add_sit(struct ecm_db_iface_instance *ii, struct ecm_db_interface_info_sit *type_info, char *name, int32_t mtu,
-					int32_t interface_identifier, int32_t nss_interface_identifier,
+					int32_t interface_identifier, int32_t ae_interface_identifier,
 					ecm_db_iface_final_callback_t final, void *arg)
 {
 	ecm_db_iface_hash_t hash_index;
+	ecm_db_iface_id_hash_t iface_id_hash_index;
 	struct ecm_db_listener_instance *li;
 
 	spin_lock_bh(&ecm_db_lock);
@@ -9151,7 +9347,7 @@ void ecm_db_iface_add_sit(struct ecm_db_iface_instance *ii, struct ecm_db_interf
 	strcpy(ii->name, name);
 	ii->mtu = mtu;
 	ii->interface_identifier = interface_identifier;
-	ii->nss_interface_identifier = nss_interface_identifier;
+	ii->ae_interface_identifier = ae_interface_identifier;
 
 	/*
 	 * Type specific info to be copied
@@ -9163,6 +9359,9 @@ void ecm_db_iface_add_sit(struct ecm_db_iface_instance *ii, struct ecm_db_interf
 	 */
 	hash_index = ecm_db_iface_generate_hash_index_sit(type_info->saddr, type_info->daddr);
 	ii->hash_index = hash_index;
+
+	iface_id_hash_index = ecm_db_iface_id_generate_hash_index(interface_identifier);
+	ii->iface_id_hash_index = iface_id_hash_index;
 
 	/*
 	 * Add into the global list
@@ -9188,6 +9387,17 @@ void ecm_db_iface_add_sit(struct ecm_db_iface_instance *ii, struct ecm_db_interf
 	DEBUG_ASSERT(ecm_db_iface_table_lengths[hash_index] > 0, "%p: invalid table len %d\n", ii, ecm_db_iface_table_lengths[hash_index]);
 
 	DEBUG_INFO("%p: interface inserted at hash index %u, hash prev is %p, type: %d\n", ii, ii->hash_index, ii->hash_prev, ii->type);
+
+	/*
+	 * Insert into interface identifier chain
+	 */
+	ii->iface_id_hash_next = ecm_db_iface_id_table[iface_id_hash_index];
+	if (ecm_db_iface_id_table[iface_id_hash_index]) {
+		ecm_db_iface_id_table[iface_id_hash_index]->iface_id_hash_prev = ii;
+	}
+	ecm_db_iface_id_table[iface_id_hash_index] = ii;
+	ecm_db_iface_id_table_lengths[iface_id_hash_index]++;
+	DEBUG_ASSERT(ecm_db_iface_id_table_lengths[iface_id_hash_index] > 0, "%p: invalid iface id table len %d\n", ii, ecm_db_iface_id_table_lengths[iface_id_hash_index]);
 
 	/*
 	 * Set time of addition
@@ -9224,10 +9434,11 @@ EXPORT_SYMBOL(ecm_db_iface_add_sit);
  *	Add a iface instance into the database
  */
 void ecm_db_iface_add_tunipip6(struct ecm_db_iface_instance *ii, struct ecm_db_interface_info_tunipip6 *type_info, char *name, int32_t mtu,
-					int32_t interface_identifier, int32_t nss_interface_identifier,
+					int32_t interface_identifier, int32_t ae_interface_identifier,
 					ecm_db_iface_final_callback_t final, void *arg)
 {
 	ecm_db_iface_hash_t hash_index;
+	ecm_db_iface_id_hash_t iface_id_hash_index;
 	struct ecm_db_listener_instance *li;
 
 	spin_lock_bh(&ecm_db_lock);
@@ -9251,7 +9462,7 @@ void ecm_db_iface_add_tunipip6(struct ecm_db_iface_instance *ii, struct ecm_db_i
 	strcpy(ii->name, name);
 	ii->mtu = mtu;
 	ii->interface_identifier = interface_identifier;
-	ii->nss_interface_identifier = nss_interface_identifier;
+	ii->ae_interface_identifier = ae_interface_identifier;
 
 	/*
 	 * Type specific info to be copied
@@ -9263,6 +9474,9 @@ void ecm_db_iface_add_tunipip6(struct ecm_db_iface_instance *ii, struct ecm_db_i
 	 */
 	hash_index = ecm_db_iface_generate_hash_index_tunipip6(type_info->saddr, type_info->daddr);
 	ii->hash_index = hash_index;
+
+	iface_id_hash_index = ecm_db_iface_id_generate_hash_index(interface_identifier);
+	ii->iface_id_hash_index = iface_id_hash_index;
 
 	/*
 	 * Add into the global list
@@ -9288,6 +9502,17 @@ void ecm_db_iface_add_tunipip6(struct ecm_db_iface_instance *ii, struct ecm_db_i
 	DEBUG_ASSERT(ecm_db_iface_table_lengths[hash_index] > 0, "%p: invalid table len %d\n", ii, ecm_db_iface_table_lengths[hash_index]);
 
 	DEBUG_INFO("%p: interface inserted at hash index %u, hash prev is %p, type: %d\n", ii, ii->hash_index, ii->hash_prev, ii->type);
+
+	/*
+	 * Insert into interface identifier chain
+	 */
+	ii->iface_id_hash_next = ecm_db_iface_id_table[iface_id_hash_index];
+	if (ecm_db_iface_id_table[iface_id_hash_index]) {
+		ecm_db_iface_id_table[iface_id_hash_index]->iface_id_hash_prev = ii;
+	}
+	ecm_db_iface_id_table[iface_id_hash_index] = ii;
+	ecm_db_iface_id_table_lengths[iface_id_hash_index]++;
+	DEBUG_ASSERT(ecm_db_iface_id_table_lengths[iface_id_hash_index] > 0, "%p: invalid iface id table len %d\n", ii, ecm_db_iface_id_table_lengths[iface_id_hash_index]);
 
 	/*
 	 * Set time of addition
@@ -9326,10 +9551,11 @@ EXPORT_SYMBOL(ecm_db_iface_add_tunipip6);
  * GGG TODO This needs to take ipsec tunnel endpoint information etc. something very appropriate for ipsec tunnels, anyhow.
  */
 void ecm_db_iface_add_ipsec_tunnel(struct ecm_db_iface_instance *ii, uint32_t os_specific_ident, char *name, int32_t mtu,
-					int32_t interface_identifier, int32_t nss_interface_identifier,
+					int32_t interface_identifier, int32_t ae_interface_identifier,
 					ecm_db_iface_final_callback_t final, void *arg)
 {
 	ecm_db_iface_hash_t hash_index;
+	ecm_db_iface_id_hash_t iface_id_hash_index;
 	struct ecm_db_listener_instance *li;
 	struct ecm_db_interface_info_ipsec_tunnel *type_info;
 
@@ -9354,7 +9580,7 @@ void ecm_db_iface_add_ipsec_tunnel(struct ecm_db_iface_instance *ii, uint32_t os
 	strcpy(ii->name, name);
 	ii->mtu = mtu;
 	ii->interface_identifier = interface_identifier;
-	ii->nss_interface_identifier = nss_interface_identifier;
+	ii->ae_interface_identifier = ae_interface_identifier;
 
 	/*
 	 * Type specific info
@@ -9367,6 +9593,9 @@ void ecm_db_iface_add_ipsec_tunnel(struct ecm_db_iface_instance *ii, uint32_t os
 	 */
 	hash_index = ecm_db_iface_generate_hash_index_ipsec_tunnel(os_specific_ident);
 	ii->hash_index = hash_index;
+
+	iface_id_hash_index = ecm_db_iface_id_generate_hash_index(interface_identifier);
+	ii->iface_id_hash_index = iface_id_hash_index;
 
 	/*
 	 * Add into the global list
@@ -9392,6 +9621,17 @@ void ecm_db_iface_add_ipsec_tunnel(struct ecm_db_iface_instance *ii, uint32_t os
 	DEBUG_ASSERT(ecm_db_iface_table_lengths[hash_index] > 0, "%p: invalid table len %d\n", ii, ecm_db_iface_table_lengths[hash_index]);
 
 	DEBUG_INFO("%p: interface inserted at hash index %u, hash prev is %p, type: %d\n", ii, ii->hash_index, ii->hash_prev, ii->type);
+
+	/*
+	 * Insert into interface identifier chain
+	 */
+	ii->iface_id_hash_next = ecm_db_iface_id_table[iface_id_hash_index];
+	if (ecm_db_iface_id_table[iface_id_hash_index]) {
+		ecm_db_iface_id_table[iface_id_hash_index]->iface_id_hash_prev = ii;
+	}
+	ecm_db_iface_id_table[iface_id_hash_index] = ii;
+	ecm_db_iface_id_table_lengths[iface_id_hash_index]++;
+	DEBUG_ASSERT(ecm_db_iface_id_table_lengths[iface_id_hash_index] > 0, "%p: invalid iface id table len %d\n", ii, ecm_db_iface_id_table_lengths[iface_id_hash_index]);
 
 	/*
 	 * Set time of addition

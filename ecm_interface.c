@@ -751,13 +751,13 @@ bool ecm_interface_skip_l2tp_pptp(struct sk_buff *skb, const struct net_device *
  * Returns NULL on failure or a reference to interface.
  */
 static struct ecm_db_iface_instance *ecm_interface_vlan_interface_establish(struct ecm_db_interface_info_vlan *type_info,
-							char *dev_name, int32_t dev_interface_num, int32_t nss_interface_num, int32_t mtu)
+							char *dev_name, int32_t dev_interface_num, int32_t ae_interface_num, int32_t mtu)
 {
 	struct ecm_db_iface_instance *nii;
 	struct ecm_db_iface_instance *ii;
 
-	DEBUG_INFO("Establish VLAN iface: %s with address: %pM, vlan tag: %u, vlan_tpid: %x MTU: %d, if num: %d, nss if id: %d\n",
-			dev_name, type_info->address, type_info->vlan_tag, type_info->vlan_tpid, mtu, dev_interface_num, nss_interface_num);
+	DEBUG_INFO("Establish VLAN iface: %s with address: %pM, vlan tag: %u, vlan_tpid: %x MTU: %d, if num: %d, accel engine if id: %d\n",
+			dev_name, type_info->address, type_info->vlan_tag, type_info->vlan_tpid, mtu, dev_interface_num, ae_interface_num);
 
 	/*
 	 * Locate the iface
@@ -788,7 +788,7 @@ static struct ecm_db_iface_instance *ecm_interface_vlan_interface_establish(stru
 		return ii;
 	}
 	ecm_db_iface_add_vlan(nii, type_info->address, type_info->vlan_tag, type_info->vlan_tpid, dev_name,
-			mtu, dev_interface_num, nss_interface_num, NULL, nii);
+			mtu, dev_interface_num, ae_interface_num, NULL, nii);
 	spin_unlock_bh(&ecm_interface_lock);
 
 	DEBUG_TRACE("%p: vlan iface established\n", nii);
@@ -802,13 +802,13 @@ static struct ecm_db_iface_instance *ecm_interface_vlan_interface_establish(stru
  * Returns NULL on failure or a reference to interface.
  */
 static struct ecm_db_iface_instance *ecm_interface_bridge_interface_establish(struct ecm_db_interface_info_bridge *type_info,
-							char *dev_name, int32_t dev_interface_num, int32_t nss_interface_num, int32_t mtu)
+							char *dev_name, int32_t dev_interface_num, int32_t ae_interface_num, int32_t mtu)
 {
 	struct ecm_db_iface_instance *nii;
 	struct ecm_db_iface_instance *ii;
 
-	DEBUG_INFO("Establish BRIDGE iface: %s with address: %pM, MTU: %d, if num: %d, nss if id: %d\n",
-			dev_name, type_info->address, mtu, dev_interface_num, nss_interface_num);
+	DEBUG_INFO("Establish BRIDGE iface: %s with address: %pM, MTU: %d, if num: %d, accel engine if id: %d\n",
+			dev_name, type_info->address, mtu, dev_interface_num, ae_interface_num);
 
 	/*
 	 * Locate the iface
@@ -839,7 +839,7 @@ static struct ecm_db_iface_instance *ecm_interface_bridge_interface_establish(st
 		return ii;
 	}
 	ecm_db_iface_add_bridge(nii, type_info->address, dev_name,
-			mtu, dev_interface_num, nss_interface_num, NULL, nii);
+			mtu, dev_interface_num, ae_interface_num, NULL, nii);
 	spin_unlock_bh(&ecm_interface_lock);
 
 	DEBUG_TRACE("%p: bridge iface established\n", nii);
@@ -853,13 +853,13 @@ static struct ecm_db_iface_instance *ecm_interface_bridge_interface_establish(st
  * Returns NULL on failure or a reference to interface.
  */
 static struct ecm_db_iface_instance *ecm_interface_lag_interface_establish(struct ecm_db_interface_info_lag *type_info,
-							char *dev_name, int32_t dev_interface_num, int32_t nss_interface_num, int32_t mtu)
+							char *dev_name, int32_t dev_interface_num, int32_t ae_interface_num, int32_t mtu)
 {
 	struct ecm_db_iface_instance *nii;
 	struct ecm_db_iface_instance *ii;
 
-	DEBUG_INFO("Establish LAG iface: %s with address: %pM, MTU: %d, if num: %d, nss if id: %d\n",
-			dev_name, type_info->address, mtu, dev_interface_num, nss_interface_num);
+	DEBUG_INFO("Establish LAG iface: %s with address: %pM, MTU: %d, if num: %d, accel engine if id: %d\n",
+			dev_name, type_info->address, mtu, dev_interface_num, ae_interface_num);
 
 	/*
 	 * Locate the iface
@@ -890,7 +890,7 @@ static struct ecm_db_iface_instance *ecm_interface_lag_interface_establish(struc
 		return ii;
 	}
 	ecm_db_iface_add_lag(nii, type_info->address, dev_name,
-			mtu, dev_interface_num, nss_interface_num, NULL, nii);
+			mtu, dev_interface_num, ae_interface_num, NULL, nii);
 	spin_unlock_bh(&ecm_interface_lock);
 
 	DEBUG_TRACE("%p: lag iface established\n", nii);
@@ -904,13 +904,13 @@ static struct ecm_db_iface_instance *ecm_interface_lag_interface_establish(struc
  * Returns NULL on failure or a reference to interface.
  */
 static struct ecm_db_iface_instance *ecm_interface_ethernet_interface_establish(struct ecm_db_interface_info_ethernet *type_info,
-							char *dev_name, int32_t dev_interface_num, int32_t nss_interface_num, int32_t mtu)
+							char *dev_name, int32_t dev_interface_num, int32_t ae_interface_num, int32_t mtu)
 {
 	struct ecm_db_iface_instance *nii;
 	struct ecm_db_iface_instance *ii;
 
-	DEBUG_INFO("Establish ETHERNET iface: %s with address: %pM, MTU: %d, if num: %d, nss if id: %d\n",
-			dev_name, type_info->address, mtu, dev_interface_num, nss_interface_num);
+	DEBUG_INFO("Establish ETHERNET iface: %s with address: %pM, MTU: %d, if num: %d, accel engine if id: %d\n",
+			dev_name, type_info->address, mtu, dev_interface_num, ae_interface_num);
 
 	/*
 	 * Locate the iface
@@ -942,7 +942,7 @@ static struct ecm_db_iface_instance *ecm_interface_ethernet_interface_establish(
 		return ii;
 	}
 	ecm_db_iface_add_ethernet(nii, type_info->address, dev_name,
-			mtu, dev_interface_num, nss_interface_num, NULL, nii);
+			mtu, dev_interface_num, ae_interface_num, NULL, nii);
 	spin_unlock_bh(&ecm_interface_lock);
 
 	DEBUG_TRACE("%p: ethernet iface established\n", nii);
@@ -956,13 +956,13 @@ static struct ecm_db_iface_instance *ecm_interface_ethernet_interface_establish(
  * Returns NULL on failure or a reference to interface.
  */
 static struct ecm_db_iface_instance *ecm_interface_pppoe_interface_establish(struct ecm_db_interface_info_pppoe *type_info,
-							char *dev_name, int32_t dev_interface_num, int32_t nss_interface_num, int32_t mtu)
+							char *dev_name, int32_t dev_interface_num, int32_t ae_interface_num, int32_t mtu)
 {
 	struct ecm_db_iface_instance *nii;
 	struct ecm_db_iface_instance *ii;
 
-	DEBUG_INFO("Establish PPPoE iface: %s with session id: %u, remote mac: %pM, MTU: %d, if num: %d, nss if id: %d\n",
-			dev_name, type_info->pppoe_session_id, type_info->remote_mac, mtu, dev_interface_num, nss_interface_num);
+	DEBUG_INFO("Establish PPPoE iface: %s with session id: %u, remote mac: %pM, MTU: %d, if num: %d, accel engine if id: %d\n",
+			dev_name, type_info->pppoe_session_id, type_info->remote_mac, mtu, dev_interface_num, ae_interface_num);
 
 	/*
 	 * Locate the iface
@@ -993,7 +993,7 @@ static struct ecm_db_iface_instance *ecm_interface_pppoe_interface_establish(str
 		return ii;
 	}
 	ecm_db_iface_add_pppoe(nii, type_info->pppoe_session_id, type_info->remote_mac, dev_name,
-			mtu, dev_interface_num, nss_interface_num, NULL, nii);
+			mtu, dev_interface_num, ae_interface_num, NULL, nii);
 	spin_unlock_bh(&ecm_interface_lock);
 
 	DEBUG_TRACE("%p: pppoe iface established\n", nii);
@@ -1007,13 +1007,13 @@ static struct ecm_db_iface_instance *ecm_interface_pppoe_interface_establish(str
  * Returns NULL on failure or a reference to interface.
  */
 static struct ecm_db_iface_instance *ecm_interface_unknown_interface_establish(struct ecm_db_interface_info_unknown *type_info,
-							char *dev_name, int32_t dev_interface_num, int32_t nss_interface_num, int32_t mtu)
+							char *dev_name, int32_t dev_interface_num, int32_t ae_interface_num, int32_t mtu)
 {
 	struct ecm_db_iface_instance *nii;
 	struct ecm_db_iface_instance *ii;
 
-	DEBUG_INFO("Establish UNKNOWN iface: %s with os_specific_ident: %u, MTU: %d, if num: %d, nss if id: %d\n",
-			dev_name, type_info->os_specific_ident, mtu, dev_interface_num, nss_interface_num);
+	DEBUG_INFO("Establish UNKNOWN iface: %s with os_specific_ident: %u, MTU: %d, if num: %d, accel engine if id: %d\n",
+			dev_name, type_info->os_specific_ident, mtu, dev_interface_num, ae_interface_num);
 
 	/*
 	 * Locate the iface
@@ -1044,7 +1044,7 @@ static struct ecm_db_iface_instance *ecm_interface_unknown_interface_establish(s
 		return ii;
 	}
 	ecm_db_iface_add_unknown(nii, type_info->os_specific_ident, dev_name,
-			mtu, dev_interface_num, nss_interface_num, NULL, nii);
+			mtu, dev_interface_num, ae_interface_num, NULL, nii);
 	spin_unlock_bh(&ecm_interface_lock);
 
 	DEBUG_TRACE("%p: unknown iface established\n", nii);
@@ -1057,13 +1057,13 @@ static struct ecm_db_iface_instance *ecm_interface_unknown_interface_establish(s
  * Returns NULL on failure or a reference to interface.
  */
 static struct ecm_db_iface_instance *ecm_interface_loopback_interface_establish(struct ecm_db_interface_info_loopback *type_info,
-							char *dev_name, int32_t dev_interface_num, int32_t nss_interface_num, int32_t mtu)
+							char *dev_name, int32_t dev_interface_num, int32_t ae_interface_num, int32_t mtu)
 {
 	struct ecm_db_iface_instance *nii;
 	struct ecm_db_iface_instance *ii;
 
-	DEBUG_INFO("Establish LOOPBACK iface: %s with os_specific_ident: %u, MTU: %d, if num: %d, nss if id: %d\n",
-			dev_name, type_info->os_specific_ident, mtu, dev_interface_num, nss_interface_num);
+	DEBUG_INFO("Establish LOOPBACK iface: %s with os_specific_ident: %u, MTU: %d, if num: %d, accel engine if id: %d\n",
+			dev_name, type_info->os_specific_ident, mtu, dev_interface_num, ae_interface_num);
 
 	/*
 	 * Locate the iface
@@ -1094,7 +1094,7 @@ static struct ecm_db_iface_instance *ecm_interface_loopback_interface_establish(
 		return ii;
 	}
 	ecm_db_iface_add_loopback(nii, type_info->os_specific_ident, dev_name,
-			mtu, dev_interface_num, nss_interface_num, NULL, nii);
+			mtu, dev_interface_num, ae_interface_num, NULL, nii);
 	spin_unlock_bh(&ecm_interface_lock);
 
 	DEBUG_TRACE("%p: loopback iface established\n", nii);
@@ -1110,13 +1110,13 @@ static struct ecm_db_iface_instance *ecm_interface_loopback_interface_establish(
  * NOTE: GGG TODO THIS NEEDS TO TAKE A PROPER APPROACH TO IPSEC TUNNELS USING ENDPOINT ADDRESSING AS THE TYPE INFO KEYS
  */
 static struct ecm_db_iface_instance *ecm_interface_ipsec_tunnel_interface_establish(struct ecm_db_interface_info_ipsec_tunnel *type_info,
-							char *dev_name, int32_t dev_interface_num, int32_t nss_interface_num, int32_t mtu)
+							char *dev_name, int32_t dev_interface_num, int32_t ae_interface_num, int32_t mtu)
 {
 	struct ecm_db_iface_instance *nii;
 	struct ecm_db_iface_instance *ii;
 
-	DEBUG_INFO("Establish IPSEC_TUNNEL iface: %s with os_specific_ident: %u, MTU: %d, if num: %d, nss if id: %d\n",
-			dev_name, type_info->os_specific_ident, mtu, dev_interface_num, nss_interface_num);
+	DEBUG_INFO("Establish IPSEC_TUNNEL iface: %s with os_specific_ident: %u, MTU: %d, if num: %d, accel engine if id: %d\n",
+			dev_name, type_info->os_specific_ident, mtu, dev_interface_num, ae_interface_num);
 
 	/*
 	 * Locate the iface
@@ -1147,7 +1147,7 @@ static struct ecm_db_iface_instance *ecm_interface_ipsec_tunnel_interface_establ
 		return ii;
 	}
 	ecm_db_iface_add_ipsec_tunnel(nii, type_info->os_specific_ident, dev_name,
-			mtu, dev_interface_num, nss_interface_num, NULL, nii);
+			mtu, dev_interface_num, ae_interface_num, NULL, nii);
 	spin_unlock_bh(&ecm_interface_lock);
 
 	DEBUG_TRACE("%p: ipsec_tunnel iface established\n", nii);
@@ -1163,13 +1163,13 @@ static struct ecm_db_iface_instance *ecm_interface_ipsec_tunnel_interface_establ
  * Returns NULL on failure or a reference to interface.
  */
 static struct ecm_db_iface_instance *ecm_interface_sit_interface_establish(struct ecm_db_interface_info_sit *type_info,
-							char *dev_name, int32_t dev_interface_num, int32_t nss_interface_num, int32_t mtu)
+							char *dev_name, int32_t dev_interface_num, int32_t ae_interface_num, int32_t mtu)
 {
 	struct ecm_db_iface_instance *nii;
 	struct ecm_db_iface_instance *ii;
 
-	DEBUG_INFO("Establish SIT iface: %s with saddr: " ECM_IP_ADDR_OCTAL_FMT ", daddr: " ECM_IP_ADDR_OCTAL_FMT ", MTU: %d, if num: %d, nss if id: %d\n",
-			dev_name, ECM_IP_ADDR_TO_OCTAL(type_info->saddr), ECM_IP_ADDR_TO_OCTAL(type_info->daddr), mtu, dev_interface_num, nss_interface_num);
+	DEBUG_INFO("Establish SIT iface: %s with saddr: " ECM_IP_ADDR_OCTAL_FMT ", daddr: " ECM_IP_ADDR_OCTAL_FMT ", MTU: %d, if num: %d, accel engine if id: %d\n",
+			dev_name, ECM_IP_ADDR_TO_OCTAL(type_info->saddr), ECM_IP_ADDR_TO_OCTAL(type_info->daddr), mtu, dev_interface_num, ae_interface_num);
 
 	/*
 	 * Locate the iface
@@ -1200,7 +1200,7 @@ static struct ecm_db_iface_instance *ecm_interface_sit_interface_establish(struc
 		return ii;
 	}
 	ecm_db_iface_add_sit(nii, type_info, dev_name, mtu, dev_interface_num,
-			nss_interface_num, NULL, nii);
+			ae_interface_num, NULL, nii);
 	spin_unlock_bh(&ecm_interface_lock);
 
 	DEBUG_TRACE("%p: sit iface established\n", nii);
@@ -1217,13 +1217,13 @@ static struct ecm_db_iface_instance *ecm_interface_sit_interface_establish(struc
  * Returns NULL on failure or a reference to interface.
  */
 static struct ecm_db_iface_instance *ecm_interface_tunipip6_interface_establish(struct ecm_db_interface_info_tunipip6 *type_info,
-							char *dev_name, int32_t dev_interface_num, int32_t nss_interface_num, int32_t mtu)
+							char *dev_name, int32_t dev_interface_num, int32_t ae_interface_num, int32_t mtu)
 {
 	struct ecm_db_iface_instance *nii;
 	struct ecm_db_iface_instance *ii;
 
-	DEBUG_INFO("Establish TUNIPIP6 iface: %s with saddr: " ECM_IP_ADDR_OCTAL_FMT ", daddr: " ECM_IP_ADDR_OCTAL_FMT ", MTU: %d, if num: %d, nss if id: %d\n",
-			dev_name, ECM_IP_ADDR_TO_OCTAL(type_info->saddr), ECM_IP_ADDR_TO_OCTAL(type_info->daddr), mtu, dev_interface_num, nss_interface_num);
+	DEBUG_INFO("Establish TUNIPIP6 iface: %s with saddr: " ECM_IP_ADDR_OCTAL_FMT ", daddr: " ECM_IP_ADDR_OCTAL_FMT ", MTU: %d, if num: %d, accel engine if id: %d\n",
+			dev_name, ECM_IP_ADDR_TO_OCTAL(type_info->saddr), ECM_IP_ADDR_TO_OCTAL(type_info->daddr), mtu, dev_interface_num, ae_interface_num);
 
 	/*
 	 * Locate the iface
@@ -1254,7 +1254,7 @@ static struct ecm_db_iface_instance *ecm_interface_tunipip6_interface_establish(
 		return ii;
 	}
 	ecm_db_iface_add_tunipip6(nii, type_info, dev_name, mtu, dev_interface_num,
-			nss_interface_num, NULL, nii);
+			ae_interface_num, NULL, nii);
 	spin_unlock_bh(&ecm_interface_lock);
 
 	DEBUG_TRACE("%p: tunipip6 iface established\n", nii);
@@ -1267,13 +1267,14 @@ static struct ecm_db_iface_instance *ecm_interface_tunipip6_interface_establish(
  * ecm_interface_establish_and_ref()
  *	Establish an interface instance for the given interface detail.
  */
-struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct net_device *dev)
+struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct ecm_front_end_connection_instance *feci,
+								struct net_device *dev)
 {
 	int32_t dev_interface_num;
 	char *dev_name;
 	int32_t dev_type;
 	int32_t dev_mtu;
-	int32_t nss_interface_num;
+	int32_t ae_interface_num;
 	struct ecm_db_iface_instance *ii;
 	union {
 		struct ecm_db_interface_info_ethernet ethernet;		/* type == ECM_DB_IFACE_TYPE_ETHERNET */
@@ -1318,12 +1319,12 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct net_device 
 	dev_mtu = dev->mtu;
 
 	/*
-	 * Does the NSS recognise this interface?
+	 * Does the accel engine recognise this interface?
 	 */
-	nss_interface_num = nss_cmn_get_interface_number_by_dev(dev);
+	ae_interface_num = feci->ae_interface_number_by_dev_get(dev);
 
-	DEBUG_TRACE("Establish interface instance for device: %p is type: %d, name: %s, ifindex: %d, nss_if: %d, mtu: %d\n",
-			dev, dev_type, dev_name, dev_interface_num, nss_interface_num, dev_mtu);
+	DEBUG_TRACE("Establish interface instance for device: %p is type: %d, name: %s, ifindex: %d, ae_if: %d, mtu: %d\n",
+			dev, dev_type, dev_name, dev_interface_num, ae_interface_num, dev_mtu);
 
 	/*
 	 * Extract from the device more type-specific information
@@ -1351,7 +1352,7 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct net_device 
 			/*
 			 * Establish this type of interface
 			 */
-			ii = ecm_interface_vlan_interface_establish(&type_info.vlan, dev_name, dev_interface_num, nss_interface_num, dev_mtu);
+			ii = ecm_interface_vlan_interface_establish(&type_info.vlan, dev_name, dev_interface_num, ae_interface_num, dev_mtu);
 			return ii;
 		}
 #endif
@@ -1371,7 +1372,7 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct net_device 
 			/*
 			 * Establish this type of interface
 			 */
-			ii = ecm_interface_bridge_interface_establish(&type_info.bridge, dev_name, dev_interface_num, nss_interface_num, dev_mtu);
+			ii = ecm_interface_bridge_interface_establish(&type_info.bridge, dev_name, dev_interface_num, ae_interface_num, dev_mtu);
 			return ii;
 		}
 
@@ -1391,7 +1392,7 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct net_device 
 			/*
 			 * Establish this type of interface
 			 */
-			ii = ecm_interface_lag_interface_establish(&type_info.lag, dev_name, dev_interface_num, nss_interface_num, dev_mtu);
+			ii = ecm_interface_lag_interface_establish(&type_info.lag, dev_name, dev_interface_num, ae_interface_num, dev_mtu);
 			return ii;
 		}
 #endif
@@ -1407,7 +1408,7 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct net_device 
 		/*
 		 * Establish this type of interface
 		 */
-		ii = ecm_interface_ethernet_interface_establish(&type_info.ethernet, dev_name, dev_interface_num, nss_interface_num, dev_mtu);
+		ii = ecm_interface_ethernet_interface_establish(&type_info.ethernet, dev_name, dev_interface_num, ae_interface_num, dev_mtu);
 		return ii;
 	}
 
@@ -1417,7 +1418,7 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct net_device 
 	if (dev_type == ARPHRD_LOOPBACK) {
 		DEBUG_TRACE("Net device: %p is LOOPBACK type: %d\n", dev, dev_type);
 		type_info.loopback.os_specific_ident = dev_interface_num;
-		ii = ecm_interface_loopback_interface_establish(&type_info.loopback, dev_name, dev_interface_num, nss_interface_num, dev_mtu);
+		ii = ecm_interface_loopback_interface_establish(&type_info.loopback, dev_name, dev_interface_num, ae_interface_num, dev_mtu);
 		return ii;
 	}
 
@@ -1429,13 +1430,8 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct net_device 
 		DEBUG_TRACE("Net device: %p is IPSec tunnel type: %d\n", dev, dev_type);
 		type_info.ipsec_tunnel.os_specific_ident = dev_interface_num;
 
-		/*
-		 * nss_interface_num for all IPsec tunnels will always be NSS_C2C_TX_INTERFACE
-		 */
-		nss_interface_num = NSS_C2C_TX_INTERFACE;
-
 		// GGG TODO Flesh this out with tunnel endpoint addressing detail
-		ii = ecm_interface_ipsec_tunnel_interface_establish(&type_info.ipsec_tunnel, dev_name, dev_interface_num, nss_interface_num, dev_mtu);
+		ii = ecm_interface_ipsec_tunnel_interface_establish(&type_info.ipsec_tunnel, dev_name, dev_interface_num, ae_interface_num, dev_mtu);
 		return ii;
 	}
 #endif
@@ -1472,7 +1468,7 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct net_device 
 		type_info.sit.ttl = tiph->ttl;
 		type_info.sit.tos = tiph->tos;
 
-		ii = ecm_interface_sit_interface_establish(&type_info.sit, dev_name, dev_interface_num, nss_interface_num, dev_mtu);
+		ii = ecm_interface_sit_interface_establish(&type_info.sit, dev_name, dev_interface_num, ae_interface_num, dev_mtu);
 		return ii;
 	}
 #endif
@@ -1501,7 +1497,7 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct net_device 
 		type_info.tunipip6.flags = ntohl(tunnel->parms.flags);
 		type_info.tunipip6.flowlabel = fl6->flowlabel;  /* flow Label In kernel is stored in big endian format */
 
-		ii = ecm_interface_tunipip6_interface_establish(&type_info.tunipip6, dev_name, dev_interface_num, nss_interface_num, dev_mtu);
+		ii = ecm_interface_tunipip6_interface_establish(&type_info.tunipip6, dev_name, dev_interface_num, ae_interface_num, dev_mtu);
 		return ii;
 	}
 #endif
@@ -1517,7 +1513,7 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct net_device 
 		/*
 		 * Establish this type of interface
 		 */
-		ii = ecm_interface_unknown_interface_establish(&type_info.unknown, dev_name, dev_interface_num, nss_interface_num, dev_mtu);
+		ii = ecm_interface_unknown_interface_establish(&type_info.unknown, dev_name, dev_interface_num, ae_interface_num, dev_mtu);
 		return ii;
 	}
 
@@ -1532,7 +1528,7 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct net_device 
 	/*
 	 * Establish this type of interface
 	 */
-	ii = ecm_interface_unknown_interface_establish(&type_info.unknown, dev_name, dev_interface_num, nss_interface_num, dev_mtu);
+	ii = ecm_interface_unknown_interface_establish(&type_info.unknown, dev_name, dev_interface_num, ae_interface_num, dev_mtu);
 	return ii;
 #else
 	/*
@@ -1546,7 +1542,7 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct net_device 
 		/*
 		 * Establish this type of interface
 		 */
-		ii = ecm_interface_unknown_interface_establish(&type_info.unknown, dev_name, dev_interface_num, nss_interface_num, dev_mtu);
+		ii = ecm_interface_unknown_interface_establish(&type_info.unknown, dev_name, dev_interface_num, ae_interface_num, dev_mtu);
 		return ii;
 	}
 
@@ -1565,7 +1561,7 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct net_device 
 		/*
 		 * Establish this type of interface
 		 */
-		ii = ecm_interface_unknown_interface_establish(&type_info.unknown, dev_name, dev_interface_num, nss_interface_num, dev_mtu);
+		ii = ecm_interface_unknown_interface_establish(&type_info.unknown, dev_name, dev_interface_num, ae_interface_num, dev_mtu);
 		return ii;
 	}
 
@@ -1586,7 +1582,7 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct net_device 
 		/*
 		 * Establish this type of interface
 		 */
-		ii = ecm_interface_unknown_interface_establish(&type_info.unknown, dev_name, dev_interface_num, nss_interface_num, dev_mtu);
+		ii = ecm_interface_unknown_interface_establish(&type_info.unknown, dev_name, dev_interface_num, ae_interface_num, dev_mtu);
 		return ii;
 	}
 
@@ -1614,7 +1610,7 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct net_device 
 	/*
 	 * Establish this type of interface
 	 */
-	ii = ecm_interface_pppoe_interface_establish(&type_info.pppoe, dev_name, dev_interface_num, nss_interface_num, dev_mtu);
+	ii = ecm_interface_pppoe_interface_establish(&type_info.pppoe, dev_name, dev_interface_num, ae_interface_num, dev_mtu);
 	return ii;
 #endif
 }
@@ -1632,9 +1628,10 @@ EXPORT_SYMBOL(ecm_interface_establish_and_ref);
  *	br_slave_dev	Netdev pointer to a bridge slave device. It could be NULL in case of pure
  *			routed flow without any bridge interface in destination dev list.
  */
-static uint32_t ecm_interface_multicast_heirarchy_construct_single(ip_addr_t src_addr, ip_addr_t dest_addr,
-							    struct ecm_db_iface_instance *interface, struct net_device *given_dest_dev,
-							    struct net_device *br_slave_dev)
+static uint32_t ecm_interface_multicast_heirarchy_construct_single(struct ecm_front_end_connection_instance *feci,
+								ip_addr_t src_addr, ip_addr_t dest_addr,
+								struct ecm_db_iface_instance *interface, struct net_device *given_dest_dev,
+								struct net_device *br_slave_dev)
 {
 	struct ecm_db_iface_instance *to_list_single[ECM_DB_IFACE_HEIRARCHY_MAX];
 	struct ecm_db_iface_instance **ifaces;
@@ -1656,7 +1653,7 @@ static uint32_t ecm_interface_multicast_heirarchy_construct_single(ip_addr_t src
 		/*
 		 * Get the ecm db interface instance for the device at hand
 		 */
-		ii = ecm_interface_establish_and_ref(dest_dev);
+		ii = ecm_interface_establish_and_ref(feci, dest_dev);
 		interfaces_cnt++;
 
 		/*
@@ -1973,8 +1970,13 @@ static uint32_t ecm_interface_multicast_heirarchy_construct_single(ip_addr_t src
  *	dst_if_index_base An array of if index joined the multicast group
  *	interface_first_base An array of the index of the first interface in the list
  */
-int32_t ecm_interface_multicast_heirarchy_construct_routed(struct ecm_db_iface_instance *interfaces, struct net_device *in_dev,
-			ip_addr_t packet_src_addr, ip_addr_t packet_dest_addr, uint8_t max_if, uint32_t *dst_if_index_base, uint32_t *interface_first_base)
+int32_t ecm_interface_multicast_heirarchy_construct_routed(struct ecm_front_end_connection_instance *feci,
+								struct ecm_db_iface_instance *interfaces,
+								struct net_device *in_dev,
+								ip_addr_t packet_src_addr,
+								ip_addr_t packet_dest_addr, uint8_t max_if,
+								uint32_t *dst_if_index_base,
+								uint32_t *interface_first_base)
 {
 	struct ecm_db_iface_instance *to_list_single[ECM_DB_IFACE_HEIRARCHY_MAX];
 	struct ecm_db_iface_instance *ifaces;
@@ -2104,7 +2106,7 @@ int32_t ecm_interface_multicast_heirarchy_construct_routed(struct ecm_db_iface_i
 				/*
 				 * Construct a single interface heirarchy of a multicast dev.
 				 */
-				ii_cnt = ecm_interface_multicast_heirarchy_construct_single(packet_src_addr, packet_dest_addr, ifaces, dest_dev, mc_br_slave_dev);
+				ii_cnt = ecm_interface_multicast_heirarchy_construct_single(feci, packet_src_addr, packet_dest_addr, ifaces, dest_dev, mc_br_slave_dev);
 				if (ii_cnt == ECM_DB_IFACE_HEIRARCHY_MAX) {
 
 					/*
@@ -2140,7 +2142,7 @@ int32_t ecm_interface_multicast_heirarchy_construct_routed(struct ecm_db_iface_i
 			/*
 			 * Construct a single interface heirarchy of a multicast dev.
 			 */
-			ii_cnt = ecm_interface_multicast_heirarchy_construct_single(packet_src_addr, packet_dest_addr, ifaces, dest_dev, NULL);
+			ii_cnt = ecm_interface_multicast_heirarchy_construct_single(feci, packet_src_addr, packet_dest_addr, ifaces, dest_dev, NULL);
 			if (ii_cnt == ECM_DB_IFACE_HEIRARCHY_MAX) {
 
 				/*
@@ -2185,8 +2187,12 @@ EXPORT_SYMBOL(ecm_interface_multicast_heirarchy_construct_routed);
  *	mc_dst_if_index_base An array of if index joined the multicast group
  *	interface_first_base An array of the index of the first interface in the list
  */
-int32_t ecm_interface_multicast_heirarchy_construct_bridged(struct ecm_db_iface_instance *interfaces, struct net_device *dest_dev,
-						     ip_addr_t packet_src_addr, ip_addr_t packet_dest_addr, uint8_t mc_max_dst, int *mc_dst_if_index_base, uint32_t *interface_first_base)
+int32_t ecm_interface_multicast_heirarchy_construct_bridged(struct ecm_front_end_connection_instance *feci,
+							struct ecm_db_iface_instance *interfaces,
+							struct net_device *dest_dev,
+							ip_addr_t packet_src_addr, ip_addr_t packet_dest_addr,
+							uint8_t mc_max_dst, int *mc_dst_if_index_base,
+							uint32_t *interface_first_base)
 {
 	struct ecm_db_iface_instance *to_list_single[ECM_DB_IFACE_HEIRARCHY_MAX];
 	struct ecm_db_iface_instance *ifaces;
@@ -2248,7 +2254,7 @@ int32_t ecm_interface_multicast_heirarchy_construct_bridged(struct ecm_db_iface_
 		/*
 		 * Construct a single interface heirarchy of a multicast dev.
 		 */
-		ii_cnt = ecm_interface_multicast_heirarchy_construct_single(packet_src_addr, packet_dest_addr, ifaces, dest_dev, mc_br_slave_dev);
+		ii_cnt = ecm_interface_multicast_heirarchy_construct_single(feci, packet_src_addr, packet_dest_addr, ifaces, dest_dev, mc_br_slave_dev);
 		if (ii_cnt == ECM_DB_IFACE_HEIRARCHY_MAX) {
 
 			/*
@@ -2305,7 +2311,8 @@ EXPORT_SYMBOL(ecm_interface_multicast_heirarchy_construct_bridged);
  * IMPORTANT: This function will return any known interfaces in the database, when interfaces do not exist in the database
  * they will be created and added automatically to the database.
  */
-int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfaces[],
+int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instance *feci,
+						struct ecm_db_iface_instance *interfaces[],
 						ip_addr_t packet_src_addr,
 						ip_addr_t packet_dest_addr,
 						int ip_version, int packet_protocol,
@@ -2492,7 +2499,7 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfac
 		/*
 		 * Get the ecm db interface instance for the device at hand
 		 */
-		ii = ecm_interface_establish_and_ref(dest_dev);
+		ii = ecm_interface_establish_and_ref(feci, dest_dev);
 
 		/*
 		 * If the interface could not be established then we abort
@@ -3250,12 +3257,10 @@ void ecm_interface_dev_regenerate_connections(struct net_device *dev)
 	DEBUG_INFO("Regenerate connections for: %p (%s)\n", dev, dev->name);
 
 	/*
-	 * Establish the interface for the given device.
-	 * NOTE: The cute thing here is even if dev is previously unknown to us this will create an interface instance
-	 * but it will have no connections to regen and will be destroyed at the end of the function when we deref - so no harm done.
-	 * However if the interface is known to us then we will get it returned by this function and process it accordingly.
+	 * If the interface is known to us then we will get it returned by this
+	 * function and process it accordingly.
 	 */
-	ii = ecm_interface_establish_and_ref(dev);
+	ii = ecm_db_iface_find_and_ref_by_interface_identifier(dev->ifindex);
 	if (!ii) {
 		DEBUG_WARN("%p: No interface instance could be established for this dev\n", dev);
 		return;
@@ -3278,9 +3283,9 @@ static void ecm_interface_mtu_change(struct net_device *dev)
 	DEBUG_INFO("%p (%s): MTU Change to: %d\n", dev, dev->name, mtu);
 
 	/*
-	 * Establish the interface for the given device.
+	 * Find the interface for the given device.
 	 */
-	ii = ecm_interface_establish_and_ref(dev);
+	ii = ecm_db_iface_find_and_ref_by_interface_identifier(dev->ifindex);
 	if (!ii) {
 		DEBUG_WARN("%p: No interface instance could be established for this dev\n", dev);
 		return;

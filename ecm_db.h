@@ -64,7 +64,7 @@ ecm_db_iface_type_t ecm_db_connection_to_iface_type_get(struct ecm_db_connection
 
 ecm_db_iface_type_t ecm_db_connection_iface_type_get(struct ecm_db_iface_instance *ii);
 int32_t ecm_db_iface_mtu_reset(struct ecm_db_iface_instance *ii, int32_t mtu);
-int32_t ecm_db_iface_nss_interface_identifier_get(struct ecm_db_iface_instance *ii);
+int32_t ecm_db_iface_ae_interface_identifier_get(struct ecm_db_iface_instance *ii);
 int32_t ecm_db_iface_interface_identifier_get(struct ecm_db_iface_instance *ii);
 
 struct ecm_front_end_connection_instance *ecm_db_connection_front_end_get_and_ref(struct ecm_db_connection_instance *ci);
@@ -134,6 +134,7 @@ void ecm_db_iface_pppoe_session_info_get(struct ecm_db_iface_instance *ii, struc
 void ecm_db_iface_vlan_info_get(struct ecm_db_iface_instance *ii, struct ecm_db_interface_info_vlan *vlan_info);
 #endif
 
+struct ecm_db_iface_instance *ecm_db_iface_find_and_ref_by_interface_identifier(int32_t interface_id);
 struct ecm_db_iface_instance *ecm_db_iface_ifidx_find_and_ref_ethernet(uint8_t *address, int32_t idx);
 #ifdef ECM_INTERFACE_BOND_ENABLE
 struct ecm_db_iface_instance *ecm_db_iface_find_and_ref_lag(uint8_t *address);
@@ -254,28 +255,28 @@ char *ecm_db_interface_type_to_string(ecm_db_iface_type_t type);
 
 void ecm_db_listener_add(struct ecm_db_listener_instance *li, ecm_db_iface_listener_added_callback_t iface_added, ecm_db_iface_listener_removed_callback_t iface_removed, ecm_db_node_listener_added_callback_t node_added, ecm_db_node_listener_removed_callback_t node_removed, ecm_db_host_listener_added_callback_t host_added, ecm_db_host_listener_removed_callback_t host_removed, ecm_db_mapping_listener_added_callback_t mapping_added, ecm_db_mapping_listener_removed_callback_t mapping_removed, ecm_db_connection_listener_added_callback_t connection_added, ecm_db_connection_listener_removed_callback_t connection_removed, ecm_db_listener_final_callback_t final, void *arg);
 
-void ecm_db_iface_add_ethernet(struct ecm_db_iface_instance *ii, uint8_t *address, char *name, int32_t mtu, int32_t interface_identifier, int32_t nss_interface_identifier, ecm_db_iface_final_callback_t final, void *arg);
+void ecm_db_iface_add_ethernet(struct ecm_db_iface_instance *ii, uint8_t *address, char *name, int32_t mtu, int32_t interface_identifier, int32_t ae_interface_identifier, ecm_db_iface_final_callback_t final, void *arg);
 #ifdef ECM_INTERFACE_BOND_ENABLE
-void ecm_db_iface_add_lag(struct ecm_db_iface_instance *ii, uint8_t *address, char *name, int32_t mtu, int32_t interface_identifier, int32_t nss_interface_identifier, ecm_db_iface_final_callback_t final, void *arg);
+void ecm_db_iface_add_lag(struct ecm_db_iface_instance *ii, uint8_t *address, char *name, int32_t mtu, int32_t interface_identifier, int32_t ae_interface_identifier, ecm_db_iface_final_callback_t final, void *arg);
 #endif
-void ecm_db_iface_add_bridge(struct ecm_db_iface_instance *ii, uint8_t *address, char *name, int32_t mtu, int32_t interface_identifier, int32_t nss_interface_identifier, ecm_db_iface_final_callback_t final, void *arg);
+void ecm_db_iface_add_bridge(struct ecm_db_iface_instance *ii, uint8_t *address, char *name, int32_t mtu, int32_t interface_identifier, int32_t ae_interface_identifier, ecm_db_iface_final_callback_t final, void *arg);
 #ifdef ECM_INTERFACE_VLAN_ENABLE
-void ecm_db_iface_add_vlan(struct ecm_db_iface_instance *ii, uint8_t *address, uint16_t vlan_tag, uint16_t vlan_tpid, char *name, int32_t mtu, int32_t interface_identifier, int32_t nss_interface_identifier, ecm_db_iface_final_callback_t final, void *arg);
+void ecm_db_iface_add_vlan(struct ecm_db_iface_instance *ii, uint8_t *address, uint16_t vlan_tag, uint16_t vlan_tpid, char *name, int32_t mtu, int32_t interface_identifier, int32_t ae_interface_identifier, ecm_db_iface_final_callback_t final, void *arg);
 #endif
 #ifdef ECM_INTERFACE_PPP_ENABLE
-void ecm_db_iface_add_pppoe(struct ecm_db_iface_instance *ii, uint16_t pppoe_session_id, uint8_t *remote_mac, char *name, int32_t mtu, int32_t interface_identifier, int32_t nss_interface_identifier, ecm_db_iface_final_callback_t final, void *arg);
+void ecm_db_iface_add_pppoe(struct ecm_db_iface_instance *ii, uint16_t pppoe_session_id, uint8_t *remote_mac, char *name, int32_t mtu, int32_t interface_identifier, int32_t ae_interface_identifier, ecm_db_iface_final_callback_t final, void *arg);
 #endif
-void ecm_db_iface_add_unknown(struct ecm_db_iface_instance *ii, uint32_t os_specific_ident, char *name, int32_t mtu, int32_t interface_identifier, int32_t nss_interface_identifier, ecm_db_iface_final_callback_t final, void *arg);
-void ecm_db_iface_add_loopback(struct ecm_db_iface_instance *ii, uint32_t os_specific_ident, char *name, int32_t mtu, int32_t interface_identifier, int32_t nss_interface_identifier, ecm_db_iface_final_callback_t final, void *arg);
+void ecm_db_iface_add_unknown(struct ecm_db_iface_instance *ii, uint32_t os_specific_ident, char *name, int32_t mtu, int32_t interface_identifier, int32_t ae_interface_identifier, ecm_db_iface_final_callback_t final, void *arg);
+void ecm_db_iface_add_loopback(struct ecm_db_iface_instance *ii, uint32_t os_specific_ident, char *name, int32_t mtu, int32_t interface_identifier, int32_t ae_interface_identifier, ecm_db_iface_final_callback_t final, void *arg);
 #ifdef ECM_INTERFACE_IPSEC_ENABLE
-void ecm_db_iface_add_ipsec_tunnel(struct ecm_db_iface_instance *ii, uint32_t os_specific_ident, char *name, int32_t mtu, int32_t interface_identifier, int32_t nss_interface_identifier, ecm_db_iface_final_callback_t final, void *arg);
+void ecm_db_iface_add_ipsec_tunnel(struct ecm_db_iface_instance *ii, uint32_t os_specific_ident, char *name, int32_t mtu, int32_t interface_identifier, int32_t ae_interface_identifier, ecm_db_iface_final_callback_t final, void *arg);
 #endif
 #ifdef ECM_INTERFACE_SIT_ENABLE
 bool ecm_db_iface_sit_daddr_is_null(struct ecm_db_iface_instance *ii);
-void ecm_db_iface_add_sit(struct ecm_db_iface_instance *ii, struct ecm_db_interface_info_sit *type_info, char *name, int32_t mtu, int32_t interface_identifier, int32_t nss_interface_identifier, ecm_db_iface_final_callback_t final, void *arg);
+void ecm_db_iface_add_sit(struct ecm_db_iface_instance *ii, struct ecm_db_interface_info_sit *type_info, char *name, int32_t mtu, int32_t interface_identifier, int32_t ae_interface_identifier, ecm_db_iface_final_callback_t final, void *arg);
 #endif
 #ifdef ECM_INTERFACE_TUNIPIP6_ENABLE
-void ecm_db_iface_add_tunipip6(struct ecm_db_iface_instance *ii, struct ecm_db_interface_info_tunipip6 *type_info, char *name, int32_t mtu, int32_t interface_identifier, int32_t nss_interface_identifier, ecm_db_iface_final_callback_t final, void *arg);
+void ecm_db_iface_add_tunipip6(struct ecm_db_iface_instance *ii, struct ecm_db_interface_info_tunipip6 *type_info, char *name, int32_t mtu, int32_t interface_identifier, int32_t ae_interface_identifier, ecm_db_iface_final_callback_t final, void *arg);
 #endif
 void ecm_db_node_add(struct ecm_db_node_instance *ni, struct ecm_db_iface_instance *ii, uint8_t *address, ecm_db_node_final_callback_t final, void *arg);
 void ecm_db_host_add(struct ecm_db_host_instance *hi, ip_addr_t address, bool on_link, ecm_db_host_final_callback_t final, void *arg);

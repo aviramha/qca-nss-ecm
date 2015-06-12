@@ -83,6 +83,7 @@
 #include "ecm_interface.h"
 #include "ecm_nss_ported_ipv6.h"
 #include "ecm_nss_ipv6.h"
+#include "ecm_nss_common.h"
 
 /*
  * Magic numbers
@@ -202,7 +203,7 @@ static void ecm_nss_ported_ipv6_connection_callback(void *app_data, struct nss_i
 			/*
 			 * Too many NSS rejections
 			 */
-			result_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_NSS;
+			result_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_ACCEL_ENGINE;
 		} else {
 			/*
 			 * Revert to decelerated
@@ -404,8 +405,8 @@ static void ecm_nss_ported_ipv6_connection_accelerate(struct ecm_front_end_conne
 	 */
 	from_nss_iface = from_ifaces[from_ifaces_first];
 	to_nss_iface = to_ifaces[to_ifaces_first];
-	from_nss_iface_id = ecm_db_iface_nss_interface_identifier_get(from_nss_iface);
-	to_nss_iface_id = ecm_db_iface_nss_interface_identifier_get(to_nss_iface);
+	from_nss_iface_id = ecm_db_iface_ae_interface_identifier_get(from_nss_iface);
+	to_nss_iface_id = ecm_db_iface_ae_interface_identifier_get(to_nss_iface);
 	if ((from_nss_iface_id < 0) || (to_nss_iface_id < 0)) {
 		DEBUG_TRACE("%p: from_nss_iface_id: %d, to_nss_iface_id: %d\n", npci, from_nss_iface_id, to_nss_iface_id);
 		ecm_db_connection_interfaces_deref(from_ifaces, from_ifaces_first);
@@ -1569,8 +1570,6 @@ static int ecm_nss_ported_ipv6_connection_state_get(struct ecm_front_end_connect
  */
 static struct ecm_nss_ported_ipv6_connection_instance *ecm_nss_ported_ipv6_connection_instance_alloc(
 								struct ecm_db_connection_instance *ci,
-								struct ecm_db_mapping_instance *src_mi,
-								struct ecm_db_mapping_instance *dest_mi,
 								int protocol,
 								bool can_accel)
 {
@@ -1616,6 +1615,7 @@ static struct ecm_nss_ported_ipv6_connection_instance *ecm_nss_ported_ipv6_conne
 #ifdef ECM_STATE_OUTPUT_ENABLE
 	feci->state_get = ecm_nss_ported_ipv6_connection_state_get;
 #endif
+	feci->ae_interface_number_by_dev_get = ecm_nss_common_get_interface_number_by_dev;
 
 	if (protocol == IPPROTO_TCP) {
 		npci->ported_accelerated_count_index = ECM_NSS_PORTED_IPV6_PROTO_TCP;
@@ -1861,14 +1861,25 @@ unsigned int ecm_nss_ported_ipv6_process(struct net_device *out_dev,
 		}
 
 		/*
+		 * Connection must have a front end instance associated with it
+		 */
+		feci = (struct ecm_front_end_connection_instance *)ecm_nss_ported_ipv6_connection_instance_alloc(nci, protocol, can_accel);
+		if (!feci) {
+			ecm_db_connection_deref(nci);
+			DEBUG_WARN("Failed to allocate front end\n");
+			return NF_ACCEPT;
+		}
+
+		/*
 		 * Get the src and destination mappings
 		 * For this we also need the interface lists which we also set upon the new connection while we are at it.
 		 * GGG TODO rework terms of "src/dest" - these need to be named consistently as from/to as per database terms.
 		 * GGG TODO The empty list checks should not be needed, mapping_establish_and_ref() should fail out if there is no list anyway.
 		 */
 		DEBUG_TRACE("%p: Create the 'from' interface heirarchy list\n", nci);
-		from_list_first = ecm_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, 6, protocol, in_dev, is_routed, in_dev, src_node_addr, dest_node_addr);
+		from_list_first = ecm_interface_heirarchy_construct(feci, from_list, ip_dest_addr, ip_src_addr, 6, protocol, in_dev, is_routed, in_dev, src_node_addr, dest_node_addr);
 		if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
+			feci->deref(feci);
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to obtain 'from' heirarchy list\n");
 			return NF_ACCEPT;
@@ -1876,9 +1887,10 @@ unsigned int ecm_nss_ported_ipv6_process(struct net_device *out_dev,
 		ecm_db_connection_from_interfaces_reset(nci, from_list, from_list_first);
 
 		DEBUG_TRACE("%p: Create source node\n", nci);
-		src_ni = ecm_nss_ipv6_node_establish_and_ref(in_dev, ip_src_addr, from_list, from_list_first, src_node_addr);
+		src_ni = ecm_nss_ipv6_node_establish_and_ref(feci, in_dev, ip_src_addr, from_list, from_list_first, src_node_addr);
 		ecm_db_connection_interfaces_deref(from_list, from_list_first);
 		if (!src_ni) {
+			feci->deref(feci);
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to establish source node\n");
 			return NF_ACCEPT;
@@ -1888,16 +1900,18 @@ unsigned int ecm_nss_ported_ipv6_process(struct net_device *out_dev,
 		src_mi = ecm_nss_ipv6_mapping_establish_and_ref(ip_src_addr, src_port);
 		if (!src_mi) {
 			ecm_db_node_deref(src_ni);
+			feci->deref(feci);
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to establish src mapping\n");
 			return NF_ACCEPT;
 		}
 
 		DEBUG_TRACE("%p: Create the 'to' interface heirarchy list\n", nci);
-		to_list_first = ecm_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, 6, protocol, out_dev, is_routed, in_dev, dest_node_addr, src_node_addr);
+		to_list_first = ecm_interface_heirarchy_construct(feci, to_list, ip_src_addr, ip_dest_addr, 6, protocol, out_dev, is_routed, in_dev, dest_node_addr, src_node_addr);
 		if (to_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_mapping_deref(src_mi);
 			ecm_db_node_deref(src_ni);
+			feci->deref(feci);
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to obtain 'to' heirarchy list\n");
 			return NF_ACCEPT;
@@ -1905,11 +1919,12 @@ unsigned int ecm_nss_ported_ipv6_process(struct net_device *out_dev,
 		ecm_db_connection_to_interfaces_reset(nci, to_list, to_list_first);
 
 		DEBUG_TRACE("%p: Create dest node\n", nci);
-		dest_ni = ecm_nss_ipv6_node_establish_and_ref(out_dev, ip_dest_addr, to_list, to_list_first, dest_node_addr);
+		dest_ni = ecm_nss_ipv6_node_establish_and_ref(feci, out_dev, ip_dest_addr, to_list, to_list_first, dest_node_addr);
 		ecm_db_connection_interfaces_deref(to_list, to_list_first);
 		if (!dest_ni) {
 			ecm_db_mapping_deref(src_mi);
 			ecm_db_node_deref(src_ni);
+			feci->deref(feci);
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to establish dest node\n");
 			return NF_ACCEPT;
@@ -1921,22 +1936,9 @@ unsigned int ecm_nss_ported_ipv6_process(struct net_device *out_dev,
 			ecm_db_node_deref(dest_ni);
 			ecm_db_mapping_deref(src_mi);
 			ecm_db_node_deref(src_ni);
+			feci->deref(feci);
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to establish dest mapping\n");
-			return NF_ACCEPT;
-		}
-
-		/*
-		 * Connection must have a front end instance associated with it
-		 */
-		feci = (struct ecm_front_end_connection_instance *)ecm_nss_ported_ipv6_connection_instance_alloc(nci, src_mi, dest_mi, protocol, can_accel);
-		if (!feci) {
-			ecm_db_mapping_deref(dest_mi);
-			ecm_db_node_deref(dest_ni);
-			ecm_db_mapping_deref(src_mi);
-			ecm_db_node_deref(src_ni);
-			ecm_db_connection_deref(nci);
-			DEBUG_WARN("Failed to allocate front end\n");
 			return NF_ACCEPT;
 		}
 
@@ -1945,11 +1947,11 @@ unsigned int ecm_nss_ported_ipv6_process(struct net_device *out_dev,
 		 */
 		dci = ecm_classifier_default_instance_alloc(nci, protocol, ecm_dir, src_port, dest_port);
 		if (!dci) {
-			feci->deref(feci);
 			ecm_db_mapping_deref(dest_mi);
 			ecm_db_node_deref(dest_ni);
 			ecm_db_mapping_deref(src_mi);
 			ecm_db_node_deref(src_ni);
+			feci->deref(feci);
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to allocate default classifier\n");
 			return NF_ACCEPT;
@@ -1971,6 +1973,7 @@ unsigned int ecm_nss_ported_ipv6_process(struct net_device *out_dev,
 				ecm_db_node_deref(dest_ni);
 				ecm_db_mapping_deref(src_mi);
 				ecm_db_node_deref(src_ni);
+				feci->deref(feci);
 				ecm_db_connection_deref(nci);
 				DEBUG_WARN("Failed to allocate classifiers assignments\n");
 				return NF_ACCEPT;
@@ -2026,12 +2029,12 @@ unsigned int ecm_nss_ported_ipv6_process(struct net_device *out_dev,
 		/*
 		 * No longer need referenecs to the objects we created
 		 */
-		feci->deref(feci);
 		dci->base.deref((struct ecm_classifier_instance *)dci);
 		ecm_db_mapping_deref(dest_mi);
 		ecm_db_node_deref(dest_ni);
 		ecm_db_mapping_deref(src_mi);
 		ecm_db_node_deref(src_ni);
+		feci->deref(feci);
 	}
 
 	/*

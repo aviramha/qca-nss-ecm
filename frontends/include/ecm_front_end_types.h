@@ -42,7 +42,7 @@ enum ecm_front_end_acceleration_modes {
 	ECM_FRONT_END_ACCELERATION_MODE_FAIL_DEFUNCT = -7,	/* Acceleration has permanently failed due to the connection has become defunct */
 	ECM_FRONT_END_ACCELERATION_MODE_FAIL_DECEL = -6,	/* Acceleration has permanently failed due to deceleration malfunction */
 	ECM_FRONT_END_ACCELERATION_MODE_FAIL_NO_ACTION = -5,	/* Acceleration has permanently failed due to too many offloads that were rejected without any packets being offloaded */
-	ECM_FRONT_END_ACCELERATION_MODE_FAIL_NSS = -4,		/* Acceleration has permanently failed due to too many NSS NAK's */
+	ECM_FRONT_END_ACCELERATION_MODE_FAIL_ACCEL_ENGINE = -4,		/* Acceleration has permanently failed due to too many accel engine NAK's */
 	ECM_FRONT_END_ACCELERATION_MODE_FAIL_DRIVER = -3,	/* Acceleration has permanently failed due to too many driver interaction failures */
 	ECM_FRONT_END_ACCELERATION_MODE_FAIL_RULE = -2,		/* Acceleration has permanently failed due to bad rule data */
 	ECM_FRONT_END_ACCELERATION_MODE_FAIL_DENIED = -1,	/* Acceleration has permanently failed due to can_accel denying accel */
@@ -73,6 +73,7 @@ typedef int (*ecm_front_end_connection_state_get_callback_t)(struct ecm_front_en
 											 * Get state output.  Return 0 on success.
 											 */
 #endif
+typedef int32_t (*ecm_front_end_connection_ae_interface_number_by_dev_get_method_t)(struct net_device *dev);
 
 /*
  * Acceleration limiting modes.
@@ -86,15 +87,15 @@ typedef int (*ecm_front_end_connection_state_get_callback_t)(struct ecm_front_en
  */
 struct ecm_front_end_connection_mode_stats {
 	bool decelerate_pending;		/* Decel was attempted during pending accel - will be actioned when accel is done */
-	bool flush_happened;			/* A flush message was received from NSS before we received an ACK or NACK. (NSS Messaging sequence/ordering workaround) */
+	bool flush_happened;			/* A flush message was received from accel engine before we received an ACK or NACK. (Accel engine Messaging sequence/ordering workaround) */
 	uint32_t flush_happened_total;		/* Total of times we see flush_happened */
-	uint32_t no_action_seen_total;		/* Total of times acceleration was ended by the NSS itself without any offload action */
-	uint32_t no_action_seen;		/* Count of times consecutive  acceleration was ended by the NSS itself without any offload action */
+	uint32_t no_action_seen_total;		/* Total of times acceleration was ended by the accel engine itself without any offload action */
+	uint32_t no_action_seen;		/* Count of times consecutive  acceleration was ended by the accel engine itself without any offload action */
 	uint32_t no_action_seen_limit;		/* Limit on consecutive no-action at which point offload permanently fails out */
 	uint32_t driver_fail_total;		/* Total times driver failed to send our command */
 	uint32_t driver_fail;			/* Count of consecutive times driver failed to send our command, when this reaches driver_fail_limit acceleration will permanently fail */
 	uint32_t driver_fail_limit;		/* Limit on drivers consecutive fails at which point offload permanently fails out */
-	uint32_t nss_nack_total;		/* Total times NSS NAK's an accel command */
+	uint32_t nss_nack_total;		/* Total times accel engine NAK's an accel command */
 	uint32_t nss_nack;			/* Count of consecutive times driver failed to ack */
 	uint32_t nss_nack_limit;		/* Limit on consecutive nacks at which point offload permanently fails out */
 	unsigned long cmd_time_begun;		/* Time captured when an accel or decel request begun */
@@ -112,6 +113,8 @@ struct ecm_front_end_connection_instance {
 	ecm_front_end_connection_accel_state_get_method_t accel_state_get;	/* Get the acceleration state */
 	ecm_front_end_connection_action_seen_method_t action_seen;		/* Acceleration action has occurred */
 	ecm_front_end_connection_accel_ceased_method_t accel_ceased;		/* Acceleration has stopped */
+	ecm_front_end_connection_ae_interface_number_by_dev_get_method_t ae_interface_number_by_dev_get;
+										/* Get the acceleration engine interface number from the dev instance */
 #ifdef ECM_STATE_OUTPUT_ENABLE
 	ecm_front_end_connection_state_get_callback_t state_get;		/* Obtain state for this object */
 #endif

@@ -168,7 +168,8 @@ static int ecm_nss_ipv6_stopped = 0;			/* When non-zero further traffic will not
  *
  * Returns NULL on failure.
  */
-struct ecm_db_node_instance *ecm_nss_ipv6_node_establish_and_ref(struct net_device *dev, ip_addr_t addr,
+struct ecm_db_node_instance *ecm_nss_ipv6_node_establish_and_ref(struct ecm_front_end_connection_instance *feci,
+							struct net_device *dev, ip_addr_t addr,
 							struct ecm_db_iface_instance *interface_list[], int32_t interface_list_first,
 							uint8_t *given_node_addr)
 {
@@ -288,7 +289,7 @@ struct ecm_db_node_instance *ecm_nss_ipv6_node_establish_and_ref(struct net_devi
 	/*
 	 * No node - establish iface
 	 */
-	ii = ecm_interface_establish_and_ref(dev);
+	ii = ecm_interface_establish_and_ref(feci, dev);
 	if (!ii) {
 		DEBUG_WARN("Failed to establish iface\n");
 		return NULL;
@@ -659,6 +660,7 @@ bool ecm_nss_ipv6_connection_regenerate(struct ecm_db_connection_instance *ci, e
 	uint8_t dest_node_addr[ETH_ALEN];
 	int assignment_count;
 	struct ecm_classifier_instance *assignments[ECM_CLASSIFIER_TYPES];
+	struct ecm_front_end_connection_instance *feci;
 
 	DEBUG_INFO("%p: re-gen needed\n", ci);
 
@@ -698,8 +700,10 @@ bool ecm_nss_ipv6_connection_regenerate(struct ecm_db_connection_instance *ci, e
 
 	ecm_db_connection_to_node_address_get(ci, dest_node_addr);
 
+	feci = ecm_db_connection_front_end_get_and_ref(ci);
+
 	DEBUG_TRACE("%p: Update the 'from' interface heirarchy list\n", ci);
-	from_list_first = ecm_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, 6, protocol, in_dev, is_routed, in_dev, src_node_addr, dest_node_addr);
+	from_list_first = ecm_interface_heirarchy_construct(feci, from_list, ip_dest_addr, ip_src_addr, 6, protocol, in_dev, is_routed, in_dev, src_node_addr, dest_node_addr);
 	if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 		goto ecm_ipv6_retry_regen;
 	}
@@ -708,11 +712,12 @@ bool ecm_nss_ipv6_connection_regenerate(struct ecm_db_connection_instance *ci, e
 	ecm_db_connection_interfaces_deref(from_list, from_list_first);
 
 	DEBUG_TRACE("%p: Update the 'to' interface heirarchy list\n", ci);
-	to_list_first = ecm_interface_heirarchy_construct(to_list, ip_src_addr, ip_dest_addr, 6, protocol, out_dev, is_routed, in_dev, dest_node_addr, src_node_addr);
+	to_list_first = ecm_interface_heirarchy_construct(feci, to_list, ip_src_addr, ip_dest_addr, 6, protocol, out_dev, is_routed, in_dev, dest_node_addr, src_node_addr);
 	if (to_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 		goto ecm_ipv6_retry_regen;
 	}
 
+	feci->deref(feci);
 	ecm_db_connection_to_interfaces_reset(ci, to_list, to_list_first);
 	ecm_db_connection_interfaces_deref(to_list, to_list_first);
 
@@ -769,6 +774,7 @@ bool ecm_nss_ipv6_connection_regenerate(struct ecm_db_connection_instance *ci, e
 	return true;
 
 ecm_ipv6_retry_regen:
+	feci->deref(feci);
 	ecm_db_connection_classifier_generation_change(ci);
 	return false;
 }
