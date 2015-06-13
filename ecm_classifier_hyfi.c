@@ -46,7 +46,6 @@
 #include <net/netfilter/ipv4/nf_conntrack_ipv4.h>
 #include <net/netfilter/ipv4/nf_defrag_ipv4.h>
 
-#include <nss_api_if.h>
 #include <hyfi_ecm.h>
 #include <hyfi_hash.h>
 
@@ -310,9 +309,9 @@ hyfi_classifier_done:
 
 /*
  * ecm_classifier_hyfi_sync_to_v4()
- *	Front end is pushing NSS state to us
+ *	Front end is pushing accel engine state to us
  */
-static void ecm_classifier_hyfi_sync_to_v4(struct ecm_classifier_instance *aci, struct nss_ipv4_conn_sync *sync)
+static void ecm_classifier_hyfi_sync_to_v4(struct ecm_classifier_instance *aci, struct ecm_classifier_rule_sync *sync)
 {
 	struct ecm_classifier_hyfi_instance *chfi;
 	struct ecm_db_connection_instance *ci;
@@ -375,9 +374,9 @@ static void ecm_classifier_hyfi_sync_to_v4(struct ecm_classifier_instance *aci, 
 
 /*
  * ecm_classifier_hyfi_sync_from_v4()
- *	Front end is retrieving NSS state from us
+ *	Front end is retrieving accel engine state from us
  */
-static void ecm_classifier_hyfi_sync_from_v4(struct ecm_classifier_instance *aci, struct nss_ipv4_rule_create_msg *nircm)
+static void ecm_classifier_hyfi_sync_from_v4(struct ecm_classifier_instance *aci, struct ecm_classifier_rule_create *ecrc)
 {
 	struct ecm_classifier_hyfi_instance *chfi;
 
@@ -387,9 +386,9 @@ static void ecm_classifier_hyfi_sync_from_v4(struct ecm_classifier_instance *aci
 
 /*
  * ecm_classifier_hyfi_sync_to_v6()
- *	Front end is pushing NSS state to us
+ *	Front end is pushing accel engine state to us
  */
-static void ecm_classifier_hyfi_sync_to_v6(struct ecm_classifier_instance *aci, struct nss_ipv6_conn_sync *sync)
+static void ecm_classifier_hyfi_sync_to_v6(struct ecm_classifier_instance *aci, struct ecm_classifier_rule_sync *sync)
 {
 	struct ecm_classifier_hyfi_instance *chfi;
 	struct ecm_db_connection_instance *ci;
@@ -446,9 +445,9 @@ static void ecm_classifier_hyfi_sync_to_v6(struct ecm_classifier_instance *aci, 
 
 /*
  * ecm_classifier_hyfi_sync_from_v6()
- *	Front end is retrieving NSS state from us
+ *	Front end is retrieving accel engine state from us
  */
-static void ecm_classifier_hyfi_sync_from_v6(struct ecm_classifier_instance *aci, struct nss_ipv6_rule_create_msg *nircm)
+static void ecm_classifier_hyfi_sync_from_v6(struct ecm_classifier_instance *aci, struct ecm_classifier_rule_create *ecrc)
 {
 	struct ecm_classifier_hyfi_instance *chfi;
 

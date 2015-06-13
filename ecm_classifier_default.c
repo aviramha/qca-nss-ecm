@@ -57,8 +57,6 @@
  */
 #define DEBUG_LEVEL ECM_CLASSIFIER_DEFAULT_DEBUG_LEVEL
 
-#include <nss_api_if.h>
-
 #include "ecm_types.h"
 #include "ecm_db_types.h"
 #include "ecm_state.h"
@@ -389,9 +387,9 @@ static void ecm_classifier_default_last_process_response_get(struct ecm_classifi
 
 /*
  * ecm_classifier_default_sync_to_v4()
- *	Front end is pushing NSS state to us
+ *	Front end is pushing accel engine state to us
  */
-static void ecm_classifier_default_sync_to_v4(struct ecm_classifier_instance *aci, struct nss_ipv4_conn_sync *sync)
+static void ecm_classifier_default_sync_to_v4(struct ecm_classifier_instance *aci, struct ecm_classifier_rule_sync *sync)
 {
 	struct ecm_classifier_default_internal_instance *cdii __attribute__((unused));
 
@@ -401,9 +399,9 @@ static void ecm_classifier_default_sync_to_v4(struct ecm_classifier_instance *ac
 
 /*
  * ecm_classifier_default_sync_from_v4()
- *	Front end is retrieving NSS state from us
+ *	Front end is retrieving accel engine state from us
  */
-static void ecm_classifier_default_sync_from_v4(struct ecm_classifier_instance *aci, struct nss_ipv4_rule_create_msg *nircm)
+static void ecm_classifier_default_sync_from_v4(struct ecm_classifier_instance *aci, struct ecm_classifier_rule_create *ecrc)
 {
 	struct ecm_classifier_default_internal_instance *cdii __attribute__((unused));
 
@@ -413,9 +411,9 @@ static void ecm_classifier_default_sync_from_v4(struct ecm_classifier_instance *
 
 /*
  * ecm_classifier_default_sync_to_v6()
- *	Front end is pushing NSS state to us
+ *	Front end is pushing accel engine state to us
  */
-static void ecm_classifier_default_sync_to_v6(struct ecm_classifier_instance *aci, struct nss_ipv6_conn_sync *sync)
+static void ecm_classifier_default_sync_to_v6(struct ecm_classifier_instance *aci, struct ecm_classifier_rule_sync *sync)
 {
 	struct ecm_classifier_default_internal_instance *cdii __attribute__((unused));
 
@@ -425,9 +423,9 @@ static void ecm_classifier_default_sync_to_v6(struct ecm_classifier_instance *ac
 
 /*
  * ecm_classifier_default_sync_from_v6()
- *	Front end is retrieving NSS state from us
+ *	Front end is retrieving accel engine state from us
  */
-static void ecm_classifier_default_sync_from_v6(struct ecm_classifier_instance *aci, struct nss_ipv6_rule_create_msg *nircm)
+static void ecm_classifier_default_sync_from_v6(struct ecm_classifier_instance *aci, struct ecm_classifier_rule_create *ecrc)
 {
 	struct ecm_classifier_default_internal_instance *cdii __attribute__((unused));
 

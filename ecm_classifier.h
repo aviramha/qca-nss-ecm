@@ -103,20 +103,41 @@ struct ecm_classifier_process_response {
 };
 
 /*
+ * Sync rule structure.
+ *	Acceleration engine's sync parameters will be stored
+ * in this data structure to update the classifiers.
+ */
+struct ecm_classifier_rule_sync {
+	uint32_t flow_tx_packet_count;
+	uint32_t return_tx_packet_count;
+	uint32_t reason;
+};
+
+/*
+ * Create rule structure.
+ *	Additional create rule parameters from the classifiers
+ * will be copied to this data structure before pushing them to
+ * the underlying accelaration engine.
+ */
+struct ecm_classifier_rule_create {
+
+};
+
+/*
  * To be implemented by all classifiers
  */
 typedef void (*ecm_classifier_ref_method_t)(struct ecm_classifier_instance *ci);
 typedef int (*ecm_classifier_deref_callback_t)(struct ecm_classifier_instance *ci);
 typedef void (*ecm_classifier_process_callback_t)(struct ecm_classifier_instance *ci, ecm_tracker_sender_type_t sender, struct ecm_tracker_ip_header *ip_hdr, struct sk_buff *skb, struct ecm_classifier_process_response *process_response);
 											/* Process new data for connection, process_response is populated with the response of processing */
-typedef void (*ecm_classifier_sync_from_v4_callback_t)(struct ecm_classifier_instance *ci, struct nss_ipv4_rule_create_msg *nircm);
-											/* Sync the NSS state with state from the classifier */
-typedef void (*ecm_classifier_sync_to_v4_callback_t)(struct ecm_classifier_instance *ci, struct nss_ipv4_conn_sync *sync);
-											/* Sync the classifier state with current NSS state */
-typedef void (*ecm_classifier_sync_from_v6_callback_t)(struct ecm_classifier_instance *ci, struct nss_ipv6_rule_create_msg *nircm);
-											/* Sync the NSS state with state from the classifier */
-typedef void (*ecm_classifier_sync_to_v6_callback_t)(struct ecm_classifier_instance *ci, struct nss_ipv6_conn_sync *sync);
-											/* Sync the classifier state with current NSS state */
+typedef void (*ecm_classifier_sync_from_v4_callback_t)(struct ecm_classifier_instance *ci, struct ecm_classifier_rule_create *ecrc);
+											/* Sync the accel engine state with state from the classifier */
+typedef void (*ecm_classifier_sync_to_v4_callback_t)(struct ecm_classifier_instance *ci, struct ecm_classifier_rule_sync *sync);
+											/* Sync the classifier state with current accel engine state */
+typedef void (*ecm_classifier_sync_from_v6_callback_t)(struct ecm_classifier_instance *ci, struct ecm_classifier_rule_create *ecrc);
+											/* Sync the accel engine state with state from the classifier */
+typedef void (*ecm_classifier_sync_to_v6_callback_t)(struct ecm_classifier_instance *ci, struct ecm_classifier_rule_sync *sync);
+											/* Sync the classifier state with current accel engine state */
 typedef ecm_classifier_type_t (*ecm_classifier_type_get_callback_t)(struct ecm_classifier_instance *ci);
 											/* Get type of classifier this is */
 typedef bool (*ecm_classifier_reclassify_allowed_get_callback_t)(struct ecm_classifier_instance *ci);
@@ -139,11 +160,11 @@ struct ecm_classifier_instance {
 
 	ecm_classifier_process_callback_t process;	/* Process new skb */
 	ecm_classifier_sync_from_v4_callback_t sync_from_v4;
-							/* Sync the NSS with state from the classifier */
-	ecm_classifier_sync_to_v4_callback_t sync_to_v4;/* Sync the classifier with state from the NSS */
+							/* Sync the accel engine with state from the classifier */
+	ecm_classifier_sync_to_v4_callback_t sync_to_v4;/* Sync the classifier with state from the accel engine */
 	ecm_classifier_sync_from_v6_callback_t sync_from_v6;
-							/* Sync the NSS with state from the classifier */
-	ecm_classifier_sync_to_v6_callback_t sync_to_v6;/* Sync the classifier with state from the NSS */
+							/* Sync the accel engine with state from the classifier */
+	ecm_classifier_sync_to_v6_callback_t sync_to_v6;/* Sync the classifier with state from the accel engine */
 	ecm_classifier_type_get_callback_t type_get;	/* Get type of classifier */
 	ecm_classifier_reclassify_allowed_get_callback_t reclassify_allowed;
 							/* Get whether reclassification is allowed */

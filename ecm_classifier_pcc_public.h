@@ -15,7 +15,7 @@
  */
 
 /*
- * Structure used to synchronise a classifier instance with the state as presented by the NSS
+ * Structure used to synchronise a classifier instance with the state as presented by the accel engine
  */
 enum ecm_classifier_pcc_results {
 	ECM_CLASSIFIER_PCC_RESULT_NOT_YET,		/* Accel is neither permitted nor denied just yet - try again later */

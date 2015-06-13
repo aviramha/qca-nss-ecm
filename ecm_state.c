@@ -37,8 +37,6 @@
  */
 #define DEBUG_LEVEL ECM_STATE_DEBUG_LEVEL
 
-#include <nss_api_if.h>
-
 #include "ecm_types.h"
 #include "ecm_db_types.h"
 #include "ecm_state.h"

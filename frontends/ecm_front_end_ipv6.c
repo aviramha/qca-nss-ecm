@@ -34,8 +34,6 @@
  */
 #define DEBUG_LEVEL ECM_FRONT_END_IPV6_DEBUG_LEVEL
 
-#include <nss_api_if.h>
-
 #include "ecm_types.h"
 #include "ecm_db_types.h"
 #include "ecm_state.h"
@@ -59,7 +57,7 @@ void ecm_front_end_ipv6_stop(int num)
 	 */
 #ifdef CONFIG_OF
 	/*
-	 * TODO: Check the other platforms and use the correct APIs for those platforms.
+	 * Check the other platforms and use the correct APIs for those platforms.
 	 */
 	if (!of_machine_is_compatible("qcom,ipq8064")) {
 		return;
@@ -80,7 +78,7 @@ int ecm_front_end_ipv6_init(struct dentry *dentry)
 	 */
 #ifdef CONFIG_OF
 	/*
-	 * TODO: Check the other platforms and use the correct APIs for those platforms.
+	 * Check the other platforms and use the correct APIs for those platforms.
 	 */
 	if (!of_machine_is_compatible("qcom,ipq8064")) {
 		return -1;
@@ -101,7 +99,7 @@ void ecm_front_end_ipv6_exit(void)
 	 */
 #ifdef CONFIG_OF
 	/*
-	 * TODO: Check the other platforms and use the correct APIs for those platforms.
+	 * Check the other platforms and use the correct APIs for those platforms.
 	 */
 	if (!of_machine_is_compatible("qcom,ipq8064")) {
 		return;

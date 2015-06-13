@@ -17,7 +17,7 @@
 struct ecm_classifier_default_instance;
 
 /*
- * Structure used to synchronise a classifier instance with the state as presented by the NSS
+ * Structure used to synchronise a classifier instance with the state as presented by the accel engine
  */
 struct ecm_classifier_default_sync {
 	uint8_t qos;

@@ -79,8 +79,6 @@
  */
 #define DEBUG_LEVEL ECM_INTERFACE_DEBUG_LEVEL
 
-#include <nss_api_if.h>
-
 #ifdef ECM_MULTICAST_ENABLE
 #include <mc_ecm.h>
 #endif
@@ -1345,7 +1343,7 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct ecm_front_e
 			 */
 			memcpy(type_info.vlan.address, dev->dev_addr, 6);
 			type_info.vlan.vlan_tag = vlan_dev_vlan_id(dev);
-			type_info.vlan.vlan_tpid = VLAN_CTAG_TPID;
+			type_info.vlan.vlan_tpid = ETH_P_8021Q;
 			DEBUG_TRACE("Net device: %p is VLAN, mac: %pM, vlan_id: %x vlan_tpid: %x\n",
 					dev, type_info.vlan.address, type_info.vlan.vlan_tag, type_info.vlan.vlan_tpid);
 

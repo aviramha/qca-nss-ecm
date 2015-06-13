@@ -16,6 +16,16 @@
 
 #include "ecm_nss_ipv6.h"
 
+/*
+ * IPv4 rule sync reasons.
+ */
+enum ecm_front_end_ipv6_rule_sync_reason {
+	ECM_FRONT_END_IPV6_RULE_SYNC_REASON_STATS = 0,	/* Sync is to synchronize stats */
+	ECM_FRONT_END_IPV6_RULE_SYNC_REASON_FLUSH,	/* Sync is to flush a cache entry */
+	ECM_FRONT_END_IPV6_RULE_SYNC_REASON_EVICT,	/*Sync is to evict a cache entry */
+	ECM_FRONT_END_IPV6_RULE_SYNC_REASON_DESTROY	/* Sync is to destroy a cache entry */
+};
+
 extern void ecm_front_end_ipv6_stop(int num);
 extern int ecm_front_end_ipv6_init(struct dentry *dentry);
 extern void ecm_front_end_ipv6_exit(void);

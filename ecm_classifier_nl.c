@@ -58,8 +58,6 @@
  */
 #define DEBUG_LEVEL ECM_CLASSIFIER_NL_DEBUG_LEVEL
 
-#include <nss_api_if.h>
-
 #include "ecm_types.h"
 #include "ecm_db_types.h"
 #include "ecm_state.h"
@@ -70,7 +68,10 @@
 #include "ecm_tracker_tcp.h"
 #include "ecm_classifier_nl.h"
 #include "ecm_db.h"
-#include "ecm_classifier_nl.h"
+#include "ecm_front_end_ipv4.h"
+#ifdef ECM_IPV6_ENABLE
+#include "ecm_front_end_ipv6.h"
+#endif
 
 /*
  * Magic numbers
@@ -569,7 +570,7 @@ ecm_classifier_nl_process_mark(struct ecm_classifier_nl_instance *cnli,
 
 	/*
 	 * we need to make sure to propagate the new mark to the
-	 * NSS if the connection has been accelerated.  to do that,
+	 * accel engine if the connection has been accelerated.  to do that,
 	 * since there's no way to directly update an offload rule,
 	 * we simply decelerate the connection which should result
 	 * in a re-acceleration when the next packet is processed
@@ -665,14 +666,11 @@ static void ecm_classifier_nl_process(struct ecm_classifier_instance *aci, ecm_t
 
 /*
  * ecm_classifier_nl_sync_to_v4()
- *	Front end is pushing NSS state to us
+ *	Front end is pushing accel engine state to us
  */
-static void ecm_classifier_nl_sync_to_v4(struct ecm_classifier_instance *aci, struct nss_ipv4_conn_sync *sync)
+static void ecm_classifier_nl_sync_to_v4(struct ecm_classifier_instance *aci, struct ecm_classifier_rule_sync *sync)
 {
-	int accel_ok;
 	struct ecm_classifier_nl_instance *cnli;
-
-	accel_ok = 0;
 
 	if (!(sync->flow_tx_packet_count || sync->return_tx_packet_count)) {
 		/*
@@ -686,36 +684,32 @@ static void ecm_classifier_nl_sync_to_v4(struct ecm_classifier_instance *aci, st
 	DEBUG_CHECK_MAGIC(cnli, ECM_CLASSIFIER_NL_INSTANCE_MAGIC, "%p: magic failed", cnli);
 
 	switch(sync->reason) {
-	case NSS_IPV4_RULE_SYNC_REASON_FLUSH:
+	case ECM_FRONT_END_IPV4_RULE_SYNC_REASON_FLUSH:
 		/* do nothing */
 		DEBUG_TRACE("%p: nl_sync_to_v4: SYNC_FLUSH\n", cnli);
 		break;
-	case NSS_IPV4_RULE_SYNC_REASON_EVICT:
+	case ECM_FRONT_END_IPV4_RULE_SYNC_REASON_EVICT:
 		/* do nothing */
 		DEBUG_TRACE("%p: nl_sync_to_v4: SYNC_EVICT\n", cnli);
 		break;
-	case NSS_IPV4_RULE_SYNC_REASON_DESTROY:
+	case ECM_FRONT_END_IPV4_RULE_SYNC_REASON_DESTROY:
 		DEBUG_TRACE("%p: nl_sync_to_v4: SYNC_DESTROY\n", cnli);
 		break;
-	case NSS_IPV4_RULE_SYNC_REASON_STATS:
+	case ECM_FRONT_END_IPV4_RULE_SYNC_REASON_STATS:
 		DEBUG_TRACE("%p: nl_sync_to_v4: SYNC_STATS\n", cnli);
-		accel_ok = 1;
+		ecm_classifier_nl_genl_msg_ACCEL_OK(cnli);
 		break;
 	default:
 		DEBUG_TRACE("%p: nl_sync_to_v4: unsupported reason\n", cnli);
 		break;
 	}
-
-	if (accel_ok) {
-		ecm_classifier_nl_genl_msg_ACCEL_OK(cnli);
-	}
 }
 
 /*
  * ecm_classifier_nl_sync_from_v4()
- *	Front end is retrieving NSS state from us
+ *	Front end is retrieving accel engine state from us
  */
-static void ecm_classifier_nl_sync_from_v4(struct ecm_classifier_instance *aci, struct nss_ipv4_rule_create_msg *nircm)
+static void ecm_classifier_nl_sync_from_v4(struct ecm_classifier_instance *aci, struct ecm_classifier_rule_create *ecrc)
 {
 	struct ecm_classifier_nl_instance *cnli;
 
@@ -725,9 +719,9 @@ static void ecm_classifier_nl_sync_from_v4(struct ecm_classifier_instance *aci, 
 
 /*
  * ecm_classifier_nl_sync_to_v6()
- *	Front end is pushing NSS state to us
+ *	Front end is pushing accel engine state to us
  */
-static void ecm_classifier_nl_sync_to_v6(struct ecm_classifier_instance *aci, struct nss_ipv6_conn_sync *sync)
+static void ecm_classifier_nl_sync_to_v6(struct ecm_classifier_instance *aci, struct ecm_classifier_rule_sync *sync)
 {
 	struct ecm_classifier_nl_instance *cnli;
 
@@ -748,19 +742,19 @@ static void ecm_classifier_nl_sync_to_v6(struct ecm_classifier_instance *aci, st
 	 * and that acceleration is continuing - acceleration is OK
 	 */
 	switch(sync->reason) {
-	case NSS_IPV6_RULE_SYNC_REASON_FLUSH:
+	case ECM_FRONT_END_IPV6_RULE_SYNC_REASON_FLUSH:
 		/* do nothing */
 		DEBUG_TRACE("%p: nl_sync_to_v6: SYNC_FLUSH\n", cnli);
 		break;
-	case NSS_IPV6_RULE_SYNC_REASON_EVICT:
+	case ECM_FRONT_END_IPV6_RULE_SYNC_REASON_EVICT:
 		/* do nothing */
 		DEBUG_TRACE("%p: nl_sync_to_v6: SYNC_EVICT\n", cnli);
 		break;
-	case NSS_IPV6_RULE_SYNC_REASON_DESTROY:
+	case ECM_FRONT_END_IPV6_RULE_SYNC_REASON_DESTROY:
 		/* do nothing */
 		DEBUG_TRACE("%p: nl_sync_to_v6: SYNC_DESTROY\n", cnli);
 		break;
-	case NSS_IPV6_RULE_SYNC_REASON_STATS:
+	case ECM_FRONT_END_IPV6_RULE_SYNC_REASON_STATS:
 		DEBUG_TRACE("%p: nl_sync_to_v6: SYNC_STATS\n", cnli);
 		ecm_classifier_nl_genl_msg_ACCEL_OK(cnli);
 		break;
@@ -772,9 +766,9 @@ static void ecm_classifier_nl_sync_to_v6(struct ecm_classifier_instance *aci, st
 
 /*
  * ecm_classifier_nl_sync_from_v6()
- *	Front end is retrieving NSS state from us
+ *	Front end is retrieving accel engine state from us
  */
-static void ecm_classifier_nl_sync_from_v6(struct ecm_classifier_instance *aci, struct nss_ipv6_rule_create_msg *nircm)
+static void ecm_classifier_nl_sync_from_v6(struct ecm_classifier_instance *aci, struct ecm_classifier_rule_create *ecrc)
 {
 	struct ecm_classifier_nl_instance *cnli;
 

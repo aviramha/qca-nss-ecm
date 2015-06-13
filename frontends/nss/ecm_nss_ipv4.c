@@ -1561,6 +1561,7 @@ static void ecm_nss_ipv4_net_dev_callback(void *app_data, struct nss_ipv4_msg *n
 	struct ecm_classifier_instance *assignments[ECM_CLASSIFIER_TYPES];
 	int aci_index;
 	int assignment_count;
+	struct ecm_classifier_rule_sync class_sync;
 
 	/*
 	 * Only respond to sync messages
@@ -1695,15 +1696,22 @@ static void ecm_nss_ipv4_net_dev_callback(void *app_data, struct nss_ipv4_msg *n
 	}
 
 	/*
+	 * Copy the sync data to the classifier sync structure to
+	 * update the classifiers' stats.
+	 */
+	class_sync.flow_tx_packet_count = sync->flow_tx_packet_count;
+	class_sync.return_tx_packet_count = sync->return_tx_packet_count;
+	class_sync.reason = sync->reason;
+
+	/*
 	 * Sync assigned classifiers
 	 */
 	assignment_count = ecm_db_connection_classifier_assignments_get_and_ref(ci, assignments);
 	for (aci_index = 0; aci_index < assignment_count; ++aci_index) {
 		struct ecm_classifier_instance *aci;
-
 		aci = assignments[aci_index];
 		DEBUG_TRACE("%p: sync to: %p, type: %d\n", feci, aci, aci->type_get(aci));
-		aci->sync_to_v4(aci, sync);
+		aci->sync_to_v4(aci, &class_sync);
 	}
 	ecm_db_connection_assignments_release(assignment_count, assignments);
 

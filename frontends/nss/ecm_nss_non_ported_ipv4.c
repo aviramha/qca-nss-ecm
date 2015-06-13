@@ -955,10 +955,15 @@ static void ecm_nss_non_ported_ipv4_connection_accelerate(struct ecm_front_end_c
 	assignment_count = ecm_db_connection_classifier_assignments_get_and_ref(feci->ci, assignments);
 	for (aci_index = 0; aci_index < assignment_count; ++aci_index) {
 		struct ecm_classifier_instance *aci;
-
+		struct ecm_classifier_rule_create ecrc;
+		/*
+		 * NOTE: The current classifiers do not sync anything to the underlying accel engines.
+		 * In the future, if any of the classifiers wants to pass any parameter, these parameters
+		 * should be received via this object and copied to the accel engine's create object (nircm).
+		*/
 		aci = assignments[aci_index];
 		DEBUG_TRACE("%p: sync from: %p, type: %d\n", nnpci, aci, aci->type_get(aci));
-		aci->sync_from_v4(aci, nircm);
+		aci->sync_from_v4(aci, &ecrc);
 	}
 	ecm_db_connection_assignments_release(assignment_count, assignments);
 
