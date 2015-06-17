@@ -73,7 +73,7 @@ static int ecm_state_dev_major_id = 0;			/* Major ID of registered char dev from
  */
 #define ECM_STATE_FILE_PREFIX_SIZE 128
 #define ECM_STATE_FILE_PREFIX_LEVELS_MAX 10
-#define ECM_STATE_FILE_BUFFER_SIZE 12288
+#define ECM_STATE_FILE_BUFFER_SIZE 32768
 
 /*
  * Output selection flags
