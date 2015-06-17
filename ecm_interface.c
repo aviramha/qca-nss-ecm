@@ -3205,7 +3205,16 @@ static void ecm_interface_mtu_change(struct net_device *dev)
 	 */
 	ecm_db_iface_mtu_reset(ii, mtu);
 	DEBUG_TRACE("%p (%s): MTU Changed to: %d\n", dev, dev->name, mtu);
-	ecm_interface_regenerate_connections(ii);
+	if (netif_is_bond_slave(dev)) {
+		struct net_device *master = NULL;
+		master = ecm_interface_get_and_hold_dev_master(dev);
+		DEBUG_ASSERT(master, "Expected a master\n");
+		ecm_interface_dev_regenerate_connections(master);
+		dev_put(master);
+	} else {
+		ecm_interface_regenerate_connections(ii);
+	}
+
 	DEBUG_TRACE("%p: Regenerate for %p: COMPLETE\n", dev, ii);
 	ecm_db_iface_deref(ii);
 }
@@ -3221,13 +3230,21 @@ static int ecm_interface_netdev_notifier_callback(struct notifier_block *this, u
 #else
 	struct net_device *dev = netdev_notifier_info_to_dev(ptr);
 #endif
+	struct net_device *master = NULL;
 
 	DEBUG_INFO("Net device notifier for: %p, name: %s, event: %lx\n", dev, dev->name, event);
 
 	switch (event) {
 	case NETDEV_DOWN:
 		DEBUG_INFO("Net device: %p, DOWN\n", dev);
-		ecm_interface_dev_regenerate_connections(dev);
+		if (netif_is_bond_slave(dev)) {
+			master = ecm_interface_get_and_hold_dev_master(dev);
+			DEBUG_ASSERT(master, "Expected a master\n");
+			ecm_interface_dev_regenerate_connections(master);
+			dev_put(master);
+		} else {
+			ecm_interface_dev_regenerate_connections(dev);
+		}
 		break;
 
 	case NETDEV_CHANGE:
@@ -3235,7 +3252,6 @@ static int ecm_interface_netdev_notifier_callback(struct notifier_block *this, u
 		if (!netif_carrier_ok(dev)) {
 			DEBUG_INFO("Net device: %p, CARRIER BAD\n", dev);
 			if (netif_is_bond_slave(dev)) {
-				struct net_device *master;
 				master = ecm_interface_get_and_hold_dev_master(dev);
 				DEBUG_ASSERT(master, "Expected a master\n");
 				ecm_interface_dev_regenerate_connections(master);
