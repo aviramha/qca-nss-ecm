@@ -510,6 +510,34 @@ bool ecm_interface_multicast_check_for_br_dev(uint32_t dest_if[], uint8_t max_if
 	return false;
 }
 EXPORT_SYMBOL(ecm_interface_multicast_check_for_br_dev);
+
+/*
+ * ecm_interface_multicast_check_for_src_if_index()
+ * 	Find if a source netdev ifindex is matching with list of
+ * 	multicast destination netdev ifindex. If find a match then
+ *	returns a new list of destination netdev ifindex excluding
+ *	the ifindex of source netdev.
+ */
+int32_t ecm_interface_multicast_check_for_src_ifindex(int32_t mc_if_index[], int32_t max_if_index, int32_t if_num)
+{
+	int32_t i;
+	int32_t valid_index;
+
+	for (i = 0, valid_index = 0; i < max_if_index; i++) {
+		if (mc_if_index[i] == 0) {
+			break;
+		}
+
+		if (mc_if_index[i] != if_num) {
+			mc_if_index[valid_index] = mc_if_index[i];
+			valid_index++;
+			continue;
+		}
+	}
+
+	return valid_index;
+}
+EXPORT_SYMBOL(ecm_interface_multicast_check_for_src_ifindex);
 #endif
 
 /*
@@ -2322,7 +2350,7 @@ int32_t ecm_interface_multicast_heirarchy_construct_routed(struct ecm_front_end_
 								ip_addr_t packet_src_addr,
 								ip_addr_t packet_dest_addr, uint8_t max_if,
 								uint32_t *dst_if_index_base,
-								uint32_t *interface_first_base,
+								uint32_t *interface_first_base, bool mfc_update,
 								__be16 *layer4hdr, struct sk_buff *skb)
 {
 	struct ecm_db_iface_instance *to_list_single[ECM_DB_IFACE_HEIRARCHY_MAX];
@@ -2346,7 +2374,7 @@ int32_t ecm_interface_multicast_heirarchy_construct_routed(struct ecm_front_end_
 	/*
 	 * Check if the source net_dev is a bridge slave.
 	 */
-	if (in_dev) {
+	if (in_dev && !mfc_update) {
 		if (ecm_front_end_is_bridge_port(in_dev)) {
 			src_dev_is_bridge = true;
 			br_dev_src = in_dev->master;
@@ -2439,6 +2467,8 @@ int32_t ecm_interface_multicast_heirarchy_construct_routed(struct ecm_front_end_
 				dev_put(dest_dev);
 				return 0;
 			}
+
+			if_num = ecm_interface_multicast_check_for_src_ifindex(mc_dst_if_index, if_num, in_dev->ifindex);
 
 			for (br_if = 0; br_if < if_num; br_if++) {
 				mc_br_slave_dev = dev_get_by_index(&init_net, mc_dst_if_index[br_if]);

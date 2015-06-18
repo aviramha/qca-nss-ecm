@@ -119,7 +119,7 @@ static int32_t ecm_nss_multicast_connection_to_interface_heirarchy_construct(str
 {
 	int interface_instance_cnt;
 	if (is_routed) {
-		interface_instance_cnt = ecm_interface_multicast_heirarchy_construct_routed(feci, interfaces, in_dev, ip_src_addr, ip_dest_addr, max_if, dst_dev, to_list_first, layer4hdr, skb);
+		interface_instance_cnt = ecm_interface_multicast_heirarchy_construct_routed(feci, interfaces, in_dev, ip_src_addr, ip_dest_addr, max_if, dst_dev, to_list_first, false, layer4hdr, skb);
 	} else {
 		interface_instance_cnt = ecm_interface_multicast_heirarchy_construct_bridged(feci, interfaces, brdev, ip_src_addr, ip_dest_addr, max_if, dst_dev, to_list_first, src_node_addr, layer4hdr, skb);
 	}
@@ -2275,6 +2275,18 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 				DEBUG_WARN("Not found a valid MCS if count %d\n", if_cnt);
 				return NF_ACCEPT;
 			}
+
+			/*
+			 * The source interface could have joined the group as well.
+			 * In such cases, the destination interface list returned by
+			 * the snooper would include the source interface as well.
+			 * We need to filter the source interface from the list in such cases.
+			 */
+			if_cnt = ecm_interface_multicast_check_for_src_ifindex(dst_dev, if_cnt, in_dev->ifindex);
+			if (if_cnt <= 0) {
+				DEBUG_WARN("Not found a valid MCS if count %d\n", if_cnt);
+				return NF_ACCEPT;
+			}
 		}
 	}
 
@@ -3064,13 +3076,18 @@ static void ecm_br_multicast_update_event_callback(struct net_device *brdev, uin
 	struct ecm_db_connection_instance *ci;
 	struct ecm_front_end_connection_instance *feci;
 	struct ecm_multicast_if_update mc_update;
+	struct ecm_db_iface_instance *ii;
 	struct ecm_db_iface_instance *to_list;
 	struct ecm_db_iface_instance *to_list_single;
 	struct ecm_db_iface_instance *to_list_temp[ECM_DB_IFACE_HEIRARCHY_MAX];
+	struct ecm_db_iface_instance *from_ifaces[ECM_DB_IFACE_HEIRARCHY_MAX];
+	ecm_db_iface_type_t ii_type;
 	ip_addr_t dest_ip;
 	ip_addr_t grp_ip;
 	ip_addr_t src_ip;
 	int32_t to_list_first[ECM_DB_MULTICAST_IF_MAX];
+	int32_t from_ifaces_first;
+	int32_t from_iface_identifier;
 	int i, ret;
 	uint32_t mc_dst_dev[ECM_DB_MULTICAST_IF_MAX];
 	uint32_t if_cnt;
@@ -3147,6 +3164,35 @@ static void ecm_br_multicast_update_event_callback(struct net_device *brdev, uin
 		ci = ecm_db_multicast_connection_get_from_tuple(tuple_instance);
 
 		DEBUG_TRACE("MCS-cb: src_ip = 0x%x, dest_ip = 0x%x, Num if = %d\n", src_ip[0], dest_ip[0], if_num);
+
+		/*
+		 * The source interface could have joined the group as well.
+		 * In such cases, the destination interface list returned by
+		 * the snooper would include the source interface as well.
+		 * We need to filter the source interface from the list in such cases.
+		 */
+		if (if_num > 0) {
+			/*
+			 * Get the interface lists of the connection, we must have at least one interface in the list to continue
+			 */
+			from_ifaces_first = ecm_db_connection_from_interfaces_get_and_ref(ci, from_ifaces);
+			if (from_ifaces_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
+				DEBUG_WARN("%p: MCS Snooper Update: no interfaces in from_interfaces list!\n", ci);
+				ecm_db_multicast_tuple_instance_deref(tuple_instance);
+				ecm_db_connection_deref(ci);
+				return;
+			}
+
+			ii = from_ifaces[ECM_DB_IFACE_HEIRARCHY_MAX - 1];
+			ii_type = ecm_db_connection_iface_type_get(ii);
+			if (ii_type == ECM_DB_IFACE_TYPE_BRIDGE) {
+				ii = from_ifaces[ECM_DB_IFACE_HEIRARCHY_MAX - 2];
+			}
+
+			from_iface_identifier = ecm_db_iface_interface_identifier_get(ii);
+			if_num = ecm_interface_multicast_check_for_src_ifindex(mc_dst_dev, if_num, from_iface_identifier);
+			ecm_db_connection_interfaces_deref(from_ifaces, from_ifaces_first);
+		}
 
 		/*
 		 * All bridge slaves has left the group. If flow is pure bridge, Deacel the connection and return.
@@ -3454,7 +3500,7 @@ static void ecm_mfc_update_event_callback(__be32 group, __be32 origin, uint32_t 
 			port = (__be16)(ecm_db_connection_to_port_get(ci));
 			layer4hdr[1] = htons(port);
 
-			vif_cnt = ecm_interface_multicast_heirarchy_construct_routed(feci, to_list, NULL, src_ip, dest_ip, mc_update.if_join_cnt, mc_update.join_dev, to_list_first, layer4hdr, NULL);
+			vif_cnt = ecm_interface_multicast_heirarchy_construct_routed(feci, to_list, NULL, src_ip, dest_ip, mc_update.if_join_cnt, mc_update.join_dev, to_list_first, true, layer4hdr, NULL);
 			if (vif_cnt == 0) {
 				DEBUG_WARN("Failed to obtain 'to_mcast_update' heirarchy list\n");
 				feci->deref(feci);
