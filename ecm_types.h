@@ -52,6 +52,8 @@ typedef uint32_t ip_addr_t[4];
 
 #define ECM_IP_ADDR_NULL {0, 0, 0, 0}
 
+#define ECM_IP_ADDR_STRING_BUFFER_SIZE 40
+
 /*
  * Type checking functions for various forms of IP address
  * Placing these in a macro, enables the compiler to check

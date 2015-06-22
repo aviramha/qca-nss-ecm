@@ -595,6 +595,112 @@ void ecm_interface_route_release(struct ecm_interface_route *rt)
 }
 EXPORT_SYMBOL(ecm_interface_route_release);
 
+#ifdef ECM_IPV6_ENABLE
+/*
+ * ecm_interface_send_neighbour_solicitation()
+ *	Issue an IPv6 Neighbour soliciation request.
+ */
+void ecm_interface_send_neighbour_solicitation(struct net_device *dev, ip_addr_t addr)
+{
+	struct in6_addr dst_addr, src_addr;
+	struct in6_addr mc_dst_addr;
+	struct rt6_info *rt6i;
+	struct neighbour *neigh;
+	ip_addr_t ecm_mc_dst_addr, ecm_src_addr;
+	struct net *netf = dev_net(dev);
+	int ret;
+
+	char __attribute__((unused)) dst_addr_str[ECM_IP_ADDR_STRING_BUFFER_SIZE];
+	char __attribute__((unused)) mc_dst_addr_str[ECM_IP_ADDR_STRING_BUFFER_SIZE];
+	char __attribute__((unused)) src_addr_str[ECM_IP_ADDR_STRING_BUFFER_SIZE];
+
+	/*
+	 * Find source and destination addresses in Linux format. We need
+	 * mcast destination address as well.
+	 */
+	ECM_IP_ADDR_TO_NIN6_ADDR(dst_addr, addr);
+	addrconf_addr_solict_mult(&dst_addr, &mc_dst_addr);
+	ret = ipv6_dev_get_saddr(netf, dev, &dst_addr, 0, &src_addr);
+
+	/*
+	 * IP address in string format for debug
+	 */
+	ecm_ip_addr_to_string(dst_addr_str, addr);
+	ECM_NIN6_ADDR_TO_IP_ADDR(ecm_mc_dst_addr, mc_dst_addr);
+	ecm_ip_addr_to_string(mc_dst_addr_str, ecm_mc_dst_addr);
+	ECM_NIN6_ADDR_TO_IP_ADDR(ecm_src_addr, src_addr);
+	ecm_ip_addr_to_string(src_addr_str, ecm_src_addr);
+
+	/*
+	 * Find the route entry
+	 */
+	rt6i = rt6_lookup(netf, &dst_addr, NULL, 0, 0);
+	if (!rt6i) {
+		DEBUG_TRACE("IPv6 Route lookup failure for destination IPv6 address %s\n", dst_addr_str);
+		return;
+	}
+
+	/*
+	 * Find the neighbor entry
+	 */
+#if (LINUX_VERSION_CODE <= KERNEL_VERSION(3,6,0))
+	neigh = rt6i->dst.ops->neigh_lookup(&rt6i->dst, &dst_addr);
+#else
+	neigh = rt6i->dst.ops->neigh_lookup(&rt6i->dst, NULL, &dst_addr);
+#endif
+	if (neigh == NULL) {
+		DEBUG_TRACE("Neighbour lookup failure for destination IPv6 address %s\n", dst_addr_str);
+		dst_release(&rt6i->dst);
+		return;
+	}
+
+	/*
+	 * Issue a Neighbour soliciation request
+	 */
+	DEBUG_TRACE("Issue Neighbour solicitation request\n");
+	ndisc_send_ns(dev, neigh, &dst_addr, &mc_dst_addr, &src_addr);
+	neigh_release(neigh);
+	dst_release(&rt6i->dst);
+}
+EXPORT_SYMBOL(ecm_interface_send_neighbour_solicitation);
+#endif
+
+/*
+ * ecm_interface_send_arp_request()
+ *	Issue and ARP request.
+ */
+void ecm_interface_send_arp_request(struct net_device *dest_dev, ip_addr_t dest_addr, bool on_link, ip_addr_t gw_addr)
+{
+	/*
+	 * Possible ARP does not know the address yet
+	 */
+	__be32 ipv4_addr;
+	__be32 src_ip;
+
+	/*
+	 * Issue an ARP request for it, select the src_ip from which to issue the request.
+	 */
+	ECM_IP_ADDR_TO_NIN4_ADDR(ipv4_addr, dest_addr);
+	src_ip = inet_select_addr(dest_dev, ipv4_addr, RT_SCOPE_LINK);
+	if (!src_ip) {
+		DEBUG_TRACE("Failed to lookup IP for %pI4\n", &ipv4_addr);
+		return;
+	}
+
+	/*
+	 * If we have a GW for this address, then we have to send ARP request to the GW
+	 */
+	if (!on_link && !ECM_IP_ADDR_IS_NULL(gw_addr)) {
+		ECM_IP_ADDR_TO_NIN4_ADDR(ipv4_addr, gw_addr);
+	}
+
+	DEBUG_TRACE("Send ARP for %pI4 using src_ip as %pI4\n", &ipv4_addr, &src_ip);
+	arp_send(ARPOP_REQUEST, ETH_P_ARP, ipv4_addr, dest_dev, src_ip, NULL, NULL, NULL);
+
+	return;
+}
+EXPORT_SYMBOL(ecm_interface_send_arp_request);
+
 #ifdef ECM_INTERFACE_PPP_ENABLE
 /*
  * ecm_interface_skip_l2tp_pptp()
@@ -2198,11 +2304,14 @@ EXPORT_SYMBOL(ecm_interface_multicast_heirarchy_construct_bridged);
  *
  * IMPORTANT: This function will return any known interfaces in the database, when interfaces do not exist in the database
  * they will be created and added automatically to the database.
- *
- * GGG TODO Make this function work for IPv6!!!!!!!!!!!!!!
  */
-int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfaces[], ip_addr_t packet_src_addr, ip_addr_t packet_dest_addr, int packet_protocol,
-						struct net_device *given_dest_dev, bool is_routed, struct net_device *given_src_dev, uint8_t *dest_node_addr, uint8_t *src_node_addr)
+int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfaces[],
+						ip_addr_t packet_src_addr,
+						ip_addr_t packet_dest_addr,
+						int ip_version, int packet_protocol,
+						struct net_device *given_dest_dev,
+						bool is_routed, struct net_device *given_src_dev,
+						uint8_t *dest_node_addr, uint8_t *src_node_addr)
 {
 	int protocol;
 	ip_addr_t src_addr;
@@ -2222,8 +2331,19 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfac
 	protocol = packet_protocol;
 	ECM_IP_ADDR_COPY(src_addr, packet_src_addr);
 	ECM_IP_ADDR_COPY(dest_addr, packet_dest_addr);
-	DEBUG_TRACE("Construct interface heirarchy for from src_addr: " ECM_IP_ADDR_DOT_FMT " to dest_addr: " ECM_IP_ADDR_DOT_FMT ", protocol: %d\n",
-			ECM_IP_ADDR_TO_DOT(src_addr), ECM_IP_ADDR_TO_DOT(dest_addr), protocol);
+
+	if (ip_version == 4) {
+		DEBUG_TRACE("Construct interface heirarchy for from src_addr: " ECM_IP_ADDR_DOT_FMT " to dest_addr: " ECM_IP_ADDR_DOT_FMT ", protocol: %d\n",
+				ECM_IP_ADDR_TO_DOT(src_addr), ECM_IP_ADDR_TO_DOT(dest_addr), protocol);
+#ifdef ECM_IPV6_ENABLE
+	} else if (ip_version == 6) {
+		DEBUG_TRACE("Construct interface heirarchy for from src_addr: " ECM_IP_ADDR_OCTAL_FMT " to dest_addr: " ECM_IP_ADDR_OCTAL_FMT ", protocol: %d\n",
+				ECM_IP_ADDR_TO_OCTAL(src_addr), ECM_IP_ADDR_TO_OCTAL(dest_addr), protocol);
+#endif
+	} else {
+		DEBUG_WARN("Wrong IP protocol: %d\n", ip_version);
+		return ECM_DB_IFACE_HEIRARCHY_MAX;
+	}
 
 	/*
 	 * Get device to reach the given destination address.
@@ -2258,12 +2378,17 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfac
 	 * PARSE THE DEVICES AND WORK OUT THE PROPER INTERFACES INVOLVED.
 	 * E.G. IF WE TRIED TO RUN A TUNNEL OVER A VLAN OR QINQ THIS WILL BREAK AS WE DON'T DISCOVER THAT HIERARCHY
 	 */
-	if (dest_dev && from_local_addr && (protocol == IPPROTO_IPV6)) {
-		dev_put(dest_dev);
-		dest_dev = given_dest_dev;
-		if (dest_dev) {
-			dev_hold(dest_dev);
-			DEBUG_TRACE("HACK: IPV6 tunnel packet with dest_addr: " ECM_IP_ADDR_OCTAL_FMT " uses dev: %p(%s)\n", ECM_IP_ADDR_TO_OCTAL(dest_addr), dest_dev, dest_dev->name);
+	if (dest_dev && from_local_addr) {
+		if (((ip_version == 4) && (protocol == IPPROTO_IPV6)) ||
+				((ip_version == 6) && (protocol == IPPROTO_IPIP))) {
+			dev_put(dest_dev);
+			dest_dev = given_dest_dev;
+			if (dest_dev) {
+				dev_hold(dest_dev);
+				DEBUG_TRACE("HACK: %s tunnel packet with dest_addr: " ECM_IP_ADDR_OCTAL_FMT " uses dev: %p(%s)\n",
+						(ip_version == 4) ? "IPV6" : "IPIP",
+						ECM_IP_ADDR_TO_OCTAL(dest_addr), dest_dev, dest_dev->name);
+			}
 		}
 	}
 	if (!dest_dev) {
@@ -2306,14 +2431,20 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfac
 	 * PARSE THE DEVICES AND WORK OUT THE PROPER INTERFACES INVOLVED.
 	 * E.G. IF WE TRIED TO RUN A TUNNEL OVER A VLAN OR QINQ THIS WILL BREAK AS WE DON'T DISCOVER THAT HIERARCHY
 	 */
-	if (src_dev && from_local_addr && (protocol == IPPROTO_IPV6)) {
-		dev_put(src_dev);
-		src_dev = given_src_dev;
-		if (src_dev) {
-			dev_hold(src_dev);
-			DEBUG_TRACE("HACK: IPV6 tunnel packet with src_addr: " ECM_IP_ADDR_OCTAL_FMT " uses dev: %p(%s)\n", ECM_IP_ADDR_TO_OCTAL(src_addr), src_dev, src_dev->name);
+	if (src_dev && from_local_addr) {
+		if (((ip_version == 4) && (protocol == IPPROTO_IPV6)) ||
+				((ip_version == 6) && (protocol == IPPROTO_IPIP))) {
+			dev_put(src_dev);
+			src_dev = given_src_dev;
+			if (src_dev) {
+				dev_hold(src_dev);
+				DEBUG_TRACE("HACK: %s tunnel packet with src_addr: " ECM_IP_ADDR_OCTAL_FMT " uses dev: %p(%s)\n",
+						(ip_version == 4) ? "IPV6" : "IPIP",
+						ECM_IP_ADDR_TO_OCTAL(src_addr), src_dev, src_dev->name);
+			}
 		}
 	}
+
 	if (!src_dev) {
 		DEBUG_WARN("src_addr: " ECM_IP_ADDR_OCTAL_FMT " - cannot locate device\n", ECM_IP_ADDR_TO_OCTAL(src_addr));
 		dev_put(dest_dev);
@@ -2328,7 +2459,8 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfac
 	 */
 	if (src_dev == dest_dev) {
 		DEBUG_TRACE("Protocol is :%d source dev and dest dev are same\n", protocol);
-		if ((protocol == IPPROTO_IPV6) || (protocol == IPPROTO_ESP)) {
+		if (((ip_version == 4) && ((protocol == IPPROTO_IPV6) || (protocol == IPPROTO_ESP)))
+				|| ((ip_version == 6) && (protocol == IPPROTO_IPIP))) {
 			/*
 			 * This happens from the input hook
 			 * We do not want to create a connection entry for this
@@ -2432,44 +2564,16 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfac
 					ip_addr_t gw_addr = ECM_IP_ADDR_NULL;
 					uint8_t mac_addr[ETH_ALEN];
 					if (!ecm_interface_mac_addr_get(dest_addr, mac_addr, &on_link, gw_addr)) {
-						/*
-						 * Possible ARP does not know the address yet
-						 */
-						DEBUG_INFO("Unable to obtain MAC address for " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(dest_addr));
-						if (ECM_IP_ADDR_IS_V4(dest_addr)) {
-							__be32 ipv4_addr;
-							__be32 src_ip;
-
-							/*
-							 * Issue an ARP request for it, select the src_ip from which to issue the request.
-							 */
-							ECM_IP_ADDR_TO_NIN4_ADDR(ipv4_addr, dest_addr);
-							src_ip = inet_select_addr(dest_dev, ipv4_addr, RT_SCOPE_LINK);
-							if (!src_ip) {
-								DEBUG_TRACE("failed to lookup IP for %pI4\n", &ipv4_addr);
-
-								dev_put(src_dev);
-								dev_put(dest_dev);
-
-								/*
-								* Release the interfaces heirarchy we constructed to this point.
-								*/
-								ecm_db_connection_interfaces_deref(interfaces, current_interface_index);
-								return ECM_DB_IFACE_HEIRARCHY_MAX;
-							}
-
-							/*
-							 * If we have a GW for this address, then we have to send ARP request to the GW
-							 */
-							if (!on_link && !ECM_IP_ADDR_IS_NULL(gw_addr)) {
-								ECM_IP_ADDR_TO_NIN4_ADDR(ipv4_addr, gw_addr);
-							}
-
-							DEBUG_TRACE("Send ARP for %pI4 using src_ip as %pI4\n", &ipv4_addr, &src_ip);
-							arp_send(ARPOP_REQUEST, ETH_P_ARP, ipv4_addr, dest_dev, src_ip, NULL, NULL, NULL);
+						if (ip_version == 4) {
+							DEBUG_WARN("Unable to obtain MAC address for " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(dest_addr));
+							ecm_interface_send_arp_request(dest_dev, dest_addr, on_link, gw_addr);
 						}
-
-						DEBUG_WARN("Unable to obtain MAC address for " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(dest_addr));
+#ifdef ECM_IPV6_ENABLE
+						if (ip_version == 6) {
+							DEBUG_WARN("Unable to obtain MAC address for " ECM_IP_ADDR_OCTAL_FMT "\n", ECM_IP_ADDR_TO_OCTAL(dest_addr));
+							ecm_interface_send_neighbour_solicitation(dest_dev, dest_addr);
+						}
+#endif
 						dev_put(src_dev);
 						dev_put(dest_dev);
 
@@ -2539,18 +2643,10 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfac
 						 */
 						if (!ecm_interface_mac_addr_get(dest_addr, dest_mac_addr,
 									&dest_on_link, dest_gw_addr)) {
-							__be32 ipv4_addr = 0;
-							__be32 src_ip = 0;
-							DEBUG_WARN("Unable to obtain MAC address for "
-										ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(dest_addr));
-
 
 							/*
-							 * Issue an ARP request, select the src_ip from which to issue the request.
-							 */
-
-							/*
-							 * find proper interfce from which to issue ARP
+							 * Find proper interfce from which to issue ARP
+							 * or neighbour solicitation packet.
 							 */
 							if (dest_dev_master) {
 								master_dev = dest_dev_master;
@@ -2564,33 +2660,16 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfac
 								dev_put(dest_dev_master);
 							}
 
-							ECM_IP_ADDR_TO_NIN4_ADDR(ipv4_addr, dest_addr);
-							src_ip = inet_select_addr(master_dev, ipv4_addr, RT_SCOPE_LINK);
-							if (!src_ip) {
-								DEBUG_TRACE("failed to lookup IP for %pI4\n", &ipv4_addr);
-
-								dev_put(src_dev);
-								dev_put(dest_dev);
-								dev_put(master_dev);
-
-								/*
-								* Release the interfaces heirarchy we constructed to this point.
-								*/
-								ecm_db_connection_interfaces_deref(interfaces, current_interface_index);
-								return ECM_DB_IFACE_HEIRARCHY_MAX;
+							if (ip_version == 4) {
+								DEBUG_WARN("Unable to obtain MAC address for " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(dest_addr));
+								ecm_interface_send_arp_request(dest_dev, dest_addr, dest_on_link, dest_gw_addr);
 							}
-
-							/*
-							 * If we have a GW for this address, then we have to send ARP request to the GW
-							 */
-							if (!dest_on_link && !ECM_IP_ADDR_IS_NULL(dest_gw_addr)) {
-								ECM_IP_ADDR_TO_NIN4_ADDR(ipv4_addr, dest_gw_addr);
+#ifdef ECM_IPV6_ENABLE
+							if (ip_version == 6) {
+								DEBUG_WARN("Unable to obtain MAC address for " ECM_IP_ADDR_OCTAL_FMT "\n",ECM_IP_ADDR_TO_OCTAL(dest_addr));
+								ecm_interface_send_neighbour_solicitation(master_dev, dest_addr);
 							}
-
-							DEBUG_TRACE("Send ARP for %pI4 using src_ip as %pI4\n", &ipv4_addr, &src_ip);
-							arp_send(ARPOP_REQUEST, ETH_P_ARP, ipv4_addr, master_dev, src_ip, NULL, NULL, NULL);
-
-
+#endif
 							dev_put(src_dev);
 							dev_put(dest_dev);
 							dev_put(master_dev);
@@ -2603,9 +2682,16 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_db_iface_instance *interfac
 						}
 					}
 
-					next_dev = bond_get_tx_dev(NULL, src_mac_addr, dest_mac_addr,
-								   &src_addr_32, &dest_addr_32,
-								   htons((uint16_t)ETH_P_IP), dest_dev);
+					if (ip_version == 4) {
+						next_dev = bond_get_tx_dev(NULL, src_mac_addr, dest_mac_addr,
+										&src_addr_32, &dest_addr_32,
+										htons((uint16_t)ETH_P_IP), dest_dev);
+					} else if (ip_version == 6) {
+						next_dev = bond_get_tx_dev(NULL, src_mac_addr, dest_mac_addr,
+										src_addr, dest_addr,
+										htons((uint16_t)ETH_P_IPV6), dest_dev);
+					}
+
 					if (next_dev && netif_carrier_ok(next_dev)) {
 						dev_hold(next_dev);
 					} else {

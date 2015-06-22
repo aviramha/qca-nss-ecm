@@ -2162,7 +2162,7 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 		 * For this we also need the interface lists which we also set upon the new connection while we are at it.
 		 */
 		DEBUG_TRACE("%p: Create the 'from' interface heirarchy list\n", nci);
-		from_list_first = ecm_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, protocol, in_dev, is_routed, in_dev, src_node_addr, dest_node_addr);
+		from_list_first = ecm_interface_heirarchy_construct(from_list, ip_dest_addr, ip_src_addr, 4, protocol, in_dev, is_routed, in_dev, src_node_addr, dest_node_addr);
 		if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to obtain 'from' heirarchy list\n");
@@ -2271,7 +2271,7 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 		}
 
 		DEBUG_TRACE("%p: Create the 'from NAT' interface heirarchy list\n", nci);
-		from_nat_list_first = ecm_interface_heirarchy_construct(from_nat_list, ip_dest_addr, ip_src_addr_nat, protocol, in_dev_nat, is_routed, in_dev_nat, src_node_addr, dest_node_addr);
+		from_nat_list_first = ecm_interface_heirarchy_construct(from_nat_list, ip_dest_addr, ip_src_addr_nat, 4, protocol, in_dev_nat, is_routed, in_dev_nat, src_node_addr, dest_node_addr);
 		if (from_nat_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			for (vif = 0; vif < ECM_DB_MULTICAST_IF_MAX; vif++) {
 				to_list_single = ecm_db_multicast_if_heirarchy_get(to_list, vif);
