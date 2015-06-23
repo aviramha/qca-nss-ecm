@@ -2921,7 +2921,7 @@ EXPORT_SYMBOL(ecm_interface_heirarchy_construct);
  *	Given an interface list, walk the interfaces and update the stats for certain types.
  */
 static void ecm_interface_list_stats_update(int iface_list_first, struct ecm_db_iface_instance *iface_list[], uint8_t *mac_addr,
-						uint32_t tx_packets, uint32_t tx_bytes, uint32_t rx_packets, uint32_t rx_bytes)
+					bool is_mcast_flow, uint32_t tx_packets, uint32_t tx_bytes, uint32_t rx_packets, uint32_t rx_bytes)
 {
 	int list_index;
 
@@ -2946,14 +2946,16 @@ static void ecm_interface_list_stats_update(int iface_list_first, struct ecm_db_
 		}
 		DEBUG_TRACE("found dev: %p (%s)\n", dev, dev->name);
 
-		/*
-		 * Refresh the bridge forward table entry if the port is a bridge port
-		 * Note: A bridge port can be of different interface type, e.g VLAN, ethernet.
-		 * This check, therefore, should be performed for all interface types.
-		 */
-		if (is_valid_ether_addr(mac_addr) && ecm_front_end_is_bridge_port(dev) && rx_packets) {
-			DEBUG_TRACE("Update bridge fdb entry for mac: %pM\n", mac_addr);
-			br_refresh_fdb_entry(dev, mac_addr);
+		if (likely(!is_mcast_flow)) {
+			/*
+			 * Refresh the bridge forward table entry if the port is a bridge port
+			 * Note: A bridge port can be of different interface type, e.g VLAN, ethernet.
+			 * This check, therefore, should be performed for all interface types.
+			 */
+			if (is_valid_ether_addr(mac_addr) && ecm_front_end_is_bridge_port(dev) && rx_packets) {
+				DEBUG_TRACE("Update bridge fdb entry for mac: %pM\n", mac_addr);
+				br_refresh_fdb_entry(dev, mac_addr);
+			}
 		}
 
 		switch (ii_type) {
@@ -3020,7 +3022,7 @@ void ecm_interface_stats_update(struct ecm_db_connection_instance *ci,
 	DEBUG_INFO("%p: Update from interface stats\n", ci);
 	from_ifaces_first = ecm_db_connection_from_interfaces_get_and_ref(ci, from_ifaces);
 	ecm_db_connection_from_node_address_get(ci, mac_addr);
-	ecm_interface_list_stats_update(from_ifaces_first, from_ifaces, mac_addr, from_tx_packets, from_tx_bytes, from_rx_packets, from_rx_bytes);
+	ecm_interface_list_stats_update(from_ifaces_first, from_ifaces, mac_addr, false, from_tx_packets, from_tx_bytes, from_rx_packets, from_rx_bytes);
 	ecm_db_connection_interfaces_deref(from_ifaces, from_ifaces_first);
 
 	/*
@@ -3031,88 +3033,12 @@ void ecm_interface_stats_update(struct ecm_db_connection_instance *ci,
 	DEBUG_INFO("%p: Update to interface stats\n", ci);
 	to_ifaces_first = ecm_db_connection_to_interfaces_get_and_ref(ci, to_ifaces);
 	ecm_db_connection_to_node_address_get(ci, mac_addr);
-	ecm_interface_list_stats_update(to_ifaces_first, to_ifaces, mac_addr, to_tx_packets, to_tx_bytes, to_rx_packets, to_rx_bytes);
+	ecm_interface_list_stats_update(to_ifaces_first, to_ifaces, mac_addr, false, to_tx_packets, to_tx_bytes, to_rx_packets, to_rx_bytes);
 	ecm_db_connection_interfaces_deref(to_ifaces, to_ifaces_first);
 }
 EXPORT_SYMBOL(ecm_interface_stats_update);
 
 #ifdef ECM_MULTICAST_ENABLE
-/*
- * ecm_interface_multicast_list_stats_update()
- *	Given a destination interface list for a multicast connection, walk the interfaces and update
- *	the stats for certain types.
- *
- *	TODO: For next merge change this function to use this for both unicast list_stats_update and
- *	      multicast list_stats_update. This would save repetition of same code again.
- */
-static void ecm_interface_multicast_list_stats_update(int iface_list_first, struct ecm_db_iface_instance *iface_list, uint32_t tx_packets,
-					       uint32_t tx_bytes, uint32_t rx_packets, uint32_t rx_bytes)
-{
-	struct ecm_db_iface_instance **ifaces;
-	struct ecm_db_iface_instance *ii_temp;
-	int list_index;
-
-	for (list_index = iface_list_first; (list_index < ECM_DB_IFACE_HEIRARCHY_MAX); list_index++) {
-		struct ecm_db_iface_instance *ii;
-		struct net_device *dev;
-		char *ii_name;
-		ecm_db_iface_type_t ii_type;
-
-		ii_temp = ecm_db_multicast_if_instance_get_at_index(iface_list, list_index);
-		ifaces = (struct ecm_db_iface_instance **)ii_temp;
-		ii = *ifaces;
-		ii_type = ecm_db_connection_iface_type_get(ii);
-		ii_name = ecm_db_interface_type_to_string(ii_type);
-		DEBUG_TRACE("list_index: %d, ii: %p, type: %d (%s)\n", list_index, ii, ii_type, ii_name);
-
-		/*
-		 * Locate real device in system
-		 */
-		dev = dev_get_by_index(&init_net, ecm_db_iface_interface_identifier_get(ii));
-		if (!dev) {
-			DEBUG_WARN("Could not locate interface\n");
-			continue;
-		}
-		DEBUG_TRACE("found dev: %p (%s)\n", dev, dev->name);
-
-		switch (ii_type) {
-			struct rtnl_link_stats64 stats;
-
-#ifdef ECM_INTERFACE_VLAN_ENABLE
-			case ECM_DB_IFACE_TYPE_VLAN:
-				DEBUG_INFO("VLAN\n");
-				stats.rx_packets = rx_packets;
-				stats.rx_bytes = rx_bytes;
-				stats.tx_packets = tx_packets;
-				stats.tx_bytes = tx_bytes;
-				__vlan_dev_update_accel_stats(dev, &stats);
-				break;
-#endif
-			case ECM_DB_IFACE_TYPE_BRIDGE:
-				DEBUG_INFO("BRIDGE\n");
-				stats.rx_packets = rx_packets;
-				stats.rx_bytes = rx_bytes;
-				stats.tx_packets = tx_packets;
-				stats.tx_bytes = tx_bytes;
-				br_dev_update_stats(dev, &stats);
-				break;
-#ifdef ECM_INTERFACE_PPP_ENABLE
-			case ECM_DB_IFACE_TYPE_PPPOE:
-				DEBUG_INFO("PPPOE\n");
-				ppp_update_stats(dev, rx_packets, rx_bytes, tx_packets, tx_bytes);
-				break;
-#endif
-			default:
-				/*
-				 * TODO: Extend it accordingly
-				 */
-				break;
-		}
-
-		dev_put(dev);
-	}
-}
-
 /*
  * ecm_interface_multicast_stats_update()
  *	Using the interface lists for the given connection, update the interface statistics for each.
@@ -3125,6 +3051,7 @@ void ecm_interface_multicast_stats_update(struct ecm_db_connection_instance *ci,
 				   uint32_t to_rx_packets, uint32_t to_rx_bytes)
 {
 	struct ecm_db_iface_instance *from_ifaces[ECM_DB_IFACE_HEIRARCHY_MAX];
+	struct ecm_db_iface_instance *to_list_single[ECM_DB_IFACE_HEIRARCHY_MAX];
 	struct ecm_db_iface_instance *to_ifaces;
 	struct ecm_db_iface_instance *ii_temp;
 	int from_ifaces_first;
@@ -3141,7 +3068,7 @@ void ecm_interface_multicast_stats_update(struct ecm_db_connection_instance *ci,
 	DEBUG_INFO("%p: Update from interface stats\n", ci);
 	from_ifaces_first = ecm_db_connection_from_interfaces_get_and_ref(ci, from_ifaces);
 	ecm_db_connection_from_node_address_get(ci, mac_addr);
-	ecm_interface_list_stats_update(from_ifaces_first, from_ifaces, mac_addr, from_tx_packets, from_tx_bytes, from_rx_packets, from_rx_bytes);
+	ecm_interface_list_stats_update(from_ifaces_first, from_ifaces, mac_addr, false, from_tx_packets, from_tx_bytes, from_rx_packets, from_rx_bytes);
 	ecm_db_connection_interfaces_deref(from_ifaces, from_ifaces_first);
 
 	/*
@@ -3164,7 +3091,8 @@ void ecm_interface_multicast_stats_update(struct ecm_db_connection_instance *ci,
 	for (if_index = 0; if_index < ECM_DB_MULTICAST_IF_MAX; if_index++) {
 		if (to_ifaces_first[if_index] < ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ii_temp = ecm_db_multicast_if_heirarchy_get(to_ifaces, if_index);
-			ecm_interface_multicast_list_stats_update(to_ifaces_first[if_index], ii_temp, to_tx_packets, to_tx_bytes, to_rx_packets, to_rx_bytes);
+			ecm_db_multicast_copy_if_heirarchy(to_list_single, ii_temp);
+			ecm_interface_list_stats_update(to_ifaces_first[if_index], to_list_single, mac_addr, true, to_tx_packets, to_tx_bytes, to_rx_packets, to_rx_bytes);
 		}
 	}
 

@@ -146,6 +146,11 @@ typedef void (*ecm_db_timer_group_entry_callback_t)(void *arg);	/* Timer entry h
 struct ecm_db_multicast_tuple_instance;
 
 /*
+ * Need to set this flag when Multicast is attached to ci and added to tuple hash table
+ */
+#define ECM_DB_MULTICAST_TUPLE_INSTANCE_FLAGS_INSERTED 0x1
+
+/*
  *  This flag is used to find out whether a bridge device is present or not in a
  *  multicast destination interface list, struct ecm_db_multicast_connection_instance
  *  flags field use this flag.
