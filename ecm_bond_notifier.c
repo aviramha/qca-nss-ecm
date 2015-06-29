@@ -213,6 +213,38 @@ static void ecm_bond_notifier_bond_enslave(struct net_device *slave_dev)
 }
 
 /*
+ * ecm_bond_notifier_bond_link_down()
+ *	Callback when a link goes down on a LAG slave
+ */
+static void ecm_bond_notifier_bond_link_down(struct net_device *slave_dev)
+{
+	struct net_device *master;
+
+	/*
+	 * If operations have stopped then do not process event
+	 */
+	spin_lock_bh(&ecm_bond_notifier_lock);
+	if (unlikely(ecm_bond_notifier_stopped)) {
+		DEBUG_WARN("Ignoring bond link down event - stopped\n");
+		spin_unlock_bh(&ecm_bond_notifier_lock);
+		return;
+	}
+	spin_unlock_bh(&ecm_bond_notifier_lock);
+
+	/*
+	 * A net device that is a LAG slave has lost link.
+	 * Due to the heiarchical nature of network topologies, this can
+	 * change the packet transmit path for any connection that is using
+	 * a device that it sitting "higher" in the heirarchy. Regenerate all
+	 * connections using the LAG master.
+	 */
+
+	master = ecm_interface_get_and_hold_dev_master(slave_dev);
+	ecm_interface_dev_regenerate_connections(master);
+	dev_put(master);
+}
+
+/*
  * ecm_bond_notifier_bond_link_up()
  *	Callback when a device is enslaved by a LAG master device
  */
@@ -308,6 +340,7 @@ int ecm_bond_notifier_init(struct dentry *dentry)
 	 * Register Link Aggregation callbacks with the bonding driver
 	 */
 	ecm_bond_notifier_bond_cb.bond_cb_link_up = ecm_bond_notifier_bond_link_up;
+	ecm_bond_notifier_bond_cb.bond_cb_link_down = ecm_bond_notifier_bond_link_down;
 	ecm_bond_notifier_bond_cb.bond_cb_release = ecm_bond_notifier_bond_release;
 	ecm_bond_notifier_bond_cb.bond_cb_enslave = ecm_bond_notifier_bond_enslave;
 	bond_register_cb(&ecm_bond_notifier_bond_cb);
