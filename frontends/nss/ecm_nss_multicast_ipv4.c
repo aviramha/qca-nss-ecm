@@ -261,9 +261,9 @@ static void ecm_nss_multicast_ipv4_connection_create_callback(void *app_data, st
 		DEBUG_TRACE("%p: accel nack: %d\n", nmci, nim->cm.error);
 		spin_lock_bh(&feci->lock);
 		DEBUG_ASSERT(feci->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING, "%p: Unexpected mode: %d\n", ci, feci->accel_mode);
-		nmci->base.stats.nss_nack++;
-		nmci->base.stats.nss_nack_total++;
-		if (nmci->base.stats.nss_nack >= nmci->base.stats.nss_nack_limit) {
+		nmci->base.stats.ae_nack++;
+		nmci->base.stats.ae_nack_total++;
+		if (nmci->base.stats.ae_nack >= nmci->base.stats.ae_nack_limit) {
 			/*
 			 * Too many NSS rejections
 			 */
@@ -342,7 +342,7 @@ static void ecm_nss_multicast_ipv4_connection_create_callback(void *app_data, st
 	/*
 	 * Clear any nack count
 	 */
-	nmci->base.stats.nss_nack = 0;
+	nmci->base.stats.ae_nack = 0;
 
 	/*
 	 * Decelerate may have been attempted while we were accel pending.
@@ -1862,13 +1862,13 @@ static int ecm_nss_multicast_ipv4_connection_state_get(struct ecm_front_end_conn
 	if ((result = ecm_state_write(sfi, "driver_fail_limit", "%d", stats.driver_fail_limit))) {
 		return result;
 	}
-	if ((result = ecm_state_write(sfi, "nss_nack_total", "%d", stats.nss_nack_total))) {
+	if ((result = ecm_state_write(sfi, "ae_nack_total", "%d", stats.ae_nack_total))) {
 		return result;
 	}
-	if ((result = ecm_state_write(sfi, "nss_nack", "%d", stats.nss_nack))) {
+	if ((result = ecm_state_write(sfi, "ae_nack", "%d", stats.ae_nack))) {
 		return result;
 	}
-	if ((result = ecm_state_write(sfi, "nss_nack_limit", "%d", stats.nss_nack_limit))) {
+	if ((result = ecm_state_write(sfi, "ae_nack_limit", "%d", stats.ae_nack_limit))) {
 		return result;
 	}
 
@@ -1906,7 +1906,7 @@ static struct ecm_nss_multicast_ipv4_connection_instance *ecm_nss_multicast_ipv4
 	spin_lock_bh(&ecm_nss_ipv4_lock);
 	feci->stats.no_action_seen_limit = ecm_nss_ipv4_no_action_limit_default;
 	feci->stats.driver_fail_limit = ecm_nss_ipv4_driver_fail_limit_default;
-	feci->stats.nss_nack_limit = ecm_nss_ipv4_nack_limit_default;
+	feci->stats.ae_nack_limit = ecm_nss_ipv4_nack_limit_default;
 	spin_unlock_bh(&ecm_nss_ipv4_lock);
 
 	/*

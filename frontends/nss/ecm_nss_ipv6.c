@@ -101,6 +101,7 @@
 #endif
 #include "ecm_interface.h"
 #include "ecm_nss_ipv6.h"
+#include "ecm_nss_common.h"
 #include "ecm_nss_ported_ipv6.h"
 #ifdef ECM_MULTICAST_ENABLE
 #include "ecm_nss_multicast_ipv6.h"

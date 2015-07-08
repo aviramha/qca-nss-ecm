@@ -15,6 +15,39 @@
  */
 
 /*
+ * Some constants used with constructing NSS acceleration rules.
+ * GGG TODO These should be provided by the NSS driver itself!
+ */
+#define ECM_NSS_CONNMGR_VLAN_ID_NOT_CONFIGURED 0xFFF
+#define ECM_NSS_CONNMGR_VLAN_MARKING_NOT_CONFIGURED 0xFFFF
+
+/*
+ * This macro converts ECM ip_addr_t to NSS IPv6 address
+ */
+#define ECM_IP_ADDR_TO_NSS_IPV6_ADDR(nss6, ipaddrt) \
+	{ \
+		ecm_type_check_ae_ipv6(nss6); \
+		ecm_type_check_ecm_ip_addr(ipaddrt); \
+		nss6[0] = ipaddrt[3]; \
+		nss6[1] = ipaddrt[2]; \
+		nss6[2] = ipaddrt[1]; \
+		nss6[3] = ipaddrt[0]; \
+	}
+
+/*
+ * This macro converts NSS IPv6 address to ECM ip_addr_t
+ */
+#define ECM_NSS_IPV6_ADDR_TO_IP_ADDR(ipaddrt, nss6) \
+	{ \
+		ecm_type_check_ecm_ip_addr(ipaddrt); \
+		ecm_type_check_ae_ipv6(nss6); \
+		ipaddrt[0] = nss6[3]; \
+		ipaddrt[1] = nss6[2]; \
+		ipaddrt[2] = nss6[1]; \
+		ipaddrt[3] = nss6[0]; \
+	}
+
+/*
  * ecm_nss_common_get_interface_number_by_dev()
  *	Returns the acceleration engine interface number based on the net_device object.
  */

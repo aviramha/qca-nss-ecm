@@ -95,9 +95,9 @@ struct ecm_front_end_connection_mode_stats {
 	uint32_t driver_fail_total;		/* Total times driver failed to send our command */
 	uint32_t driver_fail;			/* Count of consecutive times driver failed to send our command, when this reaches driver_fail_limit acceleration will permanently fail */
 	uint32_t driver_fail_limit;		/* Limit on drivers consecutive fails at which point offload permanently fails out */
-	uint32_t nss_nack_total;		/* Total times accel engine NAK's an accel command */
-	uint32_t nss_nack;			/* Count of consecutive times driver failed to ack */
-	uint32_t nss_nack_limit;		/* Limit on consecutive nacks at which point offload permanently fails out */
+	uint32_t ae_nack_total;		/* Total times accel engine NAK's an accel command */
+	uint32_t ae_nack;			/* Count of consecutive times driver failed to ack */
+	uint32_t ae_nack_limit;		/* Limit on consecutive nacks at which point offload permanently fails out */
 	unsigned long cmd_time_begun;		/* Time captured when an accel or decel request begun */
 	unsigned long cmd_time_completed;	/* Time captured when request finished */
 };
