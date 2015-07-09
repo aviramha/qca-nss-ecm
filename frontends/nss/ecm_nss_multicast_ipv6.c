@@ -116,14 +116,16 @@ static int ecm_nss_multicast_ipv6_accelerated_count = 0;
 static int ecm_nss_multicast_ipv6_interface_heirarchy_construct(struct ecm_front_end_connection_instance *feci,
 								struct ecm_db_iface_instance *interfaces, struct net_device *in_dev,
 								struct net_device *brdev, ip_addr_t packet_src_addr, ip_addr_t packet_dest_addr, uint8_t max_if,
-								uint32_t *dst_dev, int32_t *to_interface_first, bool is_routed)
+								uint32_t *dst_dev, int32_t *to_interface_first, uint8_t *src_node_addr, bool is_routed)
 {
 	int32_t iface_instance_cnt;
 
 	if (is_routed) {
 		iface_instance_cnt = ecm_interface_multicast_heirarchy_construct_routed(feci, interfaces, in_dev, packet_src_addr, packet_dest_addr, max_if, dst_dev, to_interface_first);
 	} else {
-		iface_instance_cnt = ecm_interface_multicast_heirarchy_construct_bridged(feci, interfaces, brdev, packet_src_addr, packet_dest_addr, max_if, dst_dev, to_interface_first);
+		iface_instance_cnt = ecm_interface_multicast_heirarchy_construct_bridged(feci, interfaces, brdev,
+											 packet_src_addr, packet_dest_addr, max_if,
+											 dst_dev, to_interface_first, src_node_addr);
 	}
 	return iface_instance_cnt;
 }
@@ -2164,7 +2166,7 @@ unsigned int ecm_nss_multicast_ipv6_connection_process(struct net_device *out_de
 		}
 
 		interface_idx_cnt = ecm_nss_multicast_ipv6_interface_heirarchy_construct(feci, to_list, in_dev, out_dev->master, ip_src_addr,
-										      ip_dest_addr, mc_if_cnt, mc_dest_if, to_list_first, is_routed);
+										      ip_dest_addr, mc_if_cnt, mc_dest_if, to_list_first, src_node_addr,  is_routed);
 		if (interface_idx_cnt == 0) {
 			DEBUG_WARN("Failed to obtain 'to' heirarchy list\n");
 			ecm_db_mapping_deref(src_mi);
@@ -2385,7 +2387,7 @@ unsigned int ecm_nss_multicast_ipv6_connection_process(struct net_device *out_de
 			feci = ecm_db_connection_front_end_get_and_ref(ci);
 			interface_idx_cnt = ecm_nss_multicast_ipv6_interface_heirarchy_construct(feci, to_list, in_dev, out_dev->master,\
 												   ip_src_addr, ip_dest_addr, mc_if_cnt,\
-												   mc_dest_if, to_list_first, is_routed);
+												   mc_dest_if, to_list_first, src_node_addr, is_routed);
 			feci->deref(feci);
 			if (interface_idx_cnt == 0) {
 				DEBUG_WARN("Failed to reconstruct 'to mc' heirarchy list\n");
@@ -2657,6 +2659,7 @@ static void ecm_nss_multicast_ipv6_br_update_event_callback(struct net_device *b
 	ip_addr_t src_ip;
 	struct in6_addr group6;
 	struct in6_addr origin6;
+	uint8_t src_node_addr[ETH_ALEN];
 	int32_t to_list_first[ECM_DB_MULTICAST_IF_MAX];
 	int i, ret;
 	uint32_t if_cnt, mc_flags = 0;
@@ -2790,11 +2793,13 @@ static void ecm_nss_multicast_ipv6_br_update_event_callback(struct net_device *b
 				to_list_first[i] = ECM_DB_IFACE_HEIRARCHY_MAX;
 			}
 
+			ecm_db_connection_from_node_address_get(ci, src_node_addr);
+
 			/*
 			 * Create the interface heirarchy list for the new interfaces. We append this list later to
 			 * the existing list of destination interfaces.
 			 */
-			if_cnt = ecm_interface_multicast_heirarchy_construct_bridged(feci, to_list, brdev, src_ip, dest_ip, mc_sync.if_join_cnt, mc_sync.join_dev, to_list_first);
+			if_cnt = ecm_interface_multicast_heirarchy_construct_bridged(feci, to_list, brdev, src_ip, dest_ip, mc_sync.if_join_cnt, mc_sync.join_dev, to_list_first, src_node_addr);
 			if (if_cnt == 0) {
 				DEBUG_WARN("Failed to obtain 'to_mcast_update' heirarchy list\n");
 				ecm_db_multicast_tuple_instance_deref(tuple_instance);

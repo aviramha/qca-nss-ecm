@@ -1626,10 +1626,10 @@ EXPORT_SYMBOL(ecm_interface_establish_and_ref);
  *	br_slave_dev	Netdev pointer to a bridge slave device. It could be NULL in case of pure
  *			routed flow without any bridge interface in destination dev list.
  */
-static uint32_t ecm_interface_multicast_heirarchy_construct_single(struct ecm_front_end_connection_instance *feci,
-								ip_addr_t src_addr, ip_addr_t dest_addr,
-								struct ecm_db_iface_instance *interface, struct net_device *given_dest_dev,
-								struct net_device *br_slave_dev)
+static uint32_t ecm_interface_multicast_heirarchy_construct_single(struct ecm_front_end_connection_instance *feci, ip_addr_t src_addr,
+								   ip_addr_t dest_addr, struct ecm_db_iface_instance *interface,
+								   struct net_device *given_dest_dev, struct net_device *br_slave_dev,
+								   uint8_t *src_node_addr, bool is_routed)
 {
 	struct ecm_db_iface_instance *to_list_single[ECM_DB_IFACE_HEIRARCHY_MAX];
 	struct ecm_db_iface_instance **ifaces;
@@ -1743,7 +1743,7 @@ static uint32_t ecm_interface_multicast_heirarchy_construct_single(struct ecm_fr
 					break;
 				}
 
- #ifdef ECM_INTERFACE_BOND_ENABLE
+#ifdef ECM_INTERFACE_BOND_ENABLE
 				/*
 				 * LAG?
 				 */
@@ -1760,16 +1760,26 @@ static uint32_t ecm_interface_multicast_heirarchy_construct_single(struct ecm_fr
 					memset(src_mac_addr, 0, ETH_ALEN);
 					memset(dest_mac_addr, 0, ETH_ALEN);
 
-					ECM_IP_ADDR_TO_NIN4_ADDR(src_addr_32, src_addr);
-					ECM_IP_ADDR_TO_NIN4_ADDR(dest_addr_32, dest_addr);
+					if (ECM_IP_ADDR_IS_V4(src_addr)) {
+						ECM_IP_ADDR_TO_NIN4_ADDR(src_addr_32, src_addr);
+						ECM_IP_ADDR_TO_NIN4_ADDR(dest_addr_32, dest_addr);
+					}
 
-					/*
-					 * Use appropriate source MAC address for routed packets
-					 */
-					if (dest_dev->master) {
-						memcpy(src_mac_addr, dest_dev->master->dev_addr, ETH_ALEN);
+					if (!is_routed) {
+						memcpy(src_mac_addr, src_node_addr, ETH_ALEN);
 					} else {
-						memcpy(src_mac_addr, dest_dev->dev_addr, ETH_ALEN);
+						struct net_device *dest_dev_master;
+
+						/*
+						 * Use appropriate source MAC address for routed packets
+						 */
+						dest_dev_master = ecm_interface_get_and_hold_dev_master(dest_dev);
+						if (dest_dev_master) {
+							memcpy(src_mac_addr, dest_dev_master->dev_addr, ETH_ALEN);
+							dev_put(dest_dev_master);
+						} else {
+							memcpy(src_mac_addr, dest_dev->dev_addr, ETH_ALEN);
+						}
 					}
 
 					/*
@@ -1777,9 +1787,16 @@ static uint32_t ecm_interface_multicast_heirarchy_construct_single(struct ecm_fr
 					 */
 					ecm_translate_multicast_mac(dest_addr, dest_mac_addr);
 
-					next_dev = bond_get_tx_dev(NULL, src_mac_addr, dest_mac_addr,
-								   &src_addr_32, &dest_addr_32,
-								   htons((uint16_t)ETH_P_IP), dest_dev);
+					if (ECM_IP_ADDR_IS_V4(src_addr)) {
+						next_dev = bond_get_tx_dev(NULL, src_mac_addr, dest_mac_addr,
+									   &src_addr_32, &dest_addr_32,
+									   htons((uint16_t)ETH_P_IP), dest_dev);
+					} else {
+						next_dev = bond_get_tx_dev(NULL, src_mac_addr, dest_mac_addr,
+									   src_addr, dest_addr,
+									   htons((uint16_t)ETH_P_IPV6), dest_dev);
+					}
+
 					if (!(next_dev && netif_carrier_ok(next_dev))) {
 						DEBUG_WARN("Unable to obtain LAG output slave device\n");
 						dev_put(dest_dev);
@@ -2071,7 +2088,22 @@ int32_t ecm_interface_multicast_heirarchy_construct_routed(struct ecm_front_end_
 				if_num = mc_bridge_ipv6_get_if(dest_dev, &origin6, &group6, mc_max_dst, mc_dst_if_index);
 			}
 
-			if ((if_num <= 0) || (if_num > ECM_DB_MULTICAST_IF_MAX)) {
+			if ((if_num < 0) || (if_num > ECM_DB_MULTICAST_IF_MAX)) {
+				int i;
+				DEBUG_WARN("MCS is not ready\n");
+
+				/*
+				 * If already constructed any interface heirarchies before hitting
+				 * this error condition then Deref all interface heirarchies.
+				 */
+				if (valid_if > 0) {
+					for (i = 0; i < valid_if; i++) {
+						ifaces = ecm_db_multicast_if_heirarchy_get(interfaces, i);
+						ecm_db_multicast_copy_if_heirarchy(to_list_single, ifaces);
+						ecm_db_connection_interfaces_deref(to_list_single, interface_first_base[i]);
+					}
+				}
+
 				dev_put(dest_dev);
 				return 0;
 			}
@@ -2104,7 +2136,7 @@ int32_t ecm_interface_multicast_heirarchy_construct_routed(struct ecm_front_end_
 				/*
 				 * Construct a single interface heirarchy of a multicast dev.
 				 */
-				ii_cnt = ecm_interface_multicast_heirarchy_construct_single(feci, packet_src_addr, packet_dest_addr, ifaces, dest_dev, mc_br_slave_dev);
+				ii_cnt = ecm_interface_multicast_heirarchy_construct_single(feci, packet_src_addr, packet_dest_addr, ifaces, dest_dev, mc_br_slave_dev, NULL, true);
 				if (ii_cnt == ECM_DB_IFACE_HEIRARCHY_MAX) {
 
 					/*
@@ -2140,7 +2172,7 @@ int32_t ecm_interface_multicast_heirarchy_construct_routed(struct ecm_front_end_
 			/*
 			 * Construct a single interface heirarchy of a multicast dev.
 			 */
-			ii_cnt = ecm_interface_multicast_heirarchy_construct_single(feci, packet_src_addr, packet_dest_addr, ifaces, dest_dev, NULL);
+			ii_cnt = ecm_interface_multicast_heirarchy_construct_single(feci, packet_src_addr, packet_dest_addr, ifaces, dest_dev, NULL, NULL, true);
 			if (ii_cnt == ECM_DB_IFACE_HEIRARCHY_MAX) {
 
 				/*
@@ -2186,11 +2218,9 @@ EXPORT_SYMBOL(ecm_interface_multicast_heirarchy_construct_routed);
  *	interface_first_base An array of the index of the first interface in the list
  */
 int32_t ecm_interface_multicast_heirarchy_construct_bridged(struct ecm_front_end_connection_instance *feci,
-							struct ecm_db_iface_instance *interfaces,
-							struct net_device *dest_dev,
-							ip_addr_t packet_src_addr, ip_addr_t packet_dest_addr,
-							uint8_t mc_max_dst, int *mc_dst_if_index_base,
-							uint32_t *interface_first_base)
+						     struct ecm_db_iface_instance *interfaces, struct net_device *dest_dev,
+						     ip_addr_t packet_src_addr, ip_addr_t packet_dest_addr, uint8_t mc_max_dst,
+						     int *mc_dst_if_index_base, uint32_t *interface_first_base, uint8_t *src_node_addr)
 {
 	struct ecm_db_iface_instance *to_list_single[ECM_DB_IFACE_HEIRARCHY_MAX];
 	struct ecm_db_iface_instance *ifaces;
@@ -2252,7 +2282,7 @@ int32_t ecm_interface_multicast_heirarchy_construct_bridged(struct ecm_front_end
 		/*
 		 * Construct a single interface heirarchy of a multicast dev.
 		 */
-		ii_cnt = ecm_interface_multicast_heirarchy_construct_single(feci, packet_src_addr, packet_dest_addr, ifaces, dest_dev, mc_br_slave_dev);
+		ii_cnt = ecm_interface_multicast_heirarchy_construct_single(feci, packet_src_addr, packet_dest_addr, ifaces, dest_dev, mc_br_slave_dev, src_node_addr, false);
 		if (ii_cnt == ECM_DB_IFACE_HEIRARCHY_MAX) {
 
 			/*

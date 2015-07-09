@@ -112,16 +112,15 @@ static int ecm_nss_multicast_ipv4_accelerated_count = 0;
  * 	Create destination interface heirarchy for a routed/bridge multicast connection
  */
 static int32_t ecm_nss_multicast_connection_to_interface_heirarchy_construct(struct ecm_front_end_connection_instance *feci,
-									struct ecm_db_iface_instance *interfaces,
-									ip_addr_t ip_src_addr, ip_addr_t ip_dest_addr,
-									struct net_device *in_dev, struct net_device *brdev, uint8_t max_if, uint32_t *dst_dev,
-									uint32_t *to_list_first, bool is_routed)
+								      struct ecm_db_iface_instance *interfaces, ip_addr_t ip_src_addr, ip_addr_t ip_dest_addr,
+								      struct net_device *in_dev, struct net_device *brdev, uint8_t max_if, uint32_t *dst_dev,
+								      uint32_t *to_list_first, uint8_t *src_node_addr, bool is_routed)
 {
 	int interface_instance_cnt;
 	if (is_routed) {
 		interface_instance_cnt = ecm_interface_multicast_heirarchy_construct_routed(feci, interfaces, in_dev, ip_src_addr, ip_dest_addr, max_if, dst_dev, to_list_first);
 	} else {
-		interface_instance_cnt = ecm_interface_multicast_heirarchy_construct_bridged(feci, interfaces, brdev, ip_src_addr, ip_dest_addr, max_if, dst_dev, to_list_first);
+		interface_instance_cnt = ecm_interface_multicast_heirarchy_construct_bridged(feci, interfaces, brdev, ip_src_addr, ip_dest_addr, max_if, dst_dev, to_list_first, src_node_addr);
 	}
 
 	return interface_instance_cnt;
@@ -2228,7 +2227,9 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 			*to_first = ECM_DB_IFACE_HEIRARCHY_MAX;
 		}
 
-		interface_idx_cnt = ecm_nss_multicast_connection_to_interface_heirarchy_construct(feci, to_list, ip_src_addr, ip_dest_addr, in_dev, out_dev->master, if_cnt, dst_dev, to_list_first, is_routed);
+		interface_idx_cnt = ecm_nss_multicast_connection_to_interface_heirarchy_construct(feci, to_list, ip_src_addr, ip_dest_addr, in_dev,
+												  out_dev->master, if_cnt, dst_dev, to_list_first,
+												  src_node_addr, is_routed);
 		if (interface_idx_cnt == 0) {
 			ecm_db_node_deref(src_ni);
 			ecm_db_mapping_deref(src_mi);
@@ -2516,7 +2517,9 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 			}
 
 			feci = ecm_db_connection_front_end_get_and_ref(ci);
-			interface_idx_cnt = ecm_nss_multicast_connection_to_interface_heirarchy_construct(feci, to_list, ip_src_addr, ip_dest_addr, in_dev, out_dev->master, if_cnt, dst_dev, to_list_first, is_routed);
+			interface_idx_cnt = ecm_nss_multicast_connection_to_interface_heirarchy_construct(feci, to_list, ip_src_addr, ip_dest_addr, in_dev,
+													  out_dev->master, if_cnt, dst_dev, to_list_first,
+													  src_node_addr, is_routed);
 			feci->deref(feci);
 			if (interface_idx_cnt == 0) {
 				DEBUG_WARN("Failed to reconstruct 'to mc' heirarchy list\n");
@@ -2801,7 +2804,8 @@ static void ecm_br_multicast_update_event_callback(struct net_device *brdev, uin
 	uint32_t if_cnt;
 	int32_t if_num;
 	uint32_t mc_flags = 0;
-	uint32_t mc_max_dst = 4;
+	uint32_t mc_max_dst = ECM_DB_MULTICAST_IF_MAX;
+	uint8_t src_node_addr[ETH_ALEN];
 	bool if_update;
 
 	DEBUG_TRACE("ecm_br_multicast_event_callback 0x%x\n", group);
@@ -2923,11 +2927,13 @@ static void ecm_br_multicast_update_event_callback(struct net_device *brdev, uin
 				to_list_first[i] = ECM_DB_IFACE_HEIRARCHY_MAX;
 			}
 
+			ecm_db_connection_from_node_address_get(ci, src_node_addr);
+
 			/*
 			 * Create the interface heirarchy list for the new interfaces. We append this list later to
 			 * the existing list of destination interfaces.
 			 */
-			if_cnt = ecm_interface_multicast_heirarchy_construct_bridged(feci, to_list, brdev, src_ip, dest_ip, mc_update.if_join_cnt, mc_update.join_dev, to_list_first );
+			if_cnt = ecm_interface_multicast_heirarchy_construct_bridged(feci, to_list, brdev, src_ip, dest_ip, mc_update.if_join_cnt, mc_update.join_dev, to_list_first, src_node_addr);
 			if (if_cnt == 0) {
 				DEBUG_WARN("Failed to obtain 'to_mcast_update' heirarchy list\n");
 				ecm_db_multicast_tuple_instance_deref(tuple_instance);
