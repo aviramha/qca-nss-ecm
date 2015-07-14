@@ -109,6 +109,7 @@ void ecm_front_end_conntrack_notifier_exit(void)
 	ecm_nss_conntrack_notifier_exit();
 }
 
+#ifdef ECM_INTERFACE_BOND_ENABLE
 
 /*
  * ecm_front_end_bond_notifier_stop()
@@ -172,4 +173,7 @@ void ecm_front_end_bond_notifier_exit(void)
 #endif
 	ecm_nss_bond_notifier_exit();
 }
+
+#endif
+
 
