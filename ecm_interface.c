@@ -43,7 +43,11 @@
 #endif
 #include <linux/inetdevice.h>
 #if defined(ECM_INTERFACE_TUNIPIP6_ENABLE) || defined(ECM_INTERFACE_SIT_ENABLE)
+#if (LINUX_VERSION_CODE <= KERNEL_VERSION(3, 9, 0))
 #include <net/ipip.h>
+#else
+#include <net/ip_tunnels.h>
+#endif
 #endif
 #include <net/ip6_tunnel.h>
 #include <net/addrconf.h>
