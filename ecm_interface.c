@@ -2658,8 +2658,10 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 					memset(src_mac_addr, 0, ETH_ALEN);
 					memset(dest_mac_addr, 0, ETH_ALEN);
 
-					ECM_IP_ADDR_TO_NIN4_ADDR(src_addr_32, src_addr);
-					ECM_IP_ADDR_TO_NIN4_ADDR(dest_addr_32, dest_addr);
+					if (ip_version == 4) {
+						ECM_IP_ADDR_TO_NIN4_ADDR(src_addr_32, src_addr);
+						ECM_IP_ADDR_TO_NIN4_ADDR(dest_addr_32, dest_addr);
+					}
 
 					if (!is_routed) {
 						memcpy(src_mac_addr, src_node_addr, ETH_ALEN);
