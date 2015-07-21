@@ -14,7 +14,7 @@
  **************************************************************************
  */
 
-extern unsigned int ecm_nss_ported_ipv6_process(struct net_device *out_dev,
+extern unsigned int ecm_sfe_ported_ipv6_process(struct net_device *out_dev,
 							struct net_device *in_dev,
 							uint8_t *src_node_addr,
 							uint8_t *dest_node_addr,
@@ -23,5 +23,5 @@ extern unsigned int ecm_nss_ported_ipv6_process(struct net_device *out_dev,
 							struct nf_conn *ct, ecm_tracker_sender_type_t sender, ecm_db_direction_t ecm_dir,
 							struct nf_conntrack_tuple *orig_tuple, struct nf_conntrack_tuple *reply_tuple,
 							ip_addr_t ip_src_addr, ip_addr_t ip_dest_addr);
-extern bool ecm_nss_ported_ipv6_debugfs_init(struct dentry *dentry);
+extern bool ecm_sfe_ported_ipv6_debugfs_init(struct dentry *dentry);
 

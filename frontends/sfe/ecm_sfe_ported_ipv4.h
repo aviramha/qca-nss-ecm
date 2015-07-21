@@ -14,7 +14,7 @@
  **************************************************************************
  */
 
-extern unsigned int ecm_nss_ported_ipv4_process(struct net_device *out_dev, struct net_device *out_dev_nat,
+extern unsigned int ecm_sfe_ported_ipv4_process(struct net_device *out_dev, struct net_device *out_dev_nat,
 							struct net_device *in_dev, struct net_device *in_dev_nat,
 							uint8_t *src_node_addr, uint8_t *src_node_addr_nat,
 							uint8_t *dest_node_addr, uint8_t *dest_node_addr_nat,
@@ -24,5 +24,5 @@ extern unsigned int ecm_nss_ported_ipv4_process(struct net_device *out_dev, stru
 							struct nf_conntrack_tuple *orig_tuple, struct nf_conntrack_tuple *reply_tuple,
 							ip_addr_t ip_src_addr, ip_addr_t ip_dest_addr, ip_addr_t ip_src_addr_nat,
 							ip_addr_t ip_dest_addr_nat);
-extern bool ecm_nss_ported_ipv4_debugfs_init(struct dentry *dentry);
+extern bool ecm_sfe_ported_ipv4_debugfs_init(struct dentry *dentry);
 

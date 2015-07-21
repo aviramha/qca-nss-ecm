@@ -26,20 +26,43 @@ ecm-y := \
 	 frontends/ecm_front_end_ipv4.o \
 	 frontends/ecm_front_end_ipv6.o \
 	 frontends/ecm_front_end_common.o \
-	 frontends/nss/ecm_nss_ipv4.o \
-	 frontends/nss/ecm_nss_ported_ipv4.o \
 	 ecm_db.o \
 	 ecm_classifier_default.o \
-	 frontends/nss/ecm_nss_conntrack_notifier.o \
 	 ecm_interface.o \
 	 ecm_init.o
+
+# #############################################################################
+# Define ECM_FRONT_END_NSS_ENABLE=y in order to select
+# nss as ECM's front end.
+# #############################################################################
+ifeq ($(ECM_FRONT_END_NSS_ENABLE),)
+ECM_FRONT_END_NSS_ENABLE=y
+endif
+ecm-$(ECM_FRONT_END_NSS_ENABLE) += frontends/nss/ecm_nss_ipv4.o
+ecm-$(ECM_FRONT_END_NSS_ENABLE) += frontends/nss/ecm_nss_ported_ipv4.o
+ecm-$(ECM_FRONT_END_NSS_ENABLE) += frontends/nss/ecm_nss_conntrack_notifier.o
+ccflags-$(ECM_FRONT_END_NSS_ENABLE) += -DECM_FRONT_END_NSS_ENABLE
+
+# #############################################################################
+# Define ECM_FRONT_END_SFE_ENABLE=y in order to select
+# sfe as ECM's front end.
+# #############################################################################
+ifeq ($(ECM_FRONT_END_SFE_ENABLE),)
+ECM_FRONT_END_SFE_ENABLE=y
+endif
+ecm-$(ECM_FRONT_END_SFE_ENABLE) += frontends/sfe/ecm_sfe_ipv4.o
+ecm-$(ECM_FRONT_END_SFE_ENABLE) += frontends/sfe/ecm_sfe_ported_ipv4.o
+ecm-$(ECM_FRONT_END_SFE_ENABLE) += frontends/sfe/ecm_sfe_conntrack_notifier.o
+ccflags-$(ECM_FRONT_END_SFE_ENABLE) += -DECM_FRONT_END_SFE_ENABLE
 
 # #############################################################################
 # Define ECM_INTERFACE_BOND_ENABLE=y in order to enable
 # Bonding / Link Aggregation support.
 # #############################################################################
+ifeq ($(ECM_FRONT_END_NSS_ENABLE), y)
 ifneq ($(findstring 3.4, $(KERNELVERSION)),)
 ECM_INTERFACE_BOND_ENABLE=y
+endif
 endif
 ecm-$(ECM_INTERFACE_BOND_ENABLE) += frontends/nss/ecm_nss_bond_notifier.o
 ccflags-$(ECM_INTERFACE_BOND_ENABLE) += -DECM_INTERFACE_BOND_ENABLE
@@ -68,8 +91,10 @@ ccflags-$(ECM_INTERFACE_TUNIPIP6_ENABLE) += -DECM_INTERFACE_TUNIPIP6_ENABLE
 # #############################################################################
 # Define ECM_MULTICAST_ENABLE=y in order to enable support for ECM Multicast
 # #############################################################################
+ifeq ($(ECM_FRONT_END_NSS_ENABLE), y)
 ifneq ($(findstring 3.4, $(KERNELVERSION)),)
 ECM_MULTICAST_ENABLE=y
+endif
 endif
 ecm-$(ECM_MULTICAST_ENABLE) += frontends/nss/ecm_nss_multicast_ipv4.o
 ecm-$(ECM_MULTICAST_ENABLE) += frontends/nss/ecm_nss_multicast_ipv6.o
@@ -91,8 +116,14 @@ ccflags-$(ECM_INTERFACE_IPSEC_ENABLE) += -DECM_INTERFACE_IPSEC_ENABLE
 # Define ECM_IPV6_ENABLE=y in order to enable IPv6 support in the ECM.
 # #############################################################################
 ECM_IPV6_ENABLE=y
+ifeq ($(ECM_FRONT_END_NSS_ENABLE), y)
 ecm-$(ECM_IPV6_ENABLE) += frontends/nss/ecm_nss_ipv6.o
 ecm-$(ECM_IPV6_ENABLE) += frontends/nss/ecm_nss_ported_ipv6.o
+endif
+ifeq ($(ECM_FRONT_END_SFE_ENABLE), y)
+ecm-$(ECM_IPV6_ENABLE) += frontends/sfe/ecm_sfe_ipv6.o
+ecm-$(ECM_IPV6_ENABLE) += frontends/sfe/ecm_sfe_ported_ipv6.o
+endif
 ccflags-$(ECM_IPV6_ENABLE) += -DECM_IPV6_ENABLE
 
 # #############################################################################
@@ -132,8 +163,14 @@ ccflags-$(ECM_CLASSIFIER_PCC_ENABLE) += -DECM_CLASSIFIER_PCC_ENABLE
 # Define ECM_NON_PORTED_SUPPORT_ENABLE=y in order to enable non-ported protocol.
 # #############################################################################
 ECM_NON_PORTED_SUPPORT_ENABLE=y
+ifeq ($(ECM_FRONT_END_NSS_ENABLE), y)
 ecm-$(ECM_NON_PORTED_SUPPORT_ENABLE) += frontends/nss/ecm_nss_non_ported_ipv4.o
 ecm-$(ECM_NON_PORTED_SUPPORT_ENABLE) += frontends/nss/ecm_nss_non_ported_ipv6.o
+endif
+ifeq ($(ECM_FRONT_END_SFE_ENABLE), y)
+ecm-$(ECM_NON_PORTED_SUPPORT_ENABLE) += frontends/sfe/ecm_sfe_non_ported_ipv4.o
+ecm-$(ECM_NON_PORTED_SUPPORT_ENABLE) += frontends/sfe/ecm_sfe_non_ported_ipv6.o
+endif
 ccflags-$(ECM_NON_PORTED_SUPPORT_ENABLE) += -DECM_NON_PORTED_SUPPORT_ENABLE
 
 # #############################################################################
@@ -201,6 +238,12 @@ ccflags-y += -DECM_NSS_IPV6_DEBUG_LEVEL=1
 ccflags-y += -DECM_NSS_PORTED_IPV6_DEBUG_LEVEL=1
 ccflags-y += -DECM_NSS_NON_PORTED_IPV6_DEBUG_LEVEL=1
 ccflags-y += -DECM_NSS_MULTICAST_IPV6_DEBUG_LEVEL=1
+ccflags-y += -DECM_SFE_IPV4_DEBUG_LEVEL=1
+ccflags-y += -DECM_SFE_PORTED_IPV4_DEBUG_LEVEL=1
+ccflags-y += -DECM_SFE_NON_PORTED_IPV4_DEBUG_LEVEL=1
+ccflags-y += -DECM_SFE_IPV6_DEBUG_LEVEL=1
+ccflags-y += -DECM_SFE_PORTED_IPV6_DEBUG_LEVEL=1
+ccflags-y += -DECM_SFE_NON_PORTED_IPV6_DEBUG_LEVEL=1
 ccflags-y += -DECM_CONNTRACK_NOTIFIER_DEBUG_LEVEL=1
 ccflags-y += -DECM_TRACKER_DEBUG_LEVEL=1
 ccflags-y += -DECM_TRACKER_DATAGRAM_DEBUG_LEVEL=1
@@ -211,7 +254,7 @@ ccflags-y += -DECM_INTERFACE_DEBUG_LEVEL=1
 ccflags-y += -DECM_STATE_DEBUG_LEVEL=1
 ccflags-y += -DECM_OPENWRT_SUPPORT=1
 
-ccflags-y += -I$(obj)/ -I$(obj)/frontends/include -I$(obj)/frontends/nss
+ccflags-y += -I$(obj)/ -I$(obj)/frontends/include -I$(obj)/frontends/nss -I$(obj)/frontends/sfe
 
 obj ?= .
 

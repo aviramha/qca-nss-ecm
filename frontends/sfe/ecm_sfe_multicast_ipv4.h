@@ -14,17 +14,57 @@
  **************************************************************************
  */
 
-extern unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_dev,
+/*
+ * ecm_sfe_multicast_ipv4_connection_process()
+ *	Process a UDP multicast flow
+ */
+static inline unsigned int ecm_sfe_multicast_ipv4_connection_process(struct net_device *out_dev,
 							struct net_device *in_dev,
 							uint8_t *src_node_addr,
 							uint8_t *dest_node_addr,
 							bool can_accel, bool is_routed, struct sk_buff *skb,
 							struct ecm_tracker_ip_header *iph,
 							struct nf_conn *ct, ecm_tracker_sender_type_t sender,
-							struct nf_conntrack_tuple *orig_tuple, struct nf_conntrack_tuple *reply_tuple);
+							struct nf_conntrack_tuple *orig_tuple, struct nf_conntrack_tuple *reply_tuple)
+{
+	/*
+	 * Now sfe don't support multicast, just return
+	 */
+	return NF_ACCEPT;
+}
 
-extern bool ecm_nss_multicast_ipv4_debugfs_init(struct dentry *dentry);
+/*
+ * ecm_sfe_multicast_ipv4_debugfs_init()
+ *	create debugfs for ecm sfe ipv4 multicast
+ */
+static inline bool ecm_sfe_multicast_ipv4_debugfs_init(struct dentry *dentry)
+{
+	/*
+	 * Now sfe don't support multicast, just return
+	 */
+	return true;
+}
 
-extern void ecm_nss_multicast_ipv4_init(void);
+/*
+ * ecm_sfe_multicast_ipv4_init()
+ * 	Register the callbacks for MCS snooper and MFC update
+ */
+static inline void ecm_sfe_multicast_ipv4_init(void)
+{
+	/*
+	 * Now sfe don't support multicast, just return
+	 */
+	return;
+}
 
-extern void ecm_nss_multicast_ipv4_exit(void);
+/*
+ * ecm_sfe_multicast_ipv4_exit()
+ * 	De-register the callbacks for MCS snooper and MFC update
+ */
+static inline void ecm_sfe_multicast_ipv4_exit(void)
+{
+	/*
+	 * Now sfe don't support multicast, just return
+	 */
+	return;
+}

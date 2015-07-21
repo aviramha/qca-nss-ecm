@@ -89,15 +89,6 @@ static int __init ecm_init(void)
 {
 	int ret;
 
-	/*
-	 * Run only for IPQ8064 platform, if the device tree is used.
-	 */
-#ifdef CONFIG_OF
-	if (!of_machine_is_compatible("qcom,ipq8064")) {
-		DEBUG_WARN("Not compatible platform for ECM\n");
-		return 0;
-	}
-#endif
 	printk(KERN_INFO "ECM init\n");
 
 	ecm_dentry = debugfs_create_dir("ecm", NULL);
@@ -232,17 +223,6 @@ err_db:
 static void __exit ecm_exit(void)
 {
 	printk(KERN_INFO "ECM exit\n");
-
-	/*
-	 * If the platform is not IPQ8064 and device tree is enabled,
-	 * this means ECM started but none of the features are used.
-	 * So, just return here.
-	 */
-#ifdef CONFIG_OF
-	if (!of_machine_is_compatible("qcom,ipq8064")) {
-		return;
-	}
-#endif
 
 	/* call stop on anything that requires a prepare-to-exit signal */
 	DEBUG_INFO("stop conntrack notifier\n");

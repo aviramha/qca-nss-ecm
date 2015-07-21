@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2014-2015, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2015, The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -14,6 +14,6 @@
  **************************************************************************
  */
 
-extern void ecm_nss_conntrack_notifier_stop(int num);
-extern int ecm_nss_conntrack_notifier_init(struct dentry *dentry);
-extern void ecm_nss_conntrack_notifier_exit(void);
+extern void ecm_sfe_conntrack_notifier_stop(int num);
+extern int ecm_sfe_conntrack_notifier_init(struct dentry *dentry);
+extern void ecm_sfe_conntrack_notifier_exit(void);

@@ -15,8 +15,90 @@
  */
 
 #include <linux/if_pppox.h>
+
+#ifdef ECM_FRONT_END_NSS_ENABLE
 #include "ecm_nss_conntrack_notifier.h"
+#else
+static inline void ecm_nss_conntrack_notifier_stop(int num)
+{
+	/*
+	 * Just return if nss front end is not enabled
+	 */
+	return;
+}
+
+static inline int ecm_nss_conntrack_notifier_init(struct dentry *dentry)
+{
+	/*
+	 * Just return if nss front end is not enabled
+	 */
+	return 0;
+}
+
+static inline void ecm_nss_conntrack_notifier_exit(void)
+{
+	/*
+	 * Just return if nss front end is not enabled
+	 */
+	return;
+}
+#endif
+
+#ifdef ECM_FRONT_END_SFE_ENABLE
+#include "ecm_sfe_conntrack_notifier.h"
+#else
+static inline void ecm_sfe_conntrack_notifier_stop(int num)
+{
+	/*
+	 * Just return if sfe front end is not enabled
+	 */
+	return;
+}
+
+static inline int ecm_sfe_conntrack_notifier_init(struct dentry *dentry)
+{
+	/*
+	 * Just return if sfe front end is not enabled
+	 */
+	return 0;
+}
+
+static inline void ecm_sfe_conntrack_notifier_exit(void)
+{
+	/*
+	 * Just return if sfe front end is not enabled
+	 */
+	return;
+}
+#endif
+
+#ifdef ECM_FRONT_END_NSS_ENABLE
 #include "ecm_nss_bond_notifier.h"
+#else
+static inline void ecm_nss_bond_notifier_stop(int num)
+{
+	/*
+	 * Just return if nss front end is not enabled
+	 */
+	return;
+}
+
+static inline int ecm_nss_bond_notifier_init(struct dentry *dentry)
+{
+	/*
+	 * Just return if nss front end is not enabled
+	 */
+	return 0;
+}
+
+static inline void ecm_nss_bond_notifier_exit(void)
+{
+	/*
+	 * Just return if nss front end is not enabled
+	 */
+	return;
+}
+#endif
 
 /*
  * ecm_front_end_l2_encap_header_len()

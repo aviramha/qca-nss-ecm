@@ -14,10 +14,64 @@
  **************************************************************************
  */
 
+#ifdef ECM_FRONT_END_NSS_ENABLE
 #include "ecm_nss_ipv6.h"
+#else
+static inline int ecm_nss_ipv6_init(struct dentry *dentry)
+{
+	/*
+	 * Just return if nss front end is not enabled
+	 */
+	return 0;
+}
+
+static inline void ecm_nss_ipv6_stop(int num)
+{
+	/*
+	 * Just return if nss front end is not enabled
+	 */
+	return;
+}
+
+static inline void ecm_nss_ipv6_exit(void)
+{
+	/*
+	 * Just return if nss front end is not enabled
+	 */
+	return;
+}
+#endif
+
+#ifdef ECM_FRONT_END_SFE_ENABLE
+#include "ecm_sfe_ipv6.h"
+#else
+static inline int ecm_sfe_ipv6_init(struct dentry *dentry)
+{
+	/*
+	 * Just return if sfe front end is not enabled
+	 */
+	return 0;
+}
+
+static inline void ecm_sfe_ipv6_stop(int num)
+{
+	/*
+	 * Just return if sfe front end is not enabled
+	 */
+	return;
+}
+
+static inline void ecm_sfe_ipv6_exit(void)
+{
+	/*
+	 * Just return if sfe front end is not enabled
+	 */
+	return;
+}
+#endif
 
 /*
- * IPv4 rule sync reasons.
+ * IPv6 rule sync reasons.
  */
 enum ecm_front_end_ipv6_rule_sync_reason {
 	ECM_FRONT_END_IPV6_RULE_SYNC_REASON_STATS = 0,	/* Sync is to synchronize stats */

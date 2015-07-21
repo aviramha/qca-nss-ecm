@@ -15,51 +15,44 @@
  */
 
 /*
- * Some constants used with constructing NSS acceleration rules.
- * GGG TODO These should be provided by the NSS driver itself!
+ * This macro converts ECM ip_addr_t to SFE IPv6 address
  */
-#define ECM_NSS_CONNMGR_VLAN_ID_NOT_CONFIGURED 0xFFF
-#define ECM_NSS_CONNMGR_VLAN_MARKING_NOT_CONFIGURED 0xFFFF
-
-/*
- * This macro converts ECM ip_addr_t to NSS IPv6 address
- */
-#define ECM_IP_ADDR_TO_NSS_IPV6_ADDR(nss6, ipaddrt) \
+#define ECM_IP_ADDR_TO_SFE_IPV6_ADDR(sfe6, ipaddrt) \
 	{ \
-		ecm_type_check_ae_ipv6(nss6); \
+		ecm_type_check_ae_ipv6(sfe6); \
 		ecm_type_check_ecm_ip_addr(ipaddrt); \
-		nss6[0] = ipaddrt[3]; \
-		nss6[1] = ipaddrt[2]; \
-		nss6[2] = ipaddrt[1]; \
-		nss6[3] = ipaddrt[0]; \
+		sfe6[0] = htonl(ipaddrt[3]); \
+		sfe6[1] = htonl(ipaddrt[2]); \
+		sfe6[2] = htonl(ipaddrt[1]); \
+		sfe6[3] = htonl(ipaddrt[0]); \
 	}
 
 /*
- * This macro converts NSS IPv6 address to ECM ip_addr_t
+ * This macro converts SFE IPv6 address to ECM ip_addr_t
  */
-#define ECM_NSS_IPV6_ADDR_TO_IP_ADDR(ipaddrt, nss6) \
+#define ECM_SFE_IPV6_ADDR_TO_IP_ADDR(ipaddrt, sfe6) \
 	{ \
 		ecm_type_check_ecm_ip_addr(ipaddrt); \
-		ecm_type_check_ae_ipv6(nss6); \
-		ipaddrt[0] = nss6[3]; \
-		ipaddrt[1] = nss6[2]; \
-		ipaddrt[2] = nss6[1]; \
-		ipaddrt[3] = nss6[0]; \
+		ecm_type_check_ae_ipv6(sfe6); \
+		ipaddrt[0] = ntohl(sfe6[3]); \
+		ipaddrt[1] = ntohl(sfe6[2]); \
+		ipaddrt[2] = ntohl(sfe6[1]); \
+		ipaddrt[3] = ntohl(sfe6[0]); \
 	}
 
 /*
- * ecm_nss_common_get_interface_number_by_dev()
+ * ecm_sfe_common_get_interface_number_by_dev()
  *	Returns the acceleration engine interface number based on the net_device object.
  */
-static inline int32_t ecm_nss_common_get_interface_number_by_dev(struct net_device *dev)
+static inline int32_t ecm_sfe_common_get_interface_number_by_dev(struct net_device *dev)
 {
 	/*
-	 * nss_interface_num for all IPsec tunnels will always be the one specific to acceleration engine.
+	 * sfe_interface_num for all IPsec tunnels will always be the one specific to acceleration engine.
 	 */
 	if (dev->type == ECM_ARPHRD_IPSEC_TUNNEL_TYPE) {
-		return NSS_C2C_TX_INTERFACE;
+		return SFE_SPECIAL_INTERFACE_IPSEC;
 	}
 
-	return nss_cmn_get_interface_number_by_dev(dev);
+	return dev->ifindex;
 }
 
