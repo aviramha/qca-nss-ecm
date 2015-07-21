@@ -149,13 +149,6 @@ static inline void ecm_type_check_ae_ipv6(uint32_t ip6[4]){}
 		__ECM_IP_ADDR_COPY_NO_CHECK(d,s); \
 	}
 
-#define ECM_LINUX6_TO_IP_ADDR(d,s) \
-	{ \
-		ecm_type_check_ecm_ip_addr(d); \
-		ecm_type_check_ae_ipv6(&s); \
-		__ECM_IP_ADDR_COPY_NO_CHECK(d,s); \
-	}
-
 /*
  * This macro converts from Linux IPv6 address (network order) to ECM ip_addr_t
  */

@@ -176,8 +176,8 @@ static void ecm_sfe_ported_ipv4_connection_callback(void *app_data, struct sfe_i
 	 */
 	DEBUG_TRACE("%p: accelerate response for connection: %p, serial: %u\n", npci, feci->ci, serial);
 	DEBUG_TRACE("%p: rule_flags: %x, valid_flags: %x\n", npci, nircm->rule_flags, nircm->valid_flags);
-	DEBUG_TRACE("%p: flow_ip: %pI4h:%d\n", npci, &nircm->tuple.flow_ip, nircm->tuple.flow_ident);
-	DEBUG_TRACE("%p: return_ip: %pI4h:%d\n", npci, &nircm->tuple.return_ip, nircm->tuple.return_ident);
+	DEBUG_TRACE("%p: flow_ip: %pI4n:%d\n", npci, &nircm->tuple.flow_ip, nircm->tuple.flow_ident);
+	DEBUG_TRACE("%p: return_ip: %pI4n:%d\n", npci, &nircm->tuple.return_ip, nircm->tuple.return_ident);
 	DEBUG_TRACE("%p: protocol: %d\n", npci, nircm->tuple.protocol);
 
 	/*
@@ -426,6 +426,13 @@ static void ecm_sfe_ported_ipv4_connection_accelerate(struct ecm_front_end_conne
 	 */
 	nircm->conn_rule.flow_interface_num = from_sfe_iface_id;
 	nircm->conn_rule.return_interface_num = to_sfe_iface_id;
+
+	/*
+	 * Set interface numbers involved in accelerating this connection.
+	 * These are the inner facing addresses from the heirarchy interface lists we got above.
+	 */
+	nim.msg.rule_create.conn_rule.flow_top_interface_num = ecm_db_iface_interface_identifier_get(from_ifaces[ECM_DB_IFACE_HEIRARCHY_MAX-1]);
+	nim.msg.rule_create.conn_rule.return_top_interface_num = ecm_db_iface_interface_identifier_get(to_ifaces[ECM_DB_IFACE_HEIRARCHY_MAX-1]);
 
 	/*
 	 * We know that each outward facing interface is known to the SFE and so this connection could be accelerated.
@@ -808,7 +815,7 @@ static void ecm_sfe_ported_ipv4_connection_accelerate(struct ecm_front_end_conne
 	 * The flow_ip is where the connection established from
 	 */
 	ecm_db_connection_from_address_get(feci->ci, addr);
-	ECM_IP_ADDR_TO_HIN4_ADDR(nircm->tuple.flow_ip, addr);
+	ECM_IP_ADDR_TO_NIN4_ADDR(nircm->tuple.flow_ip, addr);
 
 	/*
 	 * The return_ip is where the connection is established to, however, in the case of ingress
@@ -817,7 +824,7 @@ static void ecm_sfe_ported_ipv4_connection_accelerate(struct ecm_front_end_conne
 	 * the NAT'ed version would be the same as the normal address
 	 */
 	ecm_db_connection_to_address_nat_get(feci->ci, addr);
-	ECM_IP_ADDR_TO_HIN4_ADDR(nircm->tuple.return_ip, addr);
+	ECM_IP_ADDR_TO_NIN4_ADDR(nircm->tuple.return_ip, addr);
 
 	/*
 	 * When the packet is forwarded to the next interface get the address the source IP of the
@@ -825,22 +832,22 @@ static void ecm_sfe_ported_ipv4_connection_accelerate(struct ecm_front_end_conne
 	 * This also works for ingress as the NAT'ed version of the WAN host would be the same as non-NAT'ed
 	 */
 	ecm_db_connection_from_address_nat_get(feci->ci, addr);
-	ECM_IP_ADDR_TO_HIN4_ADDR(nircm->conn_rule.flow_ip_xlate, addr);
+	ECM_IP_ADDR_TO_NIN4_ADDR(nircm->conn_rule.flow_ip_xlate, addr);
 
 	/*
 	 * The destination address is what the destination IP is translated to as it is forwarded to the next interface.
 	 * For egress this would yield the normal wan host and for ingress this would correctly NAT back to the LAN host
 	 */
 	ecm_db_connection_to_address_get(feci->ci, addr);
-	ECM_IP_ADDR_TO_HIN4_ADDR(nircm->conn_rule.return_ip_xlate, addr);
+	ECM_IP_ADDR_TO_NIN4_ADDR(nircm->conn_rule.return_ip_xlate, addr);
 
 	/*
 	 * Same approach as above for port information
 	 */
-	nircm->tuple.flow_ident = ecm_db_connection_from_port_get(feci->ci);
-	nircm->tuple.return_ident = ecm_db_connection_to_port_nat_get(feci->ci);
-	nircm->conn_rule.flow_ident_xlate = ecm_db_connection_from_port_nat_get(feci->ci);
-	nircm->conn_rule.return_ident_xlate = ecm_db_connection_to_port_get(feci->ci);
+	nircm->tuple.flow_ident = htons(ecm_db_connection_from_port_get(feci->ci));
+	nircm->tuple.return_ident = htons(ecm_db_connection_to_port_nat_get(feci->ci));
+	nircm->conn_rule.flow_ident_xlate = htons(ecm_db_connection_from_port_nat_get(feci->ci));
+	nircm->conn_rule.return_ident_xlate = htons(ecm_db_connection_to_port_get(feci->ci));
 
 	/*
 	 * Get mac addresses.
@@ -956,10 +963,10 @@ static void ecm_sfe_ported_ipv4_connection_accelerate(struct ecm_front_end_conne
 			"Protocol: %d\n"
 			"from_mtu: %u\n"
 			"to_mtu: %u\n"
-			"from_ip: %pI4h:%d\n"
-			"to_ip: %pI4h:%d\n"
-			"from_ip_xlate: %pI4h:%d\n"
-			"to_ip_xlate: %pI4h:%d\n"
+			"from_ip: %pI4n:%d\n"
+			"to_ip: %pI4n:%d\n"
+			"from_ip_xlate: %pI4n:%d\n"
+			"to_ip_xlate: %pI4n:%d\n"
 			"from_mac: %pM\n"
 			"to_mac: %pM\n"
 			"src_iface_num: %u\n"
@@ -1175,8 +1182,8 @@ static void ecm_sfe_ported_ipv4_connection_destroy_callback(void *app_data, stru
 	 * Dump some useful trace information.
 	 */
 	DEBUG_TRACE("%p: decelerate response for connection: %p\n", npci, feci->ci);
-	DEBUG_TRACE("%p: flow_ip: %pI4h:%d\n", npci, &nirdm->tuple.flow_ip, nirdm->tuple.flow_ident);
-	DEBUG_TRACE("%p: return_ip: %pI4h:%d\n", npci, &nirdm->tuple.return_ip, nirdm->tuple.return_ident);
+	DEBUG_TRACE("%p: flow_ip: %pI4n:%d\n", npci, &nirdm->tuple.flow_ip, nirdm->tuple.flow_ident);
+	DEBUG_TRACE("%p: return_ip: %pI4n:%d\n", npci, &nirdm->tuple.return_ip, nirdm->tuple.return_ident);
 	DEBUG_TRACE("%p: protocol: %d\n", npci, nirdm->tuple.protocol);
 
 	/*
@@ -1307,11 +1314,11 @@ static void ecm_sfe_ported_ipv4_connection_decelerate(struct ecm_front_end_conne
 	 * Get addressing information
 	 */
 	ecm_db_connection_from_address_get(feci->ci, addr);
-	ECM_IP_ADDR_TO_HIN4_ADDR(nirdm->tuple.flow_ip, addr);
+	ECM_IP_ADDR_TO_NIN4_ADDR(nirdm->tuple.flow_ip, addr);
 	ecm_db_connection_to_address_nat_get(feci->ci, addr);
-	ECM_IP_ADDR_TO_HIN4_ADDR(nirdm->tuple.return_ip, addr);
-	nirdm->tuple.flow_ident = ecm_db_connection_from_port_get(feci->ci);
-	nirdm->tuple.return_ident = ecm_db_connection_to_port_nat_get(feci->ci);
+	ECM_IP_ADDR_TO_NIN4_ADDR(nirdm->tuple.return_ip, addr);
+	nirdm->tuple.flow_ident = htons(ecm_db_connection_from_port_get(feci->ci));
+	nirdm->tuple.return_ident = htons(ecm_db_connection_to_port_nat_get(feci->ci));
 
 	DEBUG_INFO("%p: Ported Connection %p decelerate\n"
 			"protocol: %d\n"

@@ -1326,7 +1326,7 @@ static void ecm_sfe_ipv6_stats_sync_callback(void *app_data, struct sfe_ipv6_msg
 			ECM_IP_ADDR_TO_OCTAL(flow_ip), (int)sync->flow_ident,
 			ECM_IP_ADDR_TO_OCTAL(return_ip), (int)sync->return_ident);
 
-	ci = ecm_db_connection_find_and_ref(flow_ip, return_ip, sync->protocol, (int)sync->flow_ident, (int)sync->return_ident);
+	ci = ecm_db_connection_find_and_ref(flow_ip, return_ip, sync->protocol, (int)ntohs(sync->flow_ident), (int)ntohs(sync->return_ident));
 	if (!ci) {
 		DEBUG_TRACE("%p: SFE Sync: no connection\n", sync);
 		goto sync_conntrack;
@@ -1358,12 +1358,6 @@ static void ecm_sfe_ipv6_stats_sync_callback(void *app_data, struct sfe_ipv6_msg
 			ecm_db_multicast_connection_data_totals_update(ci, true, sync->return_rx_byte_count, sync->return_rx_packet_count);
 			ecm_db_multicast_connection_interface_heirarchy_stats_update(ci, sync->flow_rx_byte_count, sync->flow_rx_packet_count);
 
-			/*
-			 * Update interface statistics
-			 */
-			ecm_interface_multicast_stats_update(ci, sync->flow_tx_packet_count, sync->flow_tx_byte_count, sync->flow_rx_packet_count, sync->flow_rx_byte_count,
-										sync->return_tx_packet_count, sync->return_tx_byte_count, sync->return_rx_packet_count, sync->return_rx_byte_count);
-
 			ECM_IP_ADDR_TO_NIN6_ADDR(origin6, flow_ip);
 			ECM_IP_ADDR_TO_NIN6_ADDR(group6, return_ip);
 
@@ -1384,11 +1378,6 @@ static void ecm_sfe_ipv6_stats_sync_callback(void *app_data, struct sfe_ipv6_msg
 			 */
 			ecm_db_connection_data_totals_update(ci, false, sync->return_rx_byte_count, sync->return_rx_packet_count);
 
-			/*
-			 * Update interface statistics
-			 */
-			ecm_interface_stats_update(ci, sync->flow_tx_packet_count, sync->flow_tx_byte_count, sync->flow_rx_packet_count, sync->flow_rx_byte_count,
-						sync->return_tx_packet_count, sync->return_tx_byte_count, sync->return_rx_packet_count, sync->return_rx_byte_count);
 		}
 
 		/*
@@ -1411,11 +1400,6 @@ static void ecm_sfe_ipv6_stats_sync_callback(void *app_data, struct sfe_ipv6_msg
 		 */
 		feci->action_seen(feci);
 
-		/*
-		 * Update interface statistics
-		 */
-		ecm_interface_stats_update(ci, sync->flow_tx_packet_count, sync->flow_tx_byte_count, sync->flow_rx_packet_count, sync->flow_rx_byte_count,
-						sync->return_tx_packet_count, sync->return_tx_byte_count, sync->return_rx_packet_count, sync->return_rx_byte_count);
 #endif
 	}
 
@@ -1521,14 +1505,14 @@ sync_conntrack:
 	 * Create a tuple so as to be able to look up a conntrack connection
 	 */
 	memset(&tuple, 0, sizeof(tuple));
-	ECM_IP_ADDR_TO_NIN6_ADDR(tuple.src.u3.in6, flow_ip)
-	tuple.src.u.all = (__be16)htons(sync->flow_ident);
+	ECM_IP_ADDR_TO_NIN6_ADDR(tuple.src.u3.in6, flow_ip);
+	tuple.src.u.all = sync->flow_ident;
 	tuple.src.l3num = AF_INET6;
 
 	ECM_IP_ADDR_TO_NIN6_ADDR(tuple.dst.u3.in6, return_ip);
 	tuple.dst.dir = IP_CT_DIR_ORIGINAL;
 	tuple.dst.protonum = (uint8_t)sync->protocol;
-	tuple.dst.u.all = (__be16)htons(sync->return_ident);
+	tuple.dst.u.all = sync->return_ident;
 
 	DEBUG_TRACE("Conntrack sync, lookup conntrack connection using\n"
 			"Protocol: %d\n"

@@ -1587,28 +1587,28 @@ static void ecm_sfe_ipv4_stats_sync_callback(void *app_data, struct sfe_ipv4_msg
 	 */
 	DEBUG_INFO("%p: SFE Sync, lookup connection using\n"
 			"Protocol: %d\n" \
-			"src_addr: %pI4h:%d\n" \
-			"dest_addr: %pI4h:%d\n",
+			"src_addr: %pI4n:%d\n" \
+			"dest_addr: %pI4n:%d\n",
 			sync,
 			(int)sync->protocol,
 			&sync->flow_ip, (int)sync->flow_ident,
 			&sync->return_ip_xlate, (int)sync->return_ident_xlate);
 
-	ECM_HIN4_ADDR_TO_IP_ADDR(flow_ip, sync->flow_ip);
-	ECM_HIN4_ADDR_TO_IP_ADDR(return_ip_xlate, sync->return_ip_xlate);
-	ECM_HIN4_ADDR_TO_IP_ADDR(return_ip, sync->return_ip);
+	ECM_NIN4_ADDR_TO_IP_ADDR(flow_ip, sync->flow_ip);
+	ECM_NIN4_ADDR_TO_IP_ADDR(return_ip_xlate, sync->return_ip_xlate);
+	ECM_NIN4_ADDR_TO_IP_ADDR(return_ip, sync->return_ip);
 
 #ifdef ECM_MULTICAST_ENABLE
 	/*
 	 * Check for multicast flow
 	 */
 	if (ecm_ip_addr_is_multicast(return_ip)) {
-		ci = ecm_db_connection_find_and_ref(flow_ip, return_ip, sync->protocol, (int)sync->flow_ident, (int)sync->return_ident);
+		ci = ecm_db_connection_find_and_ref(flow_ip, return_ip, sync->protocol, (int)ntohs(sync->flow_ident), (int)ntohs(sync->return_ident));
 	} else {
-		ci = ecm_db_connection_find_and_ref(flow_ip, return_ip_xlate, sync->protocol, (int)sync->flow_ident, (int)sync->return_ident_xlate);
+		ci = ecm_db_connection_find_and_ref(flow_ip, return_ip_xlate, sync->protocol, (int)ntohs(sync->flow_ident), (int)ntohs(sync->return_ident_xlate));
 	}
 #else
-	ci = ecm_db_connection_find_and_ref(flow_ip, return_ip_xlate, sync->protocol, (int)sync->flow_ident, (int)sync->return_ident_xlate);
+	ci = ecm_db_connection_find_and_ref(flow_ip, return_ip_xlate, sync->protocol, (int)ntohs(sync->flow_ident), (int)ntohs(sync->return_ident_xlate));
 #endif
 	if (!ci) {
 		DEBUG_TRACE("%p: SFE Sync: no connection\n", sync);
@@ -1647,11 +1647,6 @@ static void ecm_sfe_ipv4_stats_sync_callback(void *app_data, struct sfe_ipv4_msg
 			feci->action_seen(feci);
 
 			/*
-			 * Update interface statistics
-			 */
-			ecm_interface_multicast_stats_update(ci, sync->flow_tx_packet_count, sync->flow_tx_byte_count, sync->flow_rx_packet_count, sync->flow_rx_byte_count,
-										sync->return_tx_packet_count, sync->return_tx_byte_count, sync->return_rx_packet_count, sync->return_rx_byte_count);
-			/*
 			 * Update IP multicast routing cache stats
 			 */
 			ipmr_mfc_stats_update(&init_net, htonl(flow_ip[0]), htonl(return_ip[0]), sync->flow_rx_packet_count,
@@ -1672,11 +1667,6 @@ static void ecm_sfe_ipv4_stats_sync_callback(void *app_data, struct sfe_ipv4_msg
 			 */
 			feci->action_seen(feci);
 
-			/*
-			 * Update interface statistics
-			 */
-			ecm_interface_stats_update(ci, sync->flow_tx_packet_count, sync->flow_tx_byte_count, sync->flow_rx_packet_count, sync->flow_rx_byte_count,
-							sync->return_tx_packet_count, sync->return_tx_byte_count, sync->return_rx_packet_count, sync->return_rx_byte_count);
 		}
 
 #else
@@ -1695,11 +1685,6 @@ static void ecm_sfe_ipv4_stats_sync_callback(void *app_data, struct sfe_ipv4_msg
 		 */
 		feci->action_seen(feci);
 
-		/*
-		 * Update interface statistics
-		 */
-		ecm_interface_stats_update(ci, sync->flow_tx_packet_count, sync->flow_tx_byte_count, sync->flow_rx_packet_count, sync->flow_rx_byte_count,
-						sync->return_tx_packet_count, sync->return_tx_byte_count, sync->return_rx_packet_count, sync->return_rx_byte_count);
 #endif
 	}
 
@@ -1751,9 +1736,9 @@ static void ecm_sfe_ipv4_stats_sync_callback(void *app_data, struct sfe_ipv4_msg
 		 */
 		neigh = ecm_sfe_ipv4_neigh_get(flow_ip);
 		if (!neigh) {
-			DEBUG_WARN("Neighbour entry for %pI4h not found\n", &sync->flow_ip);
+			DEBUG_WARN("Neighbour entry for %pI4n not found\n", &sync->flow_ip);
 		} else {
-			DEBUG_TRACE("Neighbour entry for %pI4h update: %p\n", &sync->flow_ip, neigh);
+			DEBUG_TRACE("Neighbour entry for %pI4n update: %p\n", &sync->flow_ip, neigh);
 			neigh_update(neigh, NULL, neigh->nud_state, NEIGH_UPDATE_F_WEAK_OVERRIDE);
 			neigh_release(neigh);
 		}
@@ -1765,9 +1750,9 @@ static void ecm_sfe_ipv4_stats_sync_callback(void *app_data, struct sfe_ipv4_msg
 		if (!ecm_ip_addr_is_multicast(return_ip)) {
 			neigh = ecm_sfe_ipv4_neigh_get(return_ip);
 			if (!neigh) {
-				DEBUG_WARN("Neighbour entry for %pI4h not found\n", &sync->return_ip);
+				DEBUG_WARN("Neighbour entry for %pI4n not found\n", &sync->return_ip);
 			} else {
-				DEBUG_TRACE("Neighbour entry for %pI4h update: %p\n", &sync->return_ip, neigh);
+				DEBUG_TRACE("Neighbour entry for %pI4n update: %p\n", &sync->return_ip, neigh);
 				neigh_update(neigh, NULL, neigh->nud_state, NEIGH_UPDATE_F_WEAK_OVERRIDE);
 				neigh_release(neigh);
 			}
@@ -1778,9 +1763,9 @@ static void ecm_sfe_ipv4_stats_sync_callback(void *app_data, struct sfe_ipv4_msg
 		 */
 		neigh = ecm_sfe_ipv4_neigh_get(return_ip);
 		if (!neigh) {
-			DEBUG_WARN("Neighbour entry for %pI4h not found\n", &sync->return_ip);
+			DEBUG_WARN("Neighbour entry for %pI4n not found\n", &sync->return_ip);
 		} else {
-			DEBUG_TRACE("Neighbour entry for %pI4h update: %p\n", &sync->return_ip, neigh);
+			DEBUG_TRACE("Neighbour entry for %pI4n update: %p\n", &sync->return_ip, neigh);
 			neigh_update(neigh, NULL, neigh->nud_state, NEIGH_UPDATE_F_WEAK_OVERRIDE);
 			neigh_release(neigh);
 		}
@@ -1805,14 +1790,14 @@ sync_conntrack:
 	 * Create a tuple so as to be able to look up a conntrack connection
 	 */
 	memset(&tuple, 0, sizeof(tuple));
-	tuple.src.u3.ip = htonl(sync->flow_ip);
-	tuple.src.u.all = (__be16)htons(sync->flow_ident);
+	tuple.src.u3.ip = sync->flow_ip;
+	tuple.src.u.all = sync->flow_ident;
 	tuple.src.l3num = AF_INET;
 
-	tuple.dst.u3.ip = htonl(sync->return_ip);
+	tuple.dst.u3.ip = sync->return_ip;
 	tuple.dst.dir = IP_CT_DIR_ORIGINAL;
 	tuple.dst.protonum = (uint8_t)sync->protocol;
-	tuple.dst.u.all = (__be16)htons(sync->return_ident);
+	tuple.dst.u.all = sync->return_ident;
 
 	DEBUG_TRACE("Conntrack sync, lookup conntrack connection using\n"
 			"Protocol: %d\n"

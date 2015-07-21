@@ -433,6 +433,13 @@ static void ecm_sfe_ported_ipv6_connection_accelerate(struct ecm_front_end_conne
 	nircm->conn_rule.return_interface_num = to_sfe_iface_id;
 
 	/*
+	 * Set interface numbers involved in accelerating this connection.
+	 * These are the inner facing addresses from the heirarchy interface lists we got above.
+	 */
+	nim.msg.rule_create.conn_rule.flow_top_interface_num = ecm_db_iface_interface_identifier_get(from_ifaces[ECM_DB_IFACE_HEIRARCHY_MAX-1]);
+	nim.msg.rule_create.conn_rule.return_top_interface_num = ecm_db_iface_interface_identifier_get(to_ifaces[ECM_DB_IFACE_HEIRARCHY_MAX-1]);
+
+	/*
 	 * We know that each outward facing interface is known to the SFE and so this connection could be accelerated.
 	 * However the lists may also specify other interesting details that must be included in the creation command,
 	 * for example, ethernet MAC, VLAN tagging or PPPoE session information.
@@ -824,8 +831,8 @@ static void ecm_sfe_ported_ipv6_connection_accelerate(struct ecm_front_end_conne
 	/*
 	 * Same approach as above for port information
 	 */
-	nircm->tuple.flow_ident = ecm_db_connection_from_port_get(feci->ci);
-	nircm->tuple.return_ident = ecm_db_connection_to_port_get(feci->ci);
+	nircm->tuple.flow_ident = htons(ecm_db_connection_from_port_get(feci->ci));
+	nircm->tuple.return_ident = htons(ecm_db_connection_to_port_get(feci->ci));
 
 	/*
 	 * Get mac addresses.
@@ -1254,8 +1261,8 @@ static void ecm_sfe_ported_ipv6_connection_decelerate(struct ecm_front_end_conne
 	ECM_IP_ADDR_TO_SFE_IPV6_ADDR(nirdm->tuple.flow_ip, src_ip);
 	ecm_db_connection_to_address_get(feci->ci, dest_ip);
 	ECM_IP_ADDR_TO_SFE_IPV6_ADDR(nirdm->tuple.return_ip, dest_ip);
-	nirdm->tuple.flow_ident = ecm_db_connection_from_port_get(feci->ci);
-	nirdm->tuple.return_ident = ecm_db_connection_to_port_get(feci->ci);
+	nirdm->tuple.flow_ident = htons(ecm_db_connection_from_port_get(feci->ci));
+	nirdm->tuple.return_ident = htons(ecm_db_connection_to_port_get(feci->ci));
 
 	DEBUG_INFO("%p: Ported Connection %p decelerate\n"
 			"protocol: %d\n"
