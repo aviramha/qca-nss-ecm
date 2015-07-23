@@ -486,6 +486,11 @@ version_check_done:
 		ip_hdr->ds = ipv4_get_dsfield(v4_hdr);
 
 		/*
+		 * TTL field
+		 */
+		ip_hdr->ttl = v4_hdr->ttl;
+
+		/*
 		 * Get the protocol and where the header info will be stored
 		 */
 		protocol = v4_hdr->protocol;
@@ -549,6 +554,11 @@ version_check_done:
 	 * DS field
 	 */
 	ip_hdr->ds = ipv6_get_dsfield(v6_hdr);
+
+	/*
+	 * hop_limit field
+	 */
+	ip_hdr->ttl = v6_hdr->hop_limit;
 
 	/*
 	 * Process headers until we run out of space, error, or we get the no next header marker for v6 (protocol 59).

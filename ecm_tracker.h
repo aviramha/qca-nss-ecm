@@ -143,6 +143,7 @@ struct ecm_tracker_ip_header {
 	int protocol;			/* The upper layer transport protocol */
 	bool fragmented;		/* True when fragmented */
 	uint8_t ds;			/* DS field from packet */
+	uint8_t ttl;			/* v4 TTL or v6 hop limit */
 	uint32_t ip_header_length;	/* Length of the IP header plus any variable sized intrinsically attached options */
 	uint32_t total_length;		/* total length of IP header including all extensions and payload.  For v4 this is total_len, for v6 this is payload_len + size of the IP 6 header */
 	uint32_t payload_length;	/* total_length - ip_header_length */

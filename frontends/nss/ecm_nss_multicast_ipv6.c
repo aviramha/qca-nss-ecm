@@ -431,7 +431,7 @@ static int ecm_nss_multicast_ipv6_connection_update_accelerate(struct ecm_front_
 		return -1;
 	}
 
-	nss_cmn_msg_init(&nim->cm, NSS_IPV6_RX_INTERFACE, NSS_IPV6_TX_CREATE_MC_RULE_MSG,
+	nss_ipv6_msg_init(nim, NSS_IPV6_RX_INTERFACE, NSS_IPV6_TX_CREATE_MC_RULE_MSG,
 			sizeof(struct nss_ipv6_mc_rule_create_msg),
 			ecm_nss_multicast_ipv6_connection_update_callback,
 			(void *)ecm_db_connection_serial_get(feci->ci));
@@ -542,6 +542,7 @@ static int ecm_nss_multicast_ipv6_connection_update_accelerate(struct ecm_front_
 					DEBUG_TRACE("%p: Bridge - ignore additional\n", nmci);
 					break;
 				}
+
 				ecm_db_iface_bridge_address_get(ii, to_nss_iface_address);
 				DEBUG_TRACE("%p: Bridge - mac: %pM\n", nmci, to_nss_iface_address);
 				break;
@@ -649,9 +650,7 @@ static int ecm_nss_multicast_ipv6_connection_update_accelerate(struct ecm_front_
 		if (to_nss_iface_id != -1) {
 			create->if_rule[valid_vif_idx].if_num = to_nss_iface_id;
 			memcpy(create->if_rule[valid_vif_idx].if_mac, to_nss_iface_address, ETH_ALEN);
-
 			create->if_rule[valid_vif_idx].if_mtu = to_mtu;
-
 			if (rp->if_join_idx[vif]) {
 
 				/*
@@ -842,26 +841,10 @@ static void ecm_nss_multicast_ipv6_connection_accelerate(struct ecm_front_end_co
 	/*
 	 * Can this connection be accelerated at all?
 	 */
-	DEBUG_INFO("%p: Accel conn: %p\n", nmci, feci->ci);
-	spin_lock_bh(&feci->lock);
-	if (feci->accel_mode <= ECM_FRONT_END_ACCELERATION_MODE_FAIL_DENIED) {
-		spin_unlock_bh(&feci->lock);
-		DEBUG_TRACE("%p: accel %p failed\n", nmci, feci->ci);
+	if (!ecm_nss_ipv6_accel_pending_set(feci)) {
+		DEBUG_TRACE("%p: Acceleration denied: %p\n", feci, feci->ci);
 		return;
 	}
-
-	/*
-	 * If acceleration mode is anything other than "not accelerated" then ignore.
-	 *
-	 */
-	if (feci->accel_mode != ECM_FRONT_END_ACCELERATION_MODE_DECEL) {
-		spin_unlock_bh(&feci->lock);
-		DEBUG_TRACE("%p: Ignoring wrong mode accel for conn: %p\n", nmci, feci->ci);
-		return;
-	}
-
-	feci->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING;
-	spin_unlock_bh(&feci->lock);
 
 	/*
 	 * Construct an accel command.
@@ -874,9 +857,9 @@ static void ecm_nss_multicast_ipv6_connection_accelerate(struct ecm_front_end_co
 		return;
 	}
 
-	nss_cmn_msg_init(&nim->cm, NSS_IPV6_RX_INTERFACE, NSS_IPV6_TX_CREATE_MC_RULE_MSG,
+	nss_ipv6_msg_init(nim, NSS_IPV6_RX_INTERFACE, NSS_IPV6_TX_CREATE_MC_RULE_MSG,
 			sizeof(struct nss_ipv6_mc_rule_create_msg),
-			 (nss_ipv6_msg_callback_t *)ecm_nss_multicast_ipv6_connection_create_callback,
+			 ecm_nss_multicast_ipv6_connection_create_callback,
 			(void *)ecm_db_connection_serial_get(feci->ci));
 
 	create = &nim->msg.mc_rule_create;
@@ -1133,7 +1116,6 @@ static void ecm_nss_multicast_ipv6_connection_accelerate(struct ecm_front_end_co
 		 * interface list.
 		 */
 		if (to_nss_iface_id != -1) {
-
 			create->if_rule[valid_vif_idx].rule_flags |= NSS_IPV6_MC_RULE_CREATE_IF_FLAG_JOIN;
 			create->if_rule[valid_vif_idx].if_num = to_nss_iface_id;
 			memcpy(create->if_rule[valid_vif_idx].if_mac, to_nss_iface_address, ETH_ALEN);
@@ -1940,7 +1922,6 @@ unsigned int ecm_nss_multicast_ipv6_connection_process(struct net_device *out_de
 	ip_addr_t ip_dest_addr;
 	uint32_t mc_dest_if[ECM_DB_MULTICAST_IF_MAX];
 	bool br_dev_found_in_mfc = false;
-
 	int protocol = (int)orig_tuple->dst.protonum;
 
 	if (protocol != IPPROTO_UDP) {
@@ -2023,6 +2004,16 @@ unsigned int ecm_nss_multicast_ipv6_connection_process(struct net_device *out_de
 				DEBUG_WARN("Not found a valid MFC if count %d\n", mc_if_cnt);
 				return NF_ACCEPT;
 			}
+		}
+	}
+
+	/*
+	 * In pure bridge flow, do not process further if Hop Limit is less than two.
+	 */
+	if (!is_routed) {
+		if (iph->ttl < 2) {
+			DEBUG_TRACE("%p: Ignoring, Multicast IPv6 Header has Hop Limit one\n", skb);
+			return NF_ACCEPT;
 		}
 	}
 

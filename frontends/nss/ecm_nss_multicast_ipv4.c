@@ -420,7 +420,7 @@ static int ecm_nss_multicast_ipv4_connection_update_accelerate(struct ecm_front_
 		return -1;
 	}
 
-	nss_cmn_msg_init(&nim->cm, NSS_IPV4_RX_INTERFACE, NSS_IPV4_TX_CREATE_MC_RULE_MSG,
+	nss_ipv4_msg_init(nim, NSS_IPV4_RX_INTERFACE, NSS_IPV4_TX_CREATE_MC_RULE_MSG,
 			sizeof(struct nss_ipv4_mc_rule_create_msg),
 			ecm_nss_multicast_ipv4_connection_update_callback,
 			(void *)ecm_db_connection_serial_get(feci->ci));
@@ -641,9 +641,7 @@ static int ecm_nss_multicast_ipv4_connection_update_accelerate(struct ecm_front_
 		if (to_nss_iface_id != -1) {
 			create->if_rule[valid_vif_idx].if_num = to_nss_iface_id;
 			memcpy(create->if_rule[valid_vif_idx].if_mac, to_nss_iface_address, ETH_ALEN);
-
 			create->if_rule[valid_vif_idx].if_mtu = to_mtu;
-
 			if (rp->if_join_idx[vif]) {
 				/*
 				 * The interface has joined the group
@@ -835,25 +833,10 @@ static void ecm_nss_multicast_ipv4_connection_accelerate(struct ecm_front_end_co
 	/*
 	 * Can this connection be accelerated at all?
 	 */
-	DEBUG_INFO("%p: Accel conn: %p\n", nmci, feci->ci);
-	spin_lock_bh(&feci->lock);
-	if (feci->accel_mode <= ECM_FRONT_END_ACCELERATION_MODE_FAIL_DENIED) {
-		spin_unlock_bh(&feci->lock);
-		DEBUG_TRACE("%p: accel %p failed\n", nmci, feci->ci);
+	if (!ecm_nss_ipv4_accel_pending_set(feci)) {
+		DEBUG_TRACE("%p: Acceleration denied: %p\n", feci, feci->ci);
 		return;
 	}
-
-	/*
-	 * If acceleration mode is anything other than "not accelerated" then ignore.
-	 */
-	if (feci->accel_mode != ECM_FRONT_END_ACCELERATION_MODE_DECEL) {
-		spin_unlock_bh(&feci->lock);
-		DEBUG_TRACE("%p: Ignoring wrong mode accel for conn: %p\n", nmci, feci->ci);
-		return;
-	}
-
-	feci->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING;
-	spin_unlock_bh(&feci->lock);
 
 	/*
 	 * Construct an accel command.
@@ -866,9 +849,9 @@ static void ecm_nss_multicast_ipv4_connection_accelerate(struct ecm_front_end_co
 		return;
 	}
 
-	nss_cmn_msg_init(&nim->cm, NSS_IPV4_RX_INTERFACE, NSS_IPV4_TX_CREATE_MC_RULE_MSG,
+	nss_ipv4_msg_init(nim, NSS_IPV4_RX_INTERFACE, NSS_IPV4_TX_CREATE_MC_RULE_MSG,
 			sizeof(struct nss_ipv4_mc_rule_create_msg),
-			 (nss_ipv4_msg_callback_t *)ecm_nss_multicast_ipv4_connection_create_callback,
+			 ecm_nss_multicast_ipv4_connection_create_callback,
 			(void *)ecm_db_connection_serial_get(feci->ci));
 
 	create = &nim->msg.mc_rule_create;
@@ -2049,6 +2032,16 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 				DEBUG_WARN("Not found a valid MCS if count %d\n", if_cnt);
 				return NF_ACCEPT;
 			}
+		}
+	}
+
+	/*
+	 * In pure bridge flow, do not process further if TTL is less than two.
+	 */
+	if (!is_routed) {
+		if (iph->ttl < 2) {
+			DEBUG_TRACE("%p: Ignoring, Multicast IPv4 Header has TTL one\n", skb);
+			return NF_ACCEPT;
 		}
 	}
 
