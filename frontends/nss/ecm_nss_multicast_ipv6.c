@@ -2932,7 +2932,7 @@ static void ecm_nss_multicast_ipv6_mfc_update_event_callback(struct in6_addr *gr
 	 */
 	ci = ecm_db_multicast_connection_find_and_ref(tuple_instance);
 	if (!ci) {
-		DEBUG_ASSERT(false, "%p: Bad connection instance for routed mcast flow\n", tuple_instance);
+		DEBUG_TRACE("%p: Bad connection instance for routed mcast flow\n", tuple_instance);
 		ecm_db_multicast_tuple_instance_deref(tuple_instance);
 		return;
 	}
