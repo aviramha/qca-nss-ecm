@@ -311,15 +311,13 @@ static void ecm_nss_ported_ipv4_connection_callback(void *app_data, struct nss_i
 /*
  * ecm_nss_ported_ipv4_connection_accelerate()
  *	Accelerate a connection
- *
- * GGG TODO Refactor this function into a single function that np, udp and tcp
- * can all use and reduce the amount of code!
  */
 static void ecm_nss_ported_ipv4_connection_accelerate(struct ecm_front_end_connection_instance *feci,
 									struct ecm_classifier_process_response *pr, bool is_l2_encap,
 									struct nf_conn *ct)
 {
 	struct ecm_nss_ported_ipv4_connection_instance *npci = (struct ecm_nss_ported_ipv4_connection_instance *)feci;
+	uint16_t regen_occurrances;
 	int protocol;
 	int32_t from_ifaces_first;
 	int32_t to_ifaces_first;
@@ -346,6 +344,13 @@ static void ecm_nss_ported_ipv4_connection_accelerate(struct ecm_front_end_conne
 	ecm_front_end_acceleration_mode_t result_mode;
 
 	DEBUG_CHECK_MAGIC(npci, ECM_NSS_PORTED_IPV4_CONNECTION_INSTANCE_MAGIC, "%p: magic failed", npci);
+
+	/*
+	 * Get the re-generation occurrance counter of the connection.
+	 * We compare it again at the end - to ensure that the rule construction has seen no generation
+	 * changes during rule creation.
+	 */
+	regen_occurrances = ecm_db_connection_regeneration_occurrances_get(feci->ci);
 
 	/*
 	 * Test if acceleration is permitted
@@ -1047,6 +1052,22 @@ static void ecm_nss_ported_ipv4_connection_accelerate(struct ecm_front_end_conne
 			nircm->tcp_rule.return_max_window,
 			nircm->tcp_rule.return_end,
 			nircm->tcp_rule.return_max_end);
+	}
+
+	/*
+	 * Now that the rule has been constructed we re-compare the generation occurrance counter.
+	 * If there has been a change then we abort because the rule may have been created using
+	 * unstable data - especially if another thread has begun regeneration of the connection state.
+	 * NOTE: This does not prevent a regen from being flagged immediately after this line of code either,
+	 * or while the acceleration rule is in flight to the nss.
+	 * This is only to check for consistency of rule state - not that the state is stale.
+	 * Remember that the connection is marked as "accel pending state" so if a regen is flagged immediately
+	 * after this check passes, the connection will be decelerated and refreshed very quickly.
+	 */
+	if (regen_occurrances != ecm_db_connection_regeneration_occurrances_get(feci->ci)) {
+		DEBUG_INFO("%p: connection:%p regen occurred - aborting accel rule.\n", feci, feci->ci);
+		ecm_nss_ipv4_accel_pending_clear(feci, ECM_FRONT_END_ACCELERATION_MODE_DECEL);
+		return;
 	}
 
 	/*
@@ -2270,12 +2291,8 @@ unsigned int ecm_nss_ported_ipv4_process(struct net_device *out_dev, struct net_
 	/*
 	 * Do we need to action generation change?
 	 */
-	if (unlikely(ecm_db_connection_classifier_generation_changed(ci))) {
-		if (!ecm_nss_ipv4_connection_regenerate(ci, sender, out_dev, out_dev_nat, in_dev, in_dev_nat)) {
-			DEBUG_WARN("%p: Re-generation failed\n", ci);
-			ecm_db_connection_deref(ci);
-			return NF_ACCEPT;
-		}
+	if (unlikely(ecm_db_connection_regeneration_required_check(ci))) {
+		ecm_nss_ipv4_connection_regenerate(ci, sender, out_dev, out_dev_nat, in_dev, in_dev_nat);
 	}
 
 	/*

@@ -71,12 +71,13 @@ struct ecm_front_end_connection_instance *ecm_db_connection_front_end_get_and_re
 
 void ecm_db_connection_data_stats_get(struct ecm_db_connection_instance *ci, uint64_t *from_data_total, uint64_t *to_data_total, uint64_t *from_packet_total, uint64_t *to_packet_total, uint64_t *from_data_total_dropped, uint64_t *to_data_total_dropped, uint64_t *from_packet_total_dropped, uint64_t *to_packet_total_dropped);
 
-void ecm_db_classifier_generation_change(void);
-
-void ecm_db_connection_classifier_generation_change(struct ecm_db_connection_instance *ci);
-bool ecm_db_connection_classifier_generation_changed(struct ecm_db_connection_instance *ci);
-bool ecm_db_connection_classifier_peek_generation_changed(struct ecm_db_connection_instance *ci);
-
+uint16_t ecm_db_connection_regeneration_occurrances_get(struct ecm_db_connection_instance *ci);
+void ecm_db_conection_regeneration_completed(struct ecm_db_connection_instance *ci);
+void ecm_db_conection_regeneration_failed(struct ecm_db_connection_instance *ci);
+bool ecm_db_connection_regeneration_required_check(struct ecm_db_connection_instance *ci);
+bool ecm_db_connection_regeneration_required_peek(struct ecm_db_connection_instance *ci);
+void ecm_db_connection_regeneration_needed(struct ecm_db_connection_instance *ci);
+void ecm_db_regeneration_needed(void);
 #ifdef ECM_DB_CTA_TRACK_ENABLE
 void ecm_db_connection_regenerate_by_assignment_type(ecm_classifier_type_t ca_type);
 void ecm_db_connection_make_defunct_by_assignment_type(ecm_classifier_type_t ca_type);

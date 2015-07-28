@@ -644,7 +644,7 @@ bool ecm_nss_ipv6_reclassify(struct ecm_db_connection_instance *ci, int assignme
  * It also involves the possible triggering of classifier re-evaluation but only if all currently assigned
  * classifiers permit this operation.
  */
-bool ecm_nss_ipv6_connection_regenerate(struct ecm_db_connection_instance *ci, ecm_tracker_sender_type_t sender,
+void ecm_nss_ipv6_connection_regenerate(struct ecm_db_connection_instance *ci, ecm_tracker_sender_type_t sender,
 							struct net_device *out_dev, struct net_device *in_dev)
 {
 	int i;
@@ -741,17 +741,22 @@ bool ecm_nss_ipv6_connection_regenerate(struct ecm_db_connection_instance *ci, e
 		}
 	}
 
+	/*
+	 * Re-generation of state is successful.
+	 */
+	ecm_db_conection_regeneration_completed(ci);
+
 	if (!reclassify_allowed) {
 		/*
 		 * Regeneration came to a successful conclusion even though reclassification was denied
 		 */
-		DEBUG_WARN("%p: re-gen denied\n", ci);\
+		DEBUG_WARN("%p: re-classify denied\n", ci);
 
 		/*
 		 * Release the assignments
 		 */
 		ecm_db_connection_assignments_release(assignment_count, assignments);
-		return true;
+		return;
 	}
 
 	/*
@@ -762,9 +767,9 @@ bool ecm_nss_ipv6_connection_regenerate(struct ecm_db_connection_instance *ci, e
 		/*
 		 * We could not set up the classifiers to reclassify, it is safer to fail out and try again next time
 		 */
-		DEBUG_WARN("%p: Regeneration failed\n", ci);
+		DEBUG_WARN("%p: Regeneration: reclassify failed\n", ci);
 		ecm_db_connection_assignments_release(assignment_count, assignments);
-		return false;
+		return;
 	}
 	DEBUG_INFO("%p: reclassify success\n", ci);
 
@@ -772,12 +777,12 @@ bool ecm_nss_ipv6_connection_regenerate(struct ecm_db_connection_instance *ci, e
 	 * Release the assignments
 	 */
 	ecm_db_connection_assignments_release(assignment_count, assignments);
-	return true;
+	return;
 
 ecm_ipv6_retry_regen:
 	feci->deref(feci);
-	ecm_db_connection_classifier_generation_change(ci);
-	return false;
+	ecm_db_conection_regeneration_failed(ci);
+	return;
 }
 
 /*
@@ -1504,7 +1509,7 @@ static void ecm_nss_ipv6_net_dev_callback(void *app_data, struct nss_ipv6_msg *n
 	/*
 	 * If connection should be re-generated then we need to force a deceleration
 	 */
-	if (unlikely(ecm_db_connection_classifier_peek_generation_changed(ci))) {
+	if (unlikely(ecm_db_connection_regeneration_required_peek(ci))) {
 		DEBUG_TRACE("%p: Connection generation changing, terminating acceleration", ci);
 		feci->decelerate(feci);
 	}

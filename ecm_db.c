@@ -725,8 +725,31 @@ struct ecm_db_connection_instance {
 								 */
 #endif
 
-	uint16_t classifier_generation;				/* Used to detect when a re-evaluation of this connection is necessary */
-	uint32_t generations;					/* Tracks how many times re-generation was seen for this connection */
+	/*
+	 * Re-generation.
+	 * When system or classifier state changes, affected connections may need to have their state re-generated.
+	 * This ensures that a connection does not continue to operate on stale state which could affect the sanity of acceleration rules.
+	 * A connection needs to be re-generated when its regen_required is > 0.
+	 * When a re-generation is completed successfully the counter is decremented.
+	 * The counter ensures that any further changes of state while re-generation is under way is not missed.
+	 * While a connection needs re-generation (regen_required > 0), acceleration should not be permitted.
+	 * It may not always be practical to flag individual connections for re-generation (time consuming with large numbers of connections).
+	 * The "generation" is a numerical counter comparison against the global "ecm_db_connection_generation".
+	 * This ecm_db_connection_generation can be incremented causing a numerical difference between the connections counter and this global.
+	 * This is enough to flag that a re-generation is needed.
+	 * Further, it is possible that re-generation may be required DURING a rule construction.  Since constructing a rule
+	 * can require lengthy non-atomic processes there needs to be a way to ensure that changes during construction of a rule are caught.
+	 * The regen_occurances is a counter that is incremented whenever regen_required is also incremented.
+	 * However it is never decremented.  This permits the caller to obtain this count before a non-atomic procedure and then afterwards.
+	 * If there is any change in the counter value there is a change of generation!  And the operation should be aborted.
+	 */
+	bool regen_in_progress;					/* The connection is under regeneration right now and is used to provide atomic re-generation in SMP */
+	uint16_t regen_required;				/* The connection needs to be re-generated when > 0 */
+	uint16_t regen_occurances;				/* Total number of regens required */
+	uint16_t generation;					/* Used to detect when a re-evaluation of this connection is necessary by comparing with ecm_db_connection_generation */
+	uint32_t regen_success;					/* Tracks how many times re-generation was successfully completed */
+	uint32_t regen_fail;					/* Tracks how many times re-generation failed */
+
 	struct ecm_front_end_connection_instance *feci;		/* Front end instance specific to this connection */
 
 	ecm_db_connection_defunct_callback_t defunct;		/* Callback to be called when connection has become defunct */
@@ -824,9 +847,10 @@ static int ecm_db_connection_count_by_protocol[ECM_DB_PROTOCOL_COUNT];	/* Each I
 static DEFINE_SPINLOCK(ecm_db_lock);					/* Protect the table from SMP access. */
 
 /*
- * Connection validity
+ * Connection state validity
+ * This counter is incremented whenever a general change is detected which requires re-generation of state for ALL connections.
  */
-static uint16_t ecm_db_classifier_generation = 0;		/* Generation counter to detect out of date connections that should be reclassified */
+static uint16_t ecm_db_connection_generation = 0;		/* Generation counter to detect when all connection state is considered stale and all must be re-generated */
 
 /*
  * Debugfs dentry object.
@@ -1748,84 +1772,189 @@ ecm_db_iface_type_t ecm_db_connection_iface_type_get(struct ecm_db_iface_instanc
 EXPORT_SYMBOL(ecm_db_connection_iface_type_get);
 
 /*
- * ecm_db_connection_classifier_generation_changed()
- *	Returns true if the classifier generation has changed for this connection.
- *
- * NOTE: The generation index will be reset on return from this call so action any true result immediately.
+ * ecm_db_connection_regeneration_occurrances_get()
+ *	Get the number of regeneration occurrances that have occurred since the connection was created.
  */
-bool ecm_db_connection_classifier_generation_changed(struct ecm_db_connection_instance *ci)
+uint16_t ecm_db_connection_regeneration_occurrances_get(struct ecm_db_connection_instance *ci)
+{
+	uint16_t occurances;
+	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed", ci);
+
+	spin_lock_bh(&ecm_db_lock);
+	occurances = ci->regen_occurances;
+	spin_unlock_bh(&ecm_db_lock);
+	return occurances;
+}
+EXPORT_SYMBOL(ecm_db_connection_regeneration_occurrances_get);
+
+/*
+ * ecm_db_conection_regeneration_completed()
+ *	Re-generation was completed successfully
+ */
+void ecm_db_conection_regeneration_completed(struct ecm_db_connection_instance *ci)
 {
 	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed", ci);
 
 	spin_lock_bh(&ecm_db_lock);
-	if (ci->classifier_generation == ecm_db_classifier_generation) {
+
+	DEBUG_ASSERT(ci->regen_in_progress, "%p: Bad call", ci);
+	DEBUG_ASSERT(ci->regen_required > 0, "%p: Bad call", ci);
+
+	/*
+	 * Decrement the required counter by 1.
+	 * This may mean that regeneration is still required due to another change occuring _during_ re-generation.
+	 */
+	ci->regen_required--;
+	ci->regen_in_progress = false;
+	ci->regen_success++;
+	spin_unlock_bh(&ecm_db_lock);
+}
+EXPORT_SYMBOL(ecm_db_conection_regeneration_completed);
+
+/*
+ * ecm_db_conection_regeneration_failed()
+ *	Re-generation failed
+ */
+void ecm_db_conection_regeneration_failed(struct ecm_db_connection_instance *ci)
+{
+	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed", ci);
+
+	spin_lock_bh(&ecm_db_lock);
+
+	DEBUG_ASSERT(ci->regen_in_progress, "%p: Bad call", ci);
+	DEBUG_ASSERT(ci->regen_required > 0, "%p: Bad call", ci);
+
+	/*
+	 * Re-generation is no longer in progress BUT we leave the regen
+	 * counter as it is so as to indicate re-generation is still needed
+	 */
+	ci->regen_in_progress = false;
+	ci->regen_fail++;
+	spin_unlock_bh(&ecm_db_lock);
+}
+EXPORT_SYMBOL(ecm_db_conection_regeneration_failed);
+
+/*
+ * ecm_db_connection_regeneration_required_check()
+ *	Returns true if the connection needs to be re-generated.
+ *
+ * If re-generation is needed this will mark the connection to indicate that re-generation is needed AND in progress.
+ * If the return code is TRUE the caller MUST handle the re-generation.
+ * Upon re-generation completion you must call ecm_db_conection_regeneration_completed() or ecm_db_conection_regeneration_failed().
+ */
+bool ecm_db_connection_regeneration_required_check(struct ecm_db_connection_instance *ci)
+{
+	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed", ci);
+
+	/*
+	 * Check the global generation counter for changes
+	 */
+	spin_lock_bh(&ecm_db_lock);
+	if (ci->generation != ecm_db_connection_generation) {
+		/*
+		 * Re-generation is needed
+		 */
+		ci->regen_occurances++;
+		ci->regen_required++;
+
+		/*
+		 * Record that we have seen this change
+		 */
+		ci->generation = ecm_db_connection_generation;
+	}
+
+	/*
+	 * If re-generation is in progress then something is handling re-generation already
+	 * so we tell the caller that it cannot handle re-generation.
+	 */
+	if (ci->regen_in_progress) {
 		spin_unlock_bh(&ecm_db_lock);
 		return false;
 	}
-	ci->generations++;
-	ci->classifier_generation = ecm_db_classifier_generation;
+
+	/*
+	 * Is re-generation required?
+	 */
+	if (ci->regen_required == 0) {
+		spin_unlock_bh(&ecm_db_lock);
+		return false;
+	}
+
+	/*
+	 * Flag that re-generation is in progress and tell the caller to handle re-generation
+	 */
+	ci->regen_in_progress = true;
 	spin_unlock_bh(&ecm_db_lock);
 	return true;
 }
-EXPORT_SYMBOL(ecm_db_connection_classifier_generation_changed);
+EXPORT_SYMBOL(ecm_db_connection_regeneration_required_check);
 
 /*
- * ecm_db_connection_classifier_peek_generation_changed()
- *	Returns true if the classifier generation has changed for this connection.
+ * ecm_db_connection_regeneration_required_peek()
+ *	Returns true if the connection needs to be regenerated.
  *
- * NOTE: The generation index will NOT be reset on return from this call.
+ * NOTE: The caller MUST NOT handle re-generation, the caller may use this indication
+ * to determine the sanity of the connection state and whether acceleration is permitted.
  */
-bool ecm_db_connection_classifier_peek_generation_changed(struct ecm_db_connection_instance *ci)
+bool ecm_db_connection_regeneration_required_peek(struct ecm_db_connection_instance *ci)
 {
 	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed", ci);
 
 	spin_lock_bh(&ecm_db_lock);
-	if (ci->classifier_generation == ecm_db_classifier_generation) {
+
+	/*
+	 * Check the global generation counter for changes (record any change now)
+	 */
+	if (ci->generation != ecm_db_connection_generation) {
+		/*
+		 * Re-generation is needed, flag the connection as needing re-generation now.
+		 */
+		ci->regen_occurances++;
+		ci->regen_required++;
+
+		/*
+		 * Record that we have seen this change
+		 */
+		ci->generation = ecm_db_connection_generation;
+	}
+	if (ci->regen_required == 0) {
 		spin_unlock_bh(&ecm_db_lock);
 		return false;
 	}
 	spin_unlock_bh(&ecm_db_lock);
 	return true;
 }
-EXPORT_SYMBOL(ecm_db_connection_classifier_peek_generation_changed);
+EXPORT_SYMBOL(ecm_db_connection_regeneration_required_peek);
 
 /*
- * _ecm_db_connection_classifier_generation_change()
- *	Cause a specific connection to be re-generated
+ * ecm_db_connection_regeneration_needed()
+ *	Cause a specific connection to require re-generation
+ *
+ * NOTE: This only flags that re-generation is needed.
+ * The connection will typically be re-generated when ecm_db_connection_regeneration_required_check() is invoked.
  */
-static void _ecm_db_connection_classifier_generation_change(struct ecm_db_connection_instance *ci)
-{
-	ci->classifier_generation = ecm_db_classifier_generation - 1;
-}
-
-/*
- * ecm_db_connection_classifier_generation_change()
- *	Cause a specific connection to be re-generated
- */
-void ecm_db_connection_classifier_generation_change(struct ecm_db_connection_instance *ci)
+void ecm_db_connection_regeneration_needed(struct ecm_db_connection_instance *ci)
 {
 	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed", ci);
 
 	spin_lock_bh(&ecm_db_lock);
-	_ecm_db_connection_classifier_generation_change(ci);
+	ci->regen_occurances++;
+	ci->regen_required++;
 	spin_unlock_bh(&ecm_db_lock);
 }
-EXPORT_SYMBOL(ecm_db_connection_classifier_generation_change);
+EXPORT_SYMBOL(ecm_db_connection_regeneration_needed);
 
 /*
- * ecm_db_classifier_generation_change()
- *	Bump the generation index to cause a re-classification of connections
- *
- * NOTE: Any connections that see activity after a call to this could be put back to undetermined qos state
- * and driven back through the classifiers.
+ * ecm_db_regeneration_needed()
+ *	Bump the global generation index to cause a re-generation of all connections state.
  */
-void ecm_db_classifier_generation_change(void)
+void ecm_db_regeneration_needed(void)
 {
 	spin_lock_bh(&ecm_db_lock);
-	ecm_db_classifier_generation++;
+	ecm_db_connection_generation++;
 	spin_unlock_bh(&ecm_db_lock);
 }
-EXPORT_SYMBOL(ecm_db_classifier_generation_change);
+EXPORT_SYMBOL(ecm_db_regeneration_needed);
 
 /*
  * ecm_db_connection_direction_get()
@@ -5740,7 +5869,7 @@ void ecm_db_connection_regenerate_by_assignment_type(ecm_classifier_type_t ca_ty
 		struct ecm_db_connection_instance *cin;
 
 		DEBUG_TRACE("%p: Re-generate: %d\n", ci, ca_type);
-		ecm_db_connection_classifier_generation_change(ci);
+		ecm_db_connection_regeneration_needed(ci);
 
 		cin = ecm_db_connection_by_classifier_type_assignment_get_and_ref_next(ci, ca_type);
 		ecm_db_connection_by_classifier_type_assignment_deref(ci, ca_type);
@@ -6759,9 +6888,9 @@ void ecm_db_connection_add(struct ecm_db_connection_instance *ci,
 	mapping_nat_to->nat_to++;
 
 	/*
-	 * Set the generation number
+	 * Set the generation number to match global
 	 */
-	ci->classifier_generation = ecm_db_classifier_generation;
+	ci->generation = ecm_db_connection_generation;
 
 	spin_unlock_bh(&ecm_db_lock);
 
@@ -7661,7 +7790,13 @@ int ecm_db_connection_state_get(struct ecm_state_file_instance *sfi, struct ecm_
 	int ip_version;
 	int protocol;
 	bool is_routed;
-	uint32_t generations;
+	uint32_t regen_success;
+	uint32_t regen_fail;
+	uint16_t regen_required;
+	uint16_t regen_occurances;
+	bool regen_in_progress;
+	uint16_t generation;
+	uint16_t global_generation;
 	uint32_t time_added;
 	uint32_t serial;
 	uint64_t from_data_total;
@@ -7696,6 +7831,15 @@ int ecm_db_connection_state_get(struct ecm_state_file_instance *sfi, struct ecm_
 			expires_in = 0;
 		}
 	}
+
+	regen_success = ci->regen_success;
+	regen_fail = ci->regen_fail;
+	regen_required = ci->regen_required;
+	regen_occurances = ci->regen_occurances;
+	regen_in_progress = ci->regen_in_progress;
+	generation = ci->generation;
+	global_generation = ecm_db_connection_generation;
+
 	spin_unlock_bh(&ecm_db_lock);
 
 	/*
@@ -7730,7 +7874,6 @@ int ecm_db_connection_state_get(struct ecm_state_file_instance *sfi, struct ecm_
 	ip_version = ci->ip_version;
 	protocol = ci->protocol;
 	is_routed = ci->is_routed;
-	generations = ci->generations;
 	time_added = ci->time_added;
 	serial = ci->serial;
 	ecm_db_connection_data_stats_get(ci, &from_data_total, &to_data_total,
@@ -7821,7 +7964,22 @@ int ecm_db_connection_state_get(struct ecm_state_file_instance *sfi, struct ecm_
 		return result;
 	}
 
-	if ((result = ecm_state_write(sfi, "generations", "%u", generations))) {
+	if ((result = ecm_state_write(sfi, "regen_success", "%u", regen_success))) {
+		return result;
+	}
+	if ((result = ecm_state_write(sfi, "regen_fail", "%u", regen_fail))) {
+		return result;
+	}
+	if ((result = ecm_state_write(sfi, "regen_required", "%u", regen_required))) {
+		return result;
+	}
+	if ((result = ecm_state_write(sfi, "regen_occurances", "%u", regen_occurances))) {
+		return result;
+	}
+	if ((result = ecm_state_write(sfi, "regen_in_progress", "%u", regen_in_progress))) {
+		return result;
+	}
+	if ((result = ecm_state_write(sfi, "generation", "%u/%u", generation, global_generation))) {
 		return result;
 	}
 

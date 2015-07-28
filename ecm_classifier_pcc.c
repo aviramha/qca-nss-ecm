@@ -150,9 +150,9 @@ int ecm_classifier_pcc_register(struct ecm_classifier_pcc_registrant *r)
 	spin_unlock_bh(&ecm_classifier_pcc_lock);
 
 	/*
-	 * Force a re-generation of all connections
+	 * Flag a re-generation of all connections is needed
 	 */
-	ecm_db_classifier_generation_change();
+	ecm_db_regeneration_needed();
 	return 0;
 }
 EXPORT_SYMBOL(ecm_classifier_pcc_register);
@@ -189,9 +189,9 @@ void ecm_classifier_pcc_unregister_begin(struct ecm_classifier_pcc_registrant *r
 	module_put(reg->this_module);
 
 	/*
-	 * Force a re-generation of all connections
+	 * Flag a re-generation of all connections is needed
 	 */
-	ecm_db_classifier_generation_change();
+	ecm_db_regeneration_needed();
 }
 EXPORT_SYMBOL(ecm_classifier_pcc_unregister_begin);
 
@@ -545,9 +545,9 @@ static void ecm_classifier_pcc_unregister_force(struct ecm_classifier_pcc_instan
 	module_put(reg->this_module);
 
 	/*
-	 * Force a re-generation of all connections
+	 * Flag a re-generation of all connections is needed
 	 */
-	ecm_db_classifier_generation_change();
+	ecm_db_regeneration_needed();
 }
 
 /*

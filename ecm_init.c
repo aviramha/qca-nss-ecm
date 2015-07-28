@@ -38,6 +38,7 @@
 #include "ecm_tracker.h"
 #include "ecm_classifier.h"
 #include "ecm_front_end_types.h"
+#include "ecm_db.h"
 #include "ecm_front_end_ipv4.h"
 #ifdef ECM_IPV6_ENABLE
 #include "ecm_front_end_ipv6.h"

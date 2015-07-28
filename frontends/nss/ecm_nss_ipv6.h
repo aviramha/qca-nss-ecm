@@ -58,10 +58,19 @@ extern struct nss_ctx_instance *ecm_nss_ipv6_nss_ipv6_mgr;
  */
 static inline bool ecm_nss_ipv6_accel_pending_set(struct ecm_front_end_connection_instance *feci)
 {
-	/*
-	 * Can this connection be accelerated at all?
-	 */
 	DEBUG_INFO("%p: Accel conn: %p\n", feci, feci->ci);
+
+	/*
+	 * If re-generation is required then we cannot permit acceleration
+	 */
+	if (ecm_db_connection_regeneration_required_peek(feci->ci)) {
+		DEBUG_TRACE("%p: accel %p failed - regen required\n", feci, feci->ci);
+		return false;
+	}
+
+	/*
+	 * Is connection acceleration permanently failed?
+	 */
 	spin_lock_bh(&feci->lock);
 	if (ECM_FRONT_END_ACCELERATION_FAILED(feci->accel_mode)) {
 		spin_unlock_bh(&feci->lock);
@@ -159,7 +168,7 @@ extern void ecm_nss_ipv6_accel_done_time_update(struct ecm_front_end_connection_
 extern void ecm_nss_ipv6_decel_done_time_update(struct ecm_front_end_connection_instance *feci);
 extern struct ecm_classifier_instance *ecm_nss_ipv6_assign_classifier(struct ecm_db_connection_instance *ci, ecm_classifier_type_t type);
 extern bool ecm_nss_ipv6_reclassify(struct ecm_db_connection_instance *ci, int assignment_count, struct ecm_classifier_instance *assignments[]);
-extern bool ecm_nss_ipv6_connection_regenerate(struct ecm_db_connection_instance *ci, ecm_tracker_sender_type_t sender,
+extern void ecm_nss_ipv6_connection_regenerate(struct ecm_db_connection_instance *ci, ecm_tracker_sender_type_t sender,
 							struct net_device *out_dev, struct net_device *in_dev);
 extern struct ecm_db_node_instance *ecm_nss_ipv6_node_establish_and_ref(struct ecm_front_end_connection_instance *feci,
 							struct net_device *dev, ip_addr_t addr,

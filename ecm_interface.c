@@ -3188,7 +3188,7 @@ void ecm_interface_regenerate_connection(struct ecm_db_connection_instance *ci)
 	 * Re-generation occurs when we next see traffic OR an acceleration engine sync for this connection.
 	 * Refer to front end protocol specific process() functions.
 	 */
-	ecm_db_connection_classifier_generation_change(ci);
+	ecm_db_connection_regeneration_needed(ci);
 
 	/*
 	 * If the connection is accelerated then force deceleration.
@@ -3220,7 +3220,7 @@ static void ecm_interface_regenerate_connections(struct ecm_db_iface_instance *i
 	/*
 	 * An interface has changed, re-generate the connections to ensure all state is updated.
 	 */
-	ecm_db_classifier_generation_change();
+	ecm_db_regeneration_needed();
 #else
 	/*
 	 * Iterate the connections of this interface and cause each one to be re-generated.
@@ -3235,7 +3235,7 @@ static void ecm_interface_regenerate_connections(struct ecm_db_iface_instance *i
 		cin = ecm_db_connection_iface_from_get_and_ref_next(ci);
 
 		DEBUG_TRACE("%p: Regenerate: %p", ii, ci);
-		ecm_interface_regenerate_connection(ci);
+		ecm_db_connection_regeneration_needed(ci);
 		ecm_db_connection_deref(ci);
 		ci = cin;
 	}
@@ -3247,7 +3247,7 @@ static void ecm_interface_regenerate_connections(struct ecm_db_iface_instance *i
 		cin = ecm_db_connection_iface_to_get_and_ref_next(ci);
 
 		DEBUG_TRACE("%p: Regenerate: %p", ii, ci);
-		ecm_interface_regenerate_connection(ci);
+		ecm_db_connection_regeneration_needed(ci);
 		ecm_db_connection_deref(ci);
 		ci = cin;
 	}
@@ -3259,7 +3259,7 @@ static void ecm_interface_regenerate_connections(struct ecm_db_iface_instance *i
 		cin = ecm_db_connection_iface_nat_from_get_and_ref_next(ci);
 
 		DEBUG_TRACE("%p: Regenerate: %p", ii, ci);
-		ecm_interface_regenerate_connection(ci);
+		ecm_db_connection_regeneration_needed(ci);
 		ecm_db_connection_deref(ci);
 		ci = cin;
 	}
@@ -3271,7 +3271,7 @@ static void ecm_interface_regenerate_connections(struct ecm_db_iface_instance *i
 		cin = ecm_db_connection_iface_nat_to_get_and_ref_next(ci);
 
 		DEBUG_TRACE("%p: Regenerate: %p", ii, ci);
-		ecm_interface_regenerate_connection(ci);
+		ecm_db_connection_regeneration_needed(ci);
 		ecm_db_connection_deref(ci);
 		ci = cin;
 	}

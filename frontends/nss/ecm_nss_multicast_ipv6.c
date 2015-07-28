@@ -400,6 +400,7 @@ static int ecm_nss_multicast_ipv6_connection_update_accelerate(struct ecm_front_
 							       struct ecm_multicast_if_update *rp, bool is_br_flow)
 {
 	struct ecm_nss_multicast_ipv6_connection_instance *nmci = (struct ecm_nss_multicast_ipv6_connection_instance *)feci;
+	uint16_t regen_occurrances;
 	struct ecm_db_iface_instance *to_ifaces;
 	struct ecm_db_iface_instance *ii_temp;
 	struct ecm_db_iface_instance *ii_single;
@@ -425,6 +426,13 @@ static int ecm_nss_multicast_ipv6_connection_update_accelerate(struct ecm_front_
 	uint8_t dest_mac[ETH_ALEN];
 
 	DEBUG_INFO("%p: UPDATE Accel conn: %p\n", nmci, feci->ci);
+
+	/*
+	 * Get the re-generation occurrance counter of the connection.
+	 * We compare it again at the end - to ensure that the rule construction has seen no generation
+	 * changes during rule creation.
+	 */
+	regen_occurrances = ecm_db_connection_regeneration_occurrances_get(feci->ci);
 
 	nim = (struct nss_ipv6_msg *)vzalloc(sizeof(struct nss_ipv6_msg));
 	if (!nim) {
@@ -749,6 +757,20 @@ static int ecm_nss_multicast_ipv6_connection_update_accelerate(struct ecm_front_
 	}
 
 	/*
+	 * Now that the rule has been constructed we re-compare the generation occurrance counter.
+	 * If there has been a change then we abort because the rule may have been created using
+	 * unstable data - especially if another thread has begun regeneration of the connection state.
+	 * NOTE: This does not prevent a regen from being flagged immediately after this line of code either,
+	 * or while the acceleration rule is in flight to the nss.
+	 * This is only to check for consistency of rule state - not that the state is stale.
+	 */
+	if (regen_occurrances != ecm_db_connection_regeneration_occurrances_get(feci->ci)) {
+		DEBUG_INFO("%p: connection:%p regen occurred - aborting accel rule.\n", feci, feci->ci);
+		vfree(nim);
+		return -1;
+	}
+
+	/*
 	 * Ref the connection before issuing an NSS rule
 	 * This ensures that when the NSS responds to the command - which may even be immediately -
 	 * the callback function can trust the correct ref was taken for its purpose.
@@ -809,6 +831,7 @@ static void ecm_nss_multicast_ipv6_connection_accelerate(struct ecm_front_end_co
 									struct ecm_classifier_process_response *pr)
 {
 	struct ecm_nss_multicast_ipv6_connection_instance *nmci = (struct ecm_nss_multicast_ipv6_connection_instance *)feci;
+	uint16_t regen_occurrances;
 	struct ecm_db_iface_instance *from_ifaces[ECM_DB_IFACE_HEIRARCHY_MAX];
 	struct ecm_db_iface_instance *from_nss_iface;
 	int32_t from_ifaces_first;
@@ -837,6 +860,13 @@ static void ecm_nss_multicast_ipv6_connection_accelerate(struct ecm_front_end_co
 	ecm_front_end_acceleration_mode_t result_mode;
 
 	DEBUG_CHECK_MAGIC(nmci, ECM_NSS_MULTICAST_IPV6_CONNECTION_INSTANCE_MAGIC, "%p: magic failed", nmci);
+
+	/*
+	 * Get the re-generation occurrance counter of the connection.
+	 * We compare it again at the end - to ensure that the rule construction has seen no generation
+	 * changes during rule creation.
+	 */
+	regen_occurrances = ecm_db_connection_regeneration_occurrances_get(feci->ci);
 
 	/*
 	 * Can this connection be accelerated at all?
@@ -1221,6 +1251,23 @@ static void ecm_nss_multicast_ipv6_connection_accelerate(struct ecm_front_end_co
 			create->ingress_vlan_tag[1],
 			create->if_rule[vif].egress_vlan_tag[0],
 			create->if_rule[vif].egress_vlan_tag[1]);
+	}
+
+	/*
+	 * Now that the rule has been constructed we re-compare the generation occurrance counter.
+	 * If there has been a change then we abort because the rule may have been created using
+	 * unstable data - especially if another thread has begun regeneration of the connection state.
+	 * NOTE: This does not prevent a regen from being flagged immediately after this line of code either,
+	 * or while the acceleration rule is in flight to the nss.
+	 * This is only to check for consistency of rule state - not that the state is stale.
+	 * Remember that the connection is marked as "accel pending state" so if a regen is flagged immediately
+	 * after this check passes, the connection will be decelerated and refreshed very quickly.
+	 */
+	if (regen_occurrances != ecm_db_connection_regeneration_occurrances_get(feci->ci)) {
+		DEBUG_INFO("%p: connection:%p regen occurred - aborting accel rule.\n", feci, feci->ci);
+		ecm_nss_ipv6_accel_pending_clear(feci, ECM_FRONT_END_ACCELERATION_MODE_DECEL);
+		kfree(nim);
+		return;
 	}
 
 	/*
@@ -2426,11 +2473,12 @@ unsigned int ecm_nss_multicast_ipv6_connection_process(struct net_device *out_de
 	/*
 	 * Do we need to action generation change?
 	 */
-	if (unlikely(ecm_db_connection_classifier_generation_changed(ci))) {
-
+	if (unlikely(ecm_db_connection_regeneration_required_check(ci))) {
 		/*
 		 * TODO: Will add support for multicast connection re-generation here.
 		 */
+		DEBUG_WARN("%p: TODO: Handle multicast re-generation\n", ci);
+		ecm_db_conection_regeneration_failed(ci);
 		ecm_db_connection_deref(ci);
 		return NF_ACCEPT;
 	}
