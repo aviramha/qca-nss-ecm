@@ -960,6 +960,7 @@ static void ecm_nss_multicast_ipv4_connection_accelerate(struct ecm_front_end_co
 
 
 	from_nat_ifaces_first = ecm_db_connection_from_nat_interfaces_get_and_ref(feci->ci, from_nat_ifaces);
+	from_nat_ifaces_identifier = ecm_db_iface_interface_identifier_get(from_nat_ifaces[ECM_DB_IFACE_HEIRARCHY_MAX - 1]);
 	ecm_db_connection_interfaces_deref(from_nat_ifaces, from_nat_ifaces_first);
 	rule_invalid = false;
 
@@ -968,7 +969,7 @@ static void ecm_nss_multicast_ipv4_connection_accelerate(struct ecm_front_end_co
 	 */
 	DEBUG_TRACE("%p: Examine to/dest heirarchy list\n", nmci);
 	for (vif = 0; vif < ECM_DB_MULTICAST_IF_MAX; vif++) {
-		int32_t found_ii_match = 0;
+		int32_t found_nat_ii_match = 0;
 		int32_t to_mtu = 0;
 
 		to_nss_iface_id = -1;
@@ -992,9 +993,15 @@ static void ecm_nss_multicast_ipv4_connection_accelerate(struct ecm_front_end_co
 			ii_type = ecm_db_connection_iface_type_get(ii);
 			ii_name = ecm_db_interface_type_to_string(ii_type);
 			ii_identifier = ecm_db_iface_interface_identifier_get(ii);
+
+			/*
+			 * Find match for NAT interface in Multicast destination interface list.
+			 * If found match, set the found_nat_ii_match flag here.
+			 */
 			if (ii_identifier == from_nat_ifaces_identifier) {
-				found_ii_match = 1;
+				found_nat_ii_match = 1;
 			}
+
 			DEBUG_TRACE("%p: list_index: %d, ii: %p, type: %d (%s)\n", nmci, list_index, ii, ii_type, ii_name);
 
 			/*
@@ -1142,7 +1149,11 @@ static void ecm_nss_multicast_ipv4_connection_accelerate(struct ecm_front_end_co
 			ecm_db_connection_from_address_get(feci->ci, addr);
 			ECM_IP_ADDR_TO_HIN4_ADDR(src_ip, addr);
 
-			if (found_ii_match && (xlate_src_ip != src_ip)) {
+			/*
+			 * Set a rule for NAT if found_nat_ii_match flag is set
+			 * and source IP of packet is not matching with host IP address.
+			 */
+			if (found_nat_ii_match && (xlate_src_ip != src_ip)) {
 				create->if_rule[valid_vif_idx].xlate_src_ip = xlate_src_ip;
 				create->if_rule[valid_vif_idx].xlate_src_ident = ecm_db_connection_from_port_nat_get(feci->ci);
 				create->if_rule[valid_vif_idx].valid_flags |= NSS_IPV4_MC_RULE_CREATE_IF_FLAG_NAT_VALID;
