@@ -2114,6 +2114,8 @@ static uint32_t ecm_interface_multicast_heirarchy_construct_single(struct ecm_fr
 					 */
 					uint32_t src_addr_32 = 0;
 					uint32_t dest_addr_32 = 0;
+					struct in6_addr src_addr6;
+					struct in6_addr dest_addr6;
 					uint8_t src_mac_addr[ETH_ALEN];
 					uint8_t dest_mac_addr[ETH_ALEN];
 
@@ -2152,8 +2154,10 @@ static uint32_t ecm_interface_multicast_heirarchy_construct_single(struct ecm_fr
 									   &src_addr_32, &dest_addr_32,
 									   htons((uint16_t)ETH_P_IP), dest_dev, layer4hdr);
 					} else {
+						ECM_IP_ADDR_TO_NIN6_ADDR(src_addr6, src_addr);
+						ECM_IP_ADDR_TO_NIN6_ADDR(dest_addr6, dest_addr);
 						next_dev = bond_get_tx_dev(NULL, src_mac_addr, dest_mac_addr,
-									   src_addr, dest_addr,
+									   src_addr6.s6_addr, dest_addr6.s6_addr,
 									   htons((uint16_t)ETH_P_IPV6), dest_dev, NULL);
 					}
 
@@ -3072,6 +3076,8 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 					ip_addr_t dest_gw_addr = ECM_IP_ADDR_NULL;
 					uint32_t src_addr_32 = 0;
 					uint32_t dest_addr_32 = 0;
+					struct in6_addr src_addr6;
+					struct in6_addr dest_addr6;
 					uint8_t src_mac_addr[ETH_ALEN];
 					uint8_t dest_mac_addr[ETH_ALEN];
 					struct net_device *master_dev = NULL;
@@ -3162,9 +3168,11 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 										&src_addr_32, &dest_addr_32,
 										htons((uint16_t)ETH_P_IP), dest_dev, layer4hdr);
 					} else if (ip_version == 6) {
+						ECM_IP_ADDR_TO_NIN6_ADDR(src_addr6, src_addr);
+						ECM_IP_ADDR_TO_NIN6_ADDR(dest_addr6, dest_addr);
 						next_dev = bond_get_tx_dev(NULL, src_mac_addr, dest_mac_addr,
-										src_addr, dest_addr,
-										htons((uint16_t)ETH_P_IPV6), dest_dev, NULL);
+									   src_addr6.s6_addr, dest_addr6.s6_addr,
+									   htons((uint16_t)ETH_P_IPV6), dest_dev, NULL);
 					}
 
 					if (next_dev && netif_carrier_ok(next_dev)) {

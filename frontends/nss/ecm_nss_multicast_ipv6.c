@@ -1864,6 +1864,8 @@ static void ecm_nss_multicast_ipv6_connection_regenerate(struct ecm_db_connectio
 	int assignment_count;
 	struct ecm_classifier_instance *assignments[ECM_CLASSIFIER_TYPES];
 	struct ecm_front_end_connection_instance *feci;
+	__be16 layer4hdr[2] = {0, 0};
+	__be16 port = 0;
 
 	/*
 	 * Update the interface lists - these may have changed, e.g. LAG path change etc.
@@ -1882,10 +1884,15 @@ static void ecm_nss_multicast_ipv6_connection_regenerate(struct ecm_db_connectio
 	ecm_db_connection_from_node_address_get(ci, src_node_addr);
 	ecm_db_connection_to_node_address_get(ci, dest_node_addr);
 
+	port = (__be16)(ecm_db_connection_from_port_get(ci));
+	layer4hdr[0] = htons(port);
+	port = (__be16)(ecm_db_connection_to_port_get(ci));
+	layer4hdr[1] = htons(port);
+
 	feci = ecm_db_connection_front_end_get_and_ref(ci);
 
 	DEBUG_TRACE("%p: Update the 'from' interface heirarchy list\n", ci);
-	from_list_first = ecm_interface_heirarchy_construct(feci, from_list, ip_dest_addr, ip_src_addr, 4, protocol, in_dev, is_routed, in_dev, src_node_addr, dest_node_addr, NULL, NULL);
+	from_list_first = ecm_interface_heirarchy_construct(feci, from_list, ip_dest_addr, ip_src_addr, 4, protocol, in_dev, is_routed, in_dev, src_node_addr, dest_node_addr, layer4hdr, NULL);
 	if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 		goto ecm_multicast_ipv6_retry_regen;
 	}
@@ -2117,6 +2124,7 @@ unsigned int ecm_nss_multicast_ipv6_connection_process(struct net_device *out_de
 	uint32_t mc_dest_if[ECM_DB_MULTICAST_IF_MAX];
 	bool br_dev_found_in_mfc = false;
 	int protocol = (int)orig_tuple->dst.protonum;
+	__be16 *layer4hdr = NULL;
 
 	if (protocol != IPPROTO_UDP) {
 		DEBUG_WARN("Invalid Protocol %d in skb %p\n", protocol, skb);
@@ -2152,6 +2160,7 @@ unsigned int ecm_nss_multicast_ipv6_connection_process(struct net_device *out_de
 		reply_tuple->dst.u.udp.port = udp_hdr->source;
 	}
 
+	layer4hdr = (__be16*)udp_hdr;
 	/*
 	 * Extract transport port information
 	 * Refer to the ecm_nss_ipv6_process() for information on how we extract this information.
@@ -2323,7 +2332,7 @@ unsigned int ecm_nss_multicast_ipv6_connection_process(struct net_device *out_de
 		 * GGG TODO The empty list checks should not be needed, mapping_establish_and_ref() should fail out if there is no list anyway.
 		 */
 		DEBUG_TRACE("%p: Create the 'from' interface heirarchy list\n", nci);
-		from_list_first = ecm_interface_heirarchy_construct(feci, from_list, ip_dest_addr, ip_src_addr, 6, IPPROTO_UDP, in_dev, is_routed, in_dev, src_node_addr, dest_node_addr, NULL, skb);
+		from_list_first = ecm_interface_heirarchy_construct(feci, from_list, ip_dest_addr, ip_src_addr, 6, IPPROTO_UDP, in_dev, is_routed, in_dev, src_node_addr, dest_node_addr, layer4hdr, skb);
 		if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			feci->deref(feci);
 			ecm_db_connection_deref(nci);

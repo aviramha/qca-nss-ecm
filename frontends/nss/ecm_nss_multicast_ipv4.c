@@ -2182,6 +2182,7 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 	__be32 ip_grp;
 	bool br_dev_found_in_mfc = false;
 	int protocol = (int)orig_tuple->dst.protonum;
+	__be16 *layer4hdr = NULL;
 
 	if (protocol != IPPROTO_UDP) {
 		DEBUG_WARN("Invalid Protocol %d in skb %p\n", protocol, skb);
@@ -2208,6 +2209,7 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 		return NF_ACCEPT;
 	}
 
+	layer4hdr = (__be16*)udp_hdr;
 	/*
 	 * Now extract information, if we have conntrack then use that (which would already be in the tuples)
 	 */
@@ -2426,7 +2428,7 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 		 * For this we also need the interface lists which we also set upon the new connection while we are at it.
 		 */
 		DEBUG_TRACE("%p: Create the 'from' interface heirarchy list\n", nci);
-		from_list_first = ecm_interface_heirarchy_construct(feci, from_list, ip_dest_addr, ip_src_addr, 4, protocol, in_dev, is_routed, in_dev, src_node_addr, dest_node_addr, (__be16 *)&udp_hdr, skb);
+		from_list_first = ecm_interface_heirarchy_construct(feci, from_list, ip_dest_addr, ip_src_addr, 4, protocol, in_dev, is_routed, in_dev, src_node_addr, dest_node_addr, layer4hdr, skb);
 		if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			feci->deref(feci);
 			ecm_db_connection_deref(nci);
@@ -2493,7 +2495,7 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 
 		interface_idx_cnt = ecm_nss_multicast_connection_to_interface_heirarchy_construct(feci, to_list, ip_src_addr, ip_dest_addr, in_dev,
 												  out_dev->master, if_cnt, dst_dev, to_list_first,
-												  src_node_addr, is_routed, (__be16 *)&udp_hdr, skb);
+												  src_node_addr, is_routed, layer4hdr, skb);
 		if (interface_idx_cnt == 0) {
 			ecm_db_node_deref(src_ni);
 			ecm_db_mapping_deref(src_mi);

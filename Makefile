@@ -60,9 +60,7 @@ ccflags-$(ECM_FRONT_END_SFE_ENABLE) += -DECM_FRONT_END_SFE_ENABLE
 # Bonding / Link Aggregation support.
 # #############################################################################
 ifeq ($(ECM_FRONT_END_NSS_ENABLE), y)
-ifneq ($(findstring 3.4, $(KERNELVERSION)),)
 ECM_INTERFACE_BOND_ENABLE=y
-endif
 endif
 ecm-$(ECM_INTERFACE_BOND_ENABLE) += frontends/nss/ecm_nss_bond_notifier.o
 ccflags-$(ECM_INTERFACE_BOND_ENABLE) += -DECM_INTERFACE_BOND_ENABLE

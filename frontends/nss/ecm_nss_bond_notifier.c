@@ -125,6 +125,7 @@ static nss_tx_status_t ecm_nss_bond_notifier_send_lag_state(struct nss_ctx_insta
 	nss_tx_status_t nss_tx_status;
 	struct nss_lag_msg nm;
 	struct nss_lag_state_change *nlsc = NULL;
+	struct net_device *master = NULL;
 
 	DEBUG_INFO("Send LAG update for: %p (%s)\n", slave, slave->name);
 
@@ -141,7 +142,13 @@ static nss_tx_status_t ecm_nss_bond_notifier_send_lag_state(struct nss_ctx_insta
 	 * Figure out the aggregation id of this slave
 	 */
 	memset(&nm, 0, sizeof(nm));
-	bondid = bond_get_id(slave->master);
+	master = ecm_interface_get_and_hold_dev_master(slave);
+	if (master == NULL) {
+		DEBUG_WARN("Invalid master for %p (%s)\n", slave, slave->name);
+		return NSS_TX_FAILURE;
+	}
+	bondid = bond_get_id(master);
+	dev_put(master);
 	if (bondid == ECM_BOND_ID_INVALID) {
 		DEBUG_WARN("Invalid LAG group id 0x%x\n", bondid);
 		return NSS_TX_FAILURE;
