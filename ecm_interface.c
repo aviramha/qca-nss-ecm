@@ -1685,7 +1685,7 @@ static uint32_t ecm_interface_multicast_heirarchy_construct_single(struct ecm_fr
 		 * Now we have to figure out what the next device will be (in the transmission path)
 		 */
 		do {
-#ifdef ECM_INTERFACE_PPP_SUPPORT
+#ifdef ECM_INTERFACE_PPP_ENABLE
 			int channel_count;
 			struct ppp_channel *ppp_chan[1];
 			int channel_protocol;
@@ -1876,7 +1876,7 @@ static uint32_t ecm_interface_multicast_heirarchy_construct_single(struct ecm_fr
 				break;
 			}
 
-#ifndef ECM_INTERFACE_PPP_SUPPORT
+#ifndef ECM_INTERFACE_PPP_ENABLE
 			DEBUG_TRACE("Net device: %p is UNKNOWN (PPP Unsupported) type: %d\n", dest_dev, dest_dev_type);
 #else
 			/*
