@@ -46,6 +46,10 @@ void ecm_interface_route_release(struct ecm_interface_route *rt);
 void ecm_interface_send_neighbour_solicitation(struct net_device *dev, ip_addr_t addr);
 #endif
 void ecm_interface_send_arp_request(struct net_device *dest_dev, ip_addr_t dest_addr, bool on_link, ip_addr_t gw_addr);
+struct neighbour *ecm_interface_ipv4_neigh_get(ip_addr_t addr);
+#ifdef ECM_IPV6_ENABLE
+struct neighbour *ecm_interface_ipv6_neigh_get(ip_addr_t addr);
+#endif
 bool ecm_interface_skip_l2tp_pptp(struct sk_buff *skb, const struct net_device *out);
 struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct ecm_front_end_connection_instance *feci, struct net_device *dev);
 

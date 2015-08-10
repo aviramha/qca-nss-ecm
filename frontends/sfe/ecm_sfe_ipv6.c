@@ -1254,30 +1254,6 @@ static unsigned int ecm_sfe_ipv6_bridge_post_routing_hook(const struct nf_hook_o
 }
 
 /*
- * ecm_sfe_ipv6_neigh_get()
- * 	Returns neighbour reference for a given IP address which must be released when you are done with it.
- *
- * Returns NULL on fail.
- */
-static struct neighbour *ecm_sfe_ipv6_neigh_get(ip_addr_t addr)
-{
-	struct neighbour *neigh;
-	struct rt6_info *rt;
-	struct dst_entry *dst;
-	struct in6_addr ipv6_addr;
-
-	ECM_IP_ADDR_TO_NIN6_ADDR(ipv6_addr, addr);
-	rt = rt6_lookup(&init_net, &ipv6_addr, NULL, 0, 0);
-	if (!rt) {
-		return NULL;
-	}
-	dst = (struct dst_entry *)rt;
-	neigh = dst_neigh_lookup(dst, &ipv6_addr);
-	dst_release(dst);
-	return neigh;
-}
-
-/*
  * ecm_sfe_ipv6_stats_sync_callback()
  *	Callback handler from the sfe driver.
  */
@@ -1449,7 +1425,7 @@ static void ecm_sfe_ipv6_stats_sync_callback(void *app_data, struct sfe_ipv6_msg
 		/*
 		 * Update the neighbour entry for source IP address
 		 */
-		neigh = ecm_sfe_ipv6_neigh_get(flow_ip);
+		neigh = ecm_interface_ipv6_neigh_get(flow_ip);
 		if (!neigh) {
 			DEBUG_WARN("Neighbour entry for " ECM_IP_ADDR_OCTAL_FMT " not found\n", ECM_IP_ADDR_TO_OCTAL(flow_ip));
 		} else {
@@ -1463,7 +1439,7 @@ static void ecm_sfe_ipv6_stats_sync_callback(void *app_data, struct sfe_ipv6_msg
 		 * Update the neighbour entry for destination IP address
 		 */
 		if (!ecm_ip_addr_is_multicast(return_ip)) {
-			neigh = ecm_sfe_ipv6_neigh_get(return_ip);
+			neigh = ecm_interface_ipv6_neigh_get(return_ip);
 			if (!neigh) {
 				DEBUG_WARN("Neighbour entry for " ECM_IP_ADDR_OCTAL_FMT " not found\n", ECM_IP_ADDR_TO_OCTAL(return_ip));
 			} else {
@@ -1476,7 +1452,7 @@ static void ecm_sfe_ipv6_stats_sync_callback(void *app_data, struct sfe_ipv6_msg
 		/*
 		 * Update the neighbour entry for destination IP address
 		 */
-		neigh = ecm_sfe_ipv6_neigh_get(return_ip);
+		neigh = ecm_interface_ipv6_neigh_get(return_ip);
 		if (!neigh) {
 			DEBUG_WARN("Neighbour entry for " ECM_IP_ADDR_OCTAL_FMT " not found\n", ECM_IP_ADDR_TO_OCTAL(return_ip));
 		} else {

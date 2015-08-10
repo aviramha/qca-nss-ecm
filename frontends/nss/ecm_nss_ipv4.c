@@ -1540,30 +1540,6 @@ static unsigned int ecm_nss_ipv4_bridge_post_routing_hook(const struct nf_hook_o
 }
 
 /*
- * ecm_nss_ipv4_neigh_get()
- * 	Returns neighbour reference for a given IP address which must be released when you are done with it.
- *
- * Returns NULL on fail.
- */
-static struct neighbour *ecm_nss_ipv4_neigh_get(ip_addr_t addr)
-{
-	struct neighbour *neigh;
-	struct rtable *rt;
-	struct dst_entry *dst;
-	__be32 ipv4_addr;
-
-	ECM_IP_ADDR_TO_NIN4_ADDR(ipv4_addr, addr);
-	rt = ip_route_output(&init_net, ipv4_addr, 0, 0, 0);
-	if (IS_ERR(rt)) {
-		return NULL;
-	}
-	dst = (struct dst_entry *)rt;
-	neigh = dst_neigh_lookup(dst, &ipv4_addr);
-	ip_rt_put(rt);
-	return neigh;
-}
-
-/*
  * ecm_nss_ipv4_process_one_conn_sync_msg()
  *	Process one connection sync message.
  */
@@ -1753,7 +1729,7 @@ static inline void ecm_nss_ipv4_process_one_conn_sync_msg(struct nss_ipv4_conn_s
 		/*
 		 * Update the neighbour entry for source IP address
 		 */
-		neigh = ecm_nss_ipv4_neigh_get(flow_ip);
+		neigh = ecm_interface_ipv4_neigh_get(flow_ip);
 		if (!neigh) {
 			DEBUG_WARN("Neighbour entry for %pI4h not found\n", &sync->flow_ip);
 		} else {
@@ -1767,7 +1743,7 @@ static inline void ecm_nss_ipv4_process_one_conn_sync_msg(struct nss_ipv4_conn_s
 		 * Update the neighbour entry for destination IP address
 		 */
 		if (!ecm_ip_addr_is_multicast(return_ip)) {
-			neigh = ecm_nss_ipv4_neigh_get(return_ip);
+			neigh = ecm_interface_ipv4_neigh_get(return_ip);
 			if (!neigh) {
 				DEBUG_WARN("Neighbour entry for %pI4h not found\n", &sync->return_ip);
 			} else {
@@ -1780,7 +1756,7 @@ static inline void ecm_nss_ipv4_process_one_conn_sync_msg(struct nss_ipv4_conn_s
 		/*
 		 * Update the neighbour entry for destination IP address
 		 */
-		neigh = ecm_nss_ipv4_neigh_get(return_ip);
+		neigh = ecm_interface_ipv4_neigh_get(return_ip);
 		if (!neigh) {
 			DEBUG_WARN("Neighbour entry for %pI4h not found\n", &sync->return_ip);
 		} else {

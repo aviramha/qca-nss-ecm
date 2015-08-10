@@ -703,6 +703,56 @@ void ecm_interface_send_arp_request(struct net_device *dest_dev, ip_addr_t dest_
 }
 EXPORT_SYMBOL(ecm_interface_send_arp_request);
 
+/*
+ * ecm_interface_ipv4_neigh_get()
+ * 	Returns neighbour reference for a given IP address which must be released when you are done with it.
+ *
+ * Returns NULL on fail.
+ */
+struct neighbour *ecm_interface_ipv4_neigh_get(ip_addr_t addr)
+{
+	struct neighbour *neigh;
+	struct rtable *rt;
+	struct dst_entry *dst;
+	__be32 ipv4_addr;
+
+	ECM_IP_ADDR_TO_NIN4_ADDR(ipv4_addr, addr);
+	rt = ip_route_output(&init_net, ipv4_addr, 0, 0, 0);
+	if (IS_ERR(rt)) {
+		return NULL;
+	}
+	dst = (struct dst_entry *)rt;
+	neigh = dst_neigh_lookup(dst, &ipv4_addr);
+	ip_rt_put(rt);
+	return neigh;
+}
+
+#ifdef ECM_IPV6_ENABLE
+/*
+ * ecm_interface_ipv6_neigh_get()
+ * 	Returns neighbour reference for a given IP address which must be released when you are done with it.
+ *
+ * Returns NULL on fail.
+ */
+struct neighbour *ecm_interface_ipv6_neigh_get(ip_addr_t addr)
+{
+	struct neighbour *neigh;
+	struct rt6_info *rt;
+	struct dst_entry *dst;
+	struct in6_addr ipv6_addr;
+
+	ECM_IP_ADDR_TO_NIN6_ADDR(ipv6_addr, addr);
+	rt = rt6_lookup(&init_net, &ipv6_addr, NULL, 0, 0);
+	if (!rt) {
+		return NULL;
+	}
+	dst = (struct dst_entry *)rt;
+	neigh = dst_neigh_lookup(dst, &ipv6_addr);
+	dst_release(dst);
+	return neigh;
+}
+#endif
+
 #ifdef ECM_INTERFACE_PPP_ENABLE
 /*
  * ecm_interface_skip_l2tp_pptp()
