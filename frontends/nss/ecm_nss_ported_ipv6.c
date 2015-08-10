@@ -474,6 +474,12 @@ static void ecm_nss_ported_ipv6_connection_accelerate(struct ecm_front_end_conne
 				break;
 			}
 			ecm_db_iface_bridge_address_get(ii, from_nss_iface_address);
+			if (is_valid_ether_addr(from_nss_iface_address)) {
+				memcpy(nircm->src_mac_rule.flow_src_mac, from_nss_iface_address, ETH_ALEN);
+				nircm->src_mac_rule.mac_valid_flags |= NSS_IPV4_SRC_MAC_FLOW_VALID;
+				nircm->valid_flags |= NSS_IPV4_RULE_CREATE_SRC_MAC_VALID;
+			}
+
 			DEBUG_TRACE("%p: Bridge - mac: %pM\n", npci, from_nss_iface_address);
 			break;
 		case ECM_DB_IFACE_TYPE_ETHERNET:
@@ -641,6 +647,12 @@ static void ecm_nss_ported_ipv6_connection_accelerate(struct ecm_front_end_conne
 				break;
 			}
 			ecm_db_iface_bridge_address_get(ii, to_nss_iface_address);
+			if (is_valid_ether_addr(to_nss_iface_address)) {
+				memcpy(nircm->src_mac_rule.return_src_mac, to_nss_iface_address, ETH_ALEN);
+				nircm->src_mac_rule.mac_valid_flags |= NSS_IPV4_SRC_MAC_RETURN_VALID;
+				nircm->valid_flags |= NSS_IPV4_RULE_CREATE_SRC_MAC_VALID;
+			}
+
 			DEBUG_TRACE("%p: Bridge - mac: %pM\n", npci, to_nss_iface_address);
 			break;
 		case ECM_DB_IFACE_TYPE_ETHERNET:
