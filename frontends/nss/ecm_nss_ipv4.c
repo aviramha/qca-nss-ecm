@@ -656,7 +656,8 @@ bool ecm_nss_ipv4_reclassify(struct ecm_db_connection_instance *ci, int assignme
  */
 void ecm_nss_ipv4_connection_regenerate(struct ecm_db_connection_instance *ci, ecm_tracker_sender_type_t sender,
 							struct net_device *out_dev, struct net_device *out_dev_nat,
-							struct net_device *in_dev, struct net_device *in_dev_nat)
+							struct net_device *in_dev, struct net_device *in_dev_nat,
+							__be16 *layer4hdr)
 {
 	int i;
 	bool reclassify_allowed;
@@ -731,7 +732,7 @@ void ecm_nss_ipv4_connection_regenerate(struct ecm_db_connection_instance *ci, e
 	feci = ecm_db_connection_front_end_get_and_ref(ci);
 
 	DEBUG_TRACE("%p: Update the 'from' interface heirarchy list\n", ci);
-	from_list_first = ecm_interface_heirarchy_construct(feci, from_list, ip_dest_addr, ip_src_addr, 4, protocol, in_dev, is_routed, in_dev, src_node_addr, dest_node_addr);
+	from_list_first = ecm_interface_heirarchy_construct(feci, from_list, ip_dest_addr, ip_src_addr, 4, protocol, in_dev, is_routed, in_dev, src_node_addr, dest_node_addr, layer4hdr);
 	if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 		goto ecm_ipv4_retry_regen;
 	}
@@ -741,11 +742,10 @@ void ecm_nss_ipv4_connection_regenerate(struct ecm_db_connection_instance *ci, e
 
 	DEBUG_TRACE("%p: Update the 'from NAT' interface heirarchy list\n", ci);
 	if ((protocol == IPPROTO_IPV6) || (protocol == IPPROTO_ESP)) {
-		from_nat_list_first = ecm_interface_heirarchy_construct(feci, from_nat_list, ip_dest_addr, ip_src_addr_nat, 4, protocol, in_dev, is_routed, in_dev, src_node_addr_nat, dest_node_addr_nat);
+		from_nat_list_first = ecm_interface_heirarchy_construct(feci, from_nat_list, ip_dest_addr, ip_src_addr_nat, 4, protocol, in_dev, is_routed, in_dev, src_node_addr_nat, dest_node_addr_nat, layer4hdr);
 	} else {
-		from_nat_list_first = ecm_interface_heirarchy_construct(feci, from_nat_list, ip_dest_addr, ip_src_addr_nat, 4, protocol, in_dev_nat, is_routed, in_dev_nat, src_node_addr_nat, dest_node_addr_nat);
+		from_nat_list_first = ecm_interface_heirarchy_construct(feci, from_nat_list, ip_dest_addr, ip_src_addr_nat, 4, protocol, in_dev_nat, is_routed, in_dev_nat, src_node_addr_nat, dest_node_addr_nat, layer4hdr);
 	}
-
 	if (from_nat_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 		goto ecm_ipv4_retry_regen;
 	}
@@ -754,7 +754,7 @@ void ecm_nss_ipv4_connection_regenerate(struct ecm_db_connection_instance *ci, e
 	ecm_db_connection_interfaces_deref(from_nat_list, from_nat_list_first);
 
 	DEBUG_TRACE("%p: Update the 'to' interface heirarchy list\n", ci);
-	to_list_first = ecm_interface_heirarchy_construct(feci, to_list, ip_src_addr, ip_dest_addr, 4, protocol, out_dev, is_routed, in_dev, dest_node_addr, src_node_addr);
+	to_list_first = ecm_interface_heirarchy_construct(feci, to_list, ip_src_addr, ip_dest_addr, 4, protocol, out_dev, is_routed, in_dev, dest_node_addr, src_node_addr, layer4hdr);
 	if (to_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 		goto ecm_ipv4_retry_regen;
 	}
@@ -763,7 +763,7 @@ void ecm_nss_ipv4_connection_regenerate(struct ecm_db_connection_instance *ci, e
 	ecm_db_connection_interfaces_deref(to_list, to_list_first);
 
 	DEBUG_TRACE("%p: Update the 'to NAT' interface heirarchy list\n", ci);
-	to_nat_list_first = ecm_interface_heirarchy_construct(feci, to_nat_list, ip_src_addr, ip_dest_addr_nat, 4, protocol, out_dev_nat, is_routed, in_dev, dest_node_addr_nat, src_node_addr_nat);
+	to_nat_list_first = ecm_interface_heirarchy_construct(feci, to_nat_list, ip_src_addr, ip_dest_addr_nat, 4, protocol, out_dev_nat, is_routed, in_dev, dest_node_addr_nat, src_node_addr_nat, layer4hdr);
 	if (to_nat_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 		goto ecm_ipv4_retry_regen;
 	}
