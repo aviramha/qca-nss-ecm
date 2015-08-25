@@ -1060,6 +1060,8 @@ EXPORT_SYMBOL(ecm_db_connection_make_defunct);
  */
 void ecm_db_connection_data_totals_update(struct ecm_db_connection_instance *ci, bool is_from, uint64_t size, uint64_t packets)
 {
+	int32_t i;
+
 	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed\n", ci);
 
 	spin_lock_bh(&ecm_db_lock);
@@ -1081,8 +1083,10 @@ void ecm_db_connection_data_totals_update(struct ecm_db_connection_instance *ci,
 		/*
 		 * Data from the host is essentially TO the interface on which the host is reachable
 		 */
-		ci->from_node->iface->to_data_total += size;
-		ci->from_node->iface->to_packet_total += packets;
+		for (i = ci->from_interface_first; i < ECM_DB_IFACE_HEIRARCHY_MAX; ++i) {
+			ci->from_interfaces[i]->to_data_total += size;
+			ci->from_interfaces[i]->to_packet_total += packets;
+		}
 
 		/*
 		 * Update totals sent TO the other side of the connection
@@ -1097,8 +1101,10 @@ void ecm_db_connection_data_totals_update(struct ecm_db_connection_instance *ci,
 		/*
 		 * Sending to the other side means FROM the interface we reach that host
 		 */
-		ci->to_node->iface->from_data_total += size;
-		ci->to_node->iface->from_packet_total += packets;
+		for (i = ci->to_interface_first; i < ECM_DB_IFACE_HEIRARCHY_MAX; ++i) {
+			ci->to_interfaces[i]->from_data_total += size;
+			ci->to_interfaces[i]->from_packet_total += packets;
+		}
 #endif
 		spin_unlock_bh(&ecm_db_lock);
 		return;
@@ -1120,8 +1126,10 @@ void ecm_db_connection_data_totals_update(struct ecm_db_connection_instance *ci,
 	/*
 	 * Data from the host is essentially TO the interface on which the host is reachable
 	 */
-	ci->to_node->iface->to_data_total += size;
-	ci->to_node->iface->to_packet_total += packets;
+	for (i = ci->to_interface_first; i < ECM_DB_IFACE_HEIRARCHY_MAX; ++i) {
+		ci->to_interfaces[i]->to_data_total += size;
+		ci->to_interfaces[i]->to_packet_total += packets;
+	}
 
 	/*
 	 * Update totals sent TO the other side of the connection
@@ -1136,8 +1144,10 @@ void ecm_db_connection_data_totals_update(struct ecm_db_connection_instance *ci,
 	/*
 	 * Sending to the other side means FROM the interface we reach that host
 	 */
-	ci->from_node->iface->from_data_total += size;
-	ci->from_node->iface->from_packet_total += packets;
+	for (i = ci->from_interface_first; i < ECM_DB_IFACE_HEIRARCHY_MAX; ++i) {
+		ci->from_interfaces[i]->from_data_total += size;
+		ci->from_interfaces[i]->from_packet_total += packets;
+	}
 #endif
 	spin_unlock_bh(&ecm_db_lock);
 }
@@ -1152,6 +1162,8 @@ EXPORT_SYMBOL(ecm_db_connection_data_totals_update);
  */
 void ecm_db_multicast_connection_data_totals_update(struct ecm_db_connection_instance *ci, bool is_from, uint64_t size, uint64_t packets)
 {
+	int32_t i;
+
 	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed\n", ci);
 
 	spin_lock_bh(&ecm_db_lock);
@@ -1173,8 +1185,10 @@ void ecm_db_multicast_connection_data_totals_update(struct ecm_db_connection_ins
 		/*
 		 * Data from the host is essentially TO the interface on which the host is reachable
 		 */
-		ci->from_node->iface->to_data_total += size;
-		ci->from_node->iface->to_packet_total += packets;
+		for (i = ci->from_interface_first; i < ECM_DB_IFACE_HEIRARCHY_MAX; ++i) {
+			ci->from_interfaces[i]->to_data_total += size;
+			ci->from_interfaces[i]->to_packet_total += packets;
+		}
 
 		/*
 		 * Update totals sent TO the other side of the connection
@@ -1216,8 +1230,10 @@ void ecm_db_multicast_connection_data_totals_update(struct ecm_db_connection_ins
 	/*
 	 * Sending to the other side means FROM the interface we reach that host
 	 */
-	ci->from_node->iface->from_data_total += size;
-	ci->from_node->iface->from_packet_total += packets;
+	for (i = ci->from_interface_first; i < ECM_DB_IFACE_HEIRARCHY_MAX; ++i) {
+		ci->from_interfaces[i]->from_data_total += size;
+		ci->from_interfaces[i]->from_packet_total += packets;
+	}
 #endif
 	spin_unlock_bh(&ecm_db_lock);
 }
@@ -1268,6 +1284,8 @@ EXPORT_SYMBOL(ecm_db_multicast_connection_interface_heirarchy_stats_update);
  */
 void ecm_db_connection_data_totals_update_dropped(struct ecm_db_connection_instance *ci, bool is_from, uint64_t size, uint64_t packets)
 {
+	int32_t i;
+
 	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed\n", ci);
 
 	if (is_from) {
@@ -1288,8 +1306,10 @@ void ecm_db_connection_data_totals_update_dropped(struct ecm_db_connection_insta
 		/*
 		 * Data from the host is essentially TO the interface on which the host is reachable
 		 */
-		ci->from_node->iface->to_data_total_dropped += size;
-		ci->from_node->iface->to_packet_total_dropped += packets;
+		for (i = ci->from_interface_first; i < ECM_DB_IFACE_HEIRARCHY_MAX; ++i) {
+			ci->from_interfaces[i]->to_data_total_dropped += size;
+			ci->from_interfaces[i]->to_packet_total_dropped += packets;
+		}
 #endif
 		spin_unlock_bh(&ecm_db_lock);
 		return;
@@ -1312,8 +1332,10 @@ void ecm_db_connection_data_totals_update_dropped(struct ecm_db_connection_insta
 	/*
 	 * Data from the host is essentially TO the interface on which the host is reachable
 	 */
-	ci->to_node->iface->to_data_total_dropped += size;
-	ci->to_node->iface->to_packet_total_dropped += packets;
+	for (i = ci->to_interface_first; i < ECM_DB_IFACE_HEIRARCHY_MAX; ++i) {
+		ci->to_interfaces[i]->to_data_total_dropped += size;
+		ci->to_interfaces[i]->to_packet_total_dropped += packets;
+	}
 #endif
 	spin_unlock_bh(&ecm_db_lock);
 }
