@@ -154,6 +154,7 @@ static unsigned long int ecm_nss_ipv6_next_req_time;
 static unsigned long int ecm_nss_ipv6_stats_request_success = 0;	/* Number of success stats request */
 static unsigned long int ecm_nss_ipv6_stats_request_fail = 0;		/* Number of failed stats request */
 static unsigned long int ecm_nss_ipv6_stats_request_nack = 0;		/* Number of NACK'd stats request */
+static bool ecm_nss_ipv6_stats_request_in_progress = false;		/* If a request is holding in nss or not */
 
 /*
  * NSS driver linkage
@@ -1627,6 +1628,11 @@ static void ecm_nss_ipv6_connection_sync_many_callback(void *app_data, struct ns
 	int i;
 
 	/*
+	 * The request message returned from NSS, so ECM can be removed safely
+	 */
+	ecm_nss_ipv6_stats_request_in_progress = false;
+
+	/*
 	 * If ECM is terminating, don't process this last stats
 	 */
 	if (ecm_nss_ipv6_terminate_pending) {
@@ -1685,6 +1691,7 @@ static void ecm_nss_ipv6_stats_sync_req_work(struct work_struct *work)
 		}
 		nss_tx_status = nss_ipv6_tx_with_size(ecm_nss_ipv6_nss_ipv6_mgr, ecm_nss_ipv6_sync_req_msg, PAGE_SIZE);
 		if (nss_tx_status == NSS_TX_SUCCESS) {
+			ecm_nss_ipv6_stats_request_in_progress = true;
 			ecm_nss_ipv6_stats_request_success++;
 			return;
 		}
@@ -2127,6 +2134,28 @@ static bool ecm_nss_ipv6_sync_queue_init(void)
 }
 
 /*
+ * ecm_nss_ipv6_sync_queue_exit
+ *	 the workqueue for ipv6 stats sync
+ */
+static void ecm_nss_ipv6_sync_queue_exit(void)
+{
+	/*
+	 * We need to make sure the request message returned before we exit
+	 * Otherwise nss will call our callback which does not exist anymore
+	 */
+	while(ecm_nss_ipv6_stats_request_in_progress) {
+		usleep_range(ECM_NSS_IPV6_STATS_SYNC_UDELAY - 100, ECM_NSS_IPV6_STATS_SYNC_UDELAY);
+	}
+
+	/*
+	 * Cancel the conn sync req work and destroy workqueue
+	 */
+	cancel_delayed_work_sync(&ecm_nss_ipv6_work);
+	destroy_workqueue(ecm_nss_ipv6_workqueue);
+	kfree(ecm_nss_ipv6_sync_req_msg);
+}
+
+/*
  * ecm_nss_ipv6_init()
  */
 int ecm_nss_ipv6_init(struct dentry *dentry)
@@ -2291,10 +2320,8 @@ void ecm_nss_ipv6_exit(void)
 #endif
 
 	/*
-	 * Cancel the conn sync req work and destroy workqueue
+	 * Clean up the stats sync queue/work
 	 */
-	cancel_delayed_work_sync(&ecm_nss_ipv6_work);
-	destroy_workqueue(ecm_nss_ipv6_workqueue);
-	kfree(ecm_nss_ipv6_sync_req_msg);
+	ecm_nss_ipv6_sync_queue_exit();
 }
 EXPORT_SYMBOL(ecm_nss_ipv6_exit);
