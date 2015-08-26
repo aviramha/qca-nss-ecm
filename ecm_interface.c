@@ -3216,7 +3216,11 @@ void ecm_interface_regenerate_connection(struct ecm_db_connection_instance *ci)
 static void ecm_interface_regenerate_connections(struct ecm_db_iface_instance *ii)
 {
 #ifdef ECM_DB_XREF_ENABLE
-	struct ecm_db_connection_instance *ci;
+	struct ecm_db_connection_instance *ci_from;
+	struct ecm_db_connection_instance *ci_to;
+	struct ecm_db_connection_instance *ci_from_nat;
+	struct ecm_db_connection_instance *ci_to_nat;
+	struct ecm_db_connection_instance *ci_mcast __attribute__ ((unused));
 #endif
 
 	DEBUG_TRACE("Regenerate connections using interface: %p\n", ii);
@@ -3228,60 +3232,93 @@ static void ecm_interface_regenerate_connections(struct ecm_db_iface_instance *i
 	ecm_db_regeneration_needed();
 #else
 	/*
-	 * Iterate the connections of this interface and cause each one to be re-generated.
-	 * GGG TODO NOTE: If this proves slow (need metrics here) we could just regenerate the "lot" with one very simple call.
-	 * But this would cause re-gen of every connection which may not be appropriate, this here at least keeps things in scope of the interface
-	 * but at the cost of performance.
+	 * If the interface has NO connections then we re-generate all.
+	 */
+	ci_from = ecm_db_iface_connections_from_get_and_ref_first(ii);
+	ci_to = ecm_db_iface_connections_to_get_and_ref_first(ii);
+	ci_from_nat = ecm_db_iface_connections_nat_from_get_and_ref_first(ii);
+	ci_to_nat = ecm_db_iface_connections_nat_to_get_and_ref_first(ii);
+	if (!ci_from && !ci_to && !ci_from_nat && !ci_to_nat) {
+		ecm_db_regeneration_needed();
+		DEBUG_TRACE("%p: Regenerate (ALL) COMPLETE\n", ii);
+		return;
+	}
+
+	/*
+	 * Re-generate all connections associated with this interface
 	 */
 	DEBUG_TRACE("%p: Regenerate 'from' connections\n", ii);
-	ci = ecm_db_iface_connections_from_get_and_ref_first(ii);
-	while (ci) {
+	while (ci_from) {
 		struct ecm_db_connection_instance *cin;
-		cin = ecm_db_connection_iface_from_get_and_ref_next(ci);
+		cin = ecm_db_connection_iface_from_get_and_ref_next(ci_from);
 
-		DEBUG_TRACE("%p: Regenerate: %p", ii, ci);
-		ecm_db_connection_regeneration_needed(ci);
-		ecm_db_connection_deref(ci);
-		ci = cin;
+		DEBUG_TRACE("%p: Regenerate: %p", ii, ci_from);
+		ecm_db_connection_regeneration_needed(ci_from);
+		ecm_db_connection_deref(ci_from);
+		ci_from = cin;
 	}
 
 	DEBUG_TRACE("%p: Regenerate 'to' connections\n", ii);
-	ci = ecm_db_iface_connections_to_get_and_ref_first(ii);
-	while (ci) {
+	while (ci_to) {
 		struct ecm_db_connection_instance *cin;
-		cin = ecm_db_connection_iface_to_get_and_ref_next(ci);
+		cin = ecm_db_connection_iface_to_get_and_ref_next(ci_to);
 
-		DEBUG_TRACE("%p: Regenerate: %p", ii, ci);
-		ecm_db_connection_regeneration_needed(ci);
-		ecm_db_connection_deref(ci);
-		ci = cin;
+		DEBUG_TRACE("%p: Regenerate: %p", ii, ci_to);
+		ecm_db_connection_regeneration_needed(ci_to);
+		ecm_db_connection_deref(ci_to);
+		ci_to = cin;
 	}
 
+	/*
+	 * GGG TODO These deprecated lists _nat_ lists will eventually be removed
+	 */
 	DEBUG_TRACE("%p: Regenerate 'from_nat' connections\n", ii);
-	ci = ecm_db_iface_connections_nat_from_get_and_ref_first(ii);
-	while (ci) {
+	while (ci_from_nat) {
 		struct ecm_db_connection_instance *cin;
-		cin = ecm_db_connection_iface_nat_from_get_and_ref_next(ci);
+		cin = ecm_db_connection_iface_nat_from_get_and_ref_next(ci_from_nat);
 
-		DEBUG_TRACE("%p: Regenerate: %p", ii, ci);
-		ecm_db_connection_regeneration_needed(ci);
-		ecm_db_connection_deref(ci);
-		ci = cin;
+		DEBUG_TRACE("%p: Regenerate: %p", ii, ci_from_nat);
+		ecm_db_connection_regeneration_needed(ci_from_nat);
+		ecm_db_connection_deref(ci_from_nat);
+		ci_from_nat = cin;
 	}
 
 	DEBUG_TRACE("%p: Regenerate 'to_nat' connections\n", ii);
-	ci = ecm_db_iface_connections_nat_to_get_and_ref_first(ii);
-	while (ci) {
+	while (ci_to_nat) {
 		struct ecm_db_connection_instance *cin;
-		cin = ecm_db_connection_iface_nat_to_get_and_ref_next(ci);
+		cin = ecm_db_connection_iface_nat_to_get_and_ref_next(ci_to_nat);
 
-		DEBUG_TRACE("%p: Regenerate: %p", ii, ci);
-		ecm_db_connection_regeneration_needed(ci);
-		ecm_db_connection_deref(ci);
-		ci = cin;
+		DEBUG_TRACE("%p: Regenerate: %p", ii, ci_to_nat);
+		ecm_db_connection_regeneration_needed(ci_to_nat);
+		ecm_db_connection_deref(ci_to_nat);
+		ci_to_nat = cin;
+	}
+
+#ifdef ECM_MULTICAST_ENABLE
+	/*
+	 * Multicasts would not have recorded in the lists above.
+	 * Our only way to re-gen those is to iterate all multicasts.
+	 * GGG TODO This will be optimised in a future release.
+	 */
+	ci_mcast = ecm_db_connections_get_and_ref_first();
+	while (ci_mcast) {
+		struct ecm_db_connection_instance *cin;
+
+		/*
+		 * Multicast and NOT flagged for re-gen?
+		 */
+		if (ecm_db_multicast_connection_to_interfaces_set_check(ci_mcast)
+				&& ecm_db_connection_regeneration_required_peek(ci_mcast)) {
+			ecm_db_connection_regeneration_needed(ci_mcast);
+		}
+
+		cin = ecm_db_connection_get_and_ref_next(ci_mcast);
+		ecm_db_connection_deref(ci_mcast);
+		ci_mcast = cin;
 	}
 #endif
 
+#endif
 	DEBUG_TRACE("%p: Regenerate COMPLETE\n", ii);
 }
 
