@@ -1876,6 +1876,146 @@ static int ecm_nss_multicast_ipv4_connection_deref(struct ecm_front_end_connecti
 	return 0;
 }
 
+/*
+ * ecm_nss_multicast_ipv4_connection_regenerate()
+ *	Re-generate a connection.
+ *
+ * Re-generating a connection involves re-evaluating the interface lists in case interface heirarchies have changed.
+ * It also involves the possible triggering of classifier re-evaluation but only if all currently assigned
+ * classifiers permit this operation.
+ */
+static void ecm_nss_multicast_ipv4_connection_regenerate(struct ecm_db_connection_instance *ci, ecm_tracker_sender_type_t sender,
+							struct net_device *out_dev, struct net_device *in_dev, struct net_device *in_dev_nat)
+{
+	int i;
+	bool reclassify_allowed;
+	struct ecm_db_iface_instance *from_list[ECM_DB_IFACE_HEIRARCHY_MAX];
+	int32_t from_list_first;
+	struct ecm_db_iface_instance *from_nat_list[ECM_DB_IFACE_HEIRARCHY_MAX];
+	int32_t from_nat_list_first;
+	ip_addr_t ip_src_addr;
+	ip_addr_t ip_dest_addr;
+	ip_addr_t ip_src_addr_nat;
+	int protocol;
+	bool is_routed;
+	uint8_t src_node_addr[ETH_ALEN];
+	uint8_t dest_node_addr[ETH_ALEN];
+	uint8_t src_node_addr_nat[ETH_ALEN];
+	int assignment_count;
+	struct ecm_classifier_instance *assignments[ECM_CLASSIFIER_TYPES];
+	struct ecm_front_end_connection_instance *feci;
+
+	/*
+	 * Update the interface lists - these may have changed, e.g. LAG path change etc.
+	 * NOTE: We never have to change the usual mapping->host->node_iface arrangements for each side of the connection (to/from sides)
+	 * This is because if these interfaces change then the connection is dead anyway.
+	 * But a LAG slave might change the heirarchy the connection is using but the LAG master is still sane.
+	 * If any of the new interface heirarchies cannot be created then simply set empty-lists as this will deny
+	 * acceleration and ensure that a bad rule cannot be created.
+	 * IMPORTANT: The 'sender' defines who has sent the packet that triggered this re-generation
+	 */
+	protocol = ecm_db_connection_protocol_get(ci);
+
+	is_routed = ecm_db_connection_is_routed_get(ci);
+
+	ecm_db_connection_from_address_get(ci, ip_src_addr);
+	ecm_db_connection_from_address_nat_get(ci, ip_src_addr_nat);
+
+	ecm_db_connection_to_address_get(ci, ip_dest_addr);
+
+	ecm_db_connection_from_node_address_get(ci, src_node_addr);
+	ecm_db_connection_from_nat_node_address_get(ci, src_node_addr_nat);
+
+	ecm_db_connection_to_node_address_get(ci, dest_node_addr);
+
+	feci = ecm_db_connection_front_end_get_and_ref(ci);
+
+	DEBUG_TRACE("%p: Update the 'from' interface heirarchy list\n", ci);
+	from_list_first = ecm_interface_heirarchy_construct(feci, from_list, ip_dest_addr, ip_src_addr, 4, protocol, in_dev, is_routed, in_dev, src_node_addr, dest_node_addr);
+	if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
+		goto ecm_multicast_ipv4_retry_regen;
+	}
+
+	ecm_db_connection_from_interfaces_reset(ci, from_list, from_list_first);
+	ecm_db_connection_interfaces_deref(from_list, from_list_first);
+
+	DEBUG_TRACE("%p: Update the 'from NAT' interface heirarchy list\n", ci);
+	from_nat_list_first = ecm_interface_heirarchy_construct(feci, from_nat_list, ip_dest_addr, ip_src_addr_nat, 4, protocol, in_dev_nat, is_routed, in_dev_nat, src_node_addr_nat, dest_node_addr);
+	if (from_nat_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
+		goto ecm_multicast_ipv4_retry_regen;
+	}
+
+	ecm_db_connection_from_nat_interfaces_reset(ci, from_nat_list, from_nat_list_first);
+	ecm_db_connection_interfaces_deref(from_nat_list, from_nat_list_first);
+
+	feci->deref(feci);
+
+	/*
+	 * Get list of assigned classifiers to reclassify.
+	 * Remember: This also includes our default classifier too.
+	 */
+	assignment_count = ecm_db_connection_classifier_assignments_get_and_ref(ci, assignments);
+
+	/*
+	 * All of the assigned classifiers must permit reclassification.
+	 */
+	reclassify_allowed = true;
+	for (i = 0; i < assignment_count; ++i) {
+		DEBUG_TRACE("%p: Calling to reclassify: %p, type: %d\n", ci, assignments[i], assignments[i]->type_get(assignments[i]));
+		if (!assignments[i]->reclassify_allowed(assignments[i])) {
+			DEBUG_TRACE("%p: reclassify denied: %p, by type: %d\n", ci, assignments[i], assignments[i]->type_get(assignments[i]));
+			reclassify_allowed = false;
+			break;
+		}
+	}
+
+	/*
+	 * Re-generation of state is successful.
+	 */
+	ecm_db_conection_regeneration_completed(ci);
+
+	/*
+	 * Now we action any classifier re-classify
+	 */
+	if (!reclassify_allowed) {
+		/*
+		 * Regeneration came to a successful conclusion even though reclassification was denied
+		 */
+		DEBUG_WARN("%p: re-classify denied\n", ci);
+
+		/*
+		 * Release the assignments
+		 */
+		ecm_db_connection_assignments_release(assignment_count, assignments);
+		return;
+	}
+
+	/*
+	 * Reclassify
+	 */
+	DEBUG_INFO("%p: reclassify\n", ci);
+	if (!ecm_nss_ipv4_reclassify(ci, assignment_count, assignments)) {
+		/*
+		 * We could not set up the classifiers to reclassify, it is safer to fail out and try again next time
+		 */
+		DEBUG_WARN("%p: Regeneration: reclassify failed\n", ci);
+		ecm_db_connection_assignments_release(assignment_count, assignments);
+		return;
+	}
+	DEBUG_INFO("%p: reclassify success\n", ci);
+
+	/*
+	 * Release the assignments
+	 */
+	ecm_db_connection_assignments_release(assignment_count, assignments);
+	return;
+
+ecm_multicast_ipv4_retry_regen:
+	feci->deref(feci);
+	ecm_db_conection_regeneration_failed(ci);
+	return;
+}
+
 #ifdef ECM_STATE_OUTPUT_ENABLE
 /*
  * ecm_nss_multicast_ipv4_connection_state_get()
@@ -2719,13 +2859,7 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 	 * Do we need to action generation change?
 	 */
 	if (unlikely(ecm_db_connection_regeneration_required_check(ci))) {
-		/*
-		 * TODO: Will add support for multicast connection re-generation here.
-		 */
-		DEBUG_WARN("%p: TODO: Handle multicast re-generation\n", ci);
-		ecm_db_conection_regeneration_failed(ci);
-		ecm_db_connection_deref(ci);
-		return NF_ACCEPT;
+		ecm_nss_multicast_ipv4_connection_regenerate(ci, sender, out_dev, in_dev, in_dev_nat);
 	}
 
 	/*
