@@ -813,6 +813,7 @@ struct ecm_db_listener_instance {
 struct ecm_db_multicast_tuple_instance {
 	struct ecm_db_multicast_tuple_instance *next;	/* Next instance in global list */
 	struct ecm_db_multicast_tuple_instance *prev;	/* Previous instance in global list */
+	struct ecm_db_connection_instance *ci;	/* Pointer to the DB Connection Instance */
 	uint16_t src_port;	/* RO: IPv4/v6 Source Port */
 	uint16_t dst_port;	/* RO: IPv4/v6 Destination Port */
 	ip_addr_t src_ip;	/* RO: IPv4/v6 Source Address */
@@ -7791,7 +7792,7 @@ static int ecm_db_multicast_to_interfaces_xml_state_get(struct ecm_db_connection
 
 	ret = ecm_db_multicast_connection_to_interfaces_get_and_ref_all(ci, &mc_ifaces, &mc_ifaces_first);
 	if (ret == 0) {
-		return -1;
+		return ret;
 	}
 
 	for (heirarchy_index = 0; heirarchy_index < ECM_DB_MULTICAST_IF_MAX; heirarchy_index++) {
@@ -10224,10 +10225,13 @@ struct ecm_db_multicast_tuple_instance *ecm_db_multicast_tuple_instance_alloc(ip
 EXPORT_SYMBOL(ecm_db_multicast_tuple_instance_alloc);
 
 /*
- * ecm_db_multicast_tuple_instance_find_and_ref()
+ * ecm_db_multicast_connection_find_and_ref()
  * 	Called by MFC event update to fetch connection from the table
+ * 	This function takes a ref count for both tuple_instance and 'ci'
+ *	Call ecm_db_multicast_connection_deref function for deref both
+ *	'ti' and 'ci'
  */
-struct ecm_db_multicast_tuple_instance *ecm_db_multicast_tuple_instance_find_and_ref(ip_addr_t origin, ip_addr_t group)
+struct ecm_db_multicast_tuple_instance *ecm_db_multicast_connection_find_and_ref(ip_addr_t origin, ip_addr_t group)
 {
 	ecm_db_multicast_tuple_instance_hash_t hash_index;
 	struct ecm_db_multicast_tuple_instance *ti;
@@ -10250,6 +10254,7 @@ struct ecm_db_multicast_tuple_instance *ecm_db_multicast_tuple_instance_find_and
 		}
 
 		_ecm_db_multicast_tuple_instance_ref(ti);
+		_ecm_db_connection_ref(ti->ci);
 		spin_unlock_bh(&ecm_db_lock);
 		DEBUG_TRACE("multicast tuple instance found %p\n", ti);
 		return ti;
@@ -10259,12 +10264,12 @@ struct ecm_db_multicast_tuple_instance *ecm_db_multicast_tuple_instance_find_and
 	DEBUG_TRACE("multicast tuple instance not found\n");
 	return NULL;
 }
-EXPORT_SYMBOL(ecm_db_multicast_tuple_instance_find_and_ref);
+EXPORT_SYMBOL(ecm_db_multicast_connection_find_and_ref);
 
 /*
  * ecm_db_multicast_tuple_instance_deref()
  * 	Deref the reference count or
- * 	Free the connection struct, when the multicast connection dies
+ * 	Free the tuple_instance struct, when the multicast connection dies
  */
 int ecm_db_multicast_tuple_instance_deref(struct ecm_db_multicast_tuple_instance *ti)
 {
@@ -10303,6 +10308,23 @@ int ecm_db_multicast_tuple_instance_deref(struct ecm_db_multicast_tuple_instance
 EXPORT_SYMBOL(ecm_db_multicast_tuple_instance_deref);
 
 /*
+ * ecm_db_multicast_connection_deref()
+ * 	Deref both 'ti' and 'ci'
+ * 	call this function after ecm_db_multicast_connection_find_and_ref()
+ */
+void ecm_db_multicast_connection_deref(struct ecm_db_multicast_tuple_instance *ti)
+{
+	struct ecm_db_connection_instance *ci;
+	DEBUG_CHECK_MAGIC(ti, ECM_DB_MULTICAST_INSTANCE_MAGIC, "%p: magic failed", ti);
+
+	ci = ti->ci;
+	ecm_db_multicast_tuple_instance_deref(ti);
+	ecm_db_connection_deref(ci);
+
+}
+EXPORT_SYMBOL(ecm_db_multicast_connection_deref);
+
+/*
  * ecm_db_multicast_tuple_instance_add()
  * 	Add the tuple instance into the hash table. Also, attach the tuple instance
  * 	with connection instance.
@@ -10321,6 +10343,7 @@ void ecm_db_multicast_tuple_instance_add(struct ecm_db_multicast_tuple_instance 
 	 * Attach the multicast tuple instance with the connection instance
 	 */
 	ci->ti = ti;
+	ti->ci = ci;
 
 	/*
 	 * Take a local reference to ti
@@ -10340,10 +10363,12 @@ void ecm_db_multicast_tuple_instance_add(struct ecm_db_multicast_tuple_instance 
 EXPORT_SYMBOL(ecm_db_multicast_tuple_instance_add);
 
 /*
- * ecm_db_multicast_tuple_instance_get_and_ref_first()
+ * ecm_db_multicast_connection_get_and_ref_first()
  * 	Return the first tuple instance from the table when given a group
+ * 	Also take a ref count for 'ci', once done call ecm_db_multicast_connection_deref()
+ * 	to deref both 'ti' and 'ci'
  */
-struct ecm_db_multicast_tuple_instance *ecm_db_multicast_tuple_instance_get_and_ref_first(ip_addr_t group)
+struct ecm_db_multicast_tuple_instance *ecm_db_multicast_connection_get_and_ref_first(ip_addr_t group)
 {
 	ecm_db_multicast_tuple_instance_hash_t hash_index;
 	struct ecm_db_multicast_tuple_instance *ti;
@@ -10354,18 +10379,21 @@ struct ecm_db_multicast_tuple_instance *ecm_db_multicast_tuple_instance_get_and_
 	ti = ecm_db_multicast_tuple_instance_table[hash_index];
 	if (ti) {
 		_ecm_db_multicast_tuple_instance_ref(ti);
+		_ecm_db_connection_ref(ti->ci);
 	}
 	spin_unlock_bh(&ecm_db_lock);
 
 	return ti;
 }
-EXPORT_SYMBOL(ecm_db_multicast_tuple_instance_get_and_ref_first);
+EXPORT_SYMBOL(ecm_db_multicast_connection_get_and_ref_first);
 
 /*
- * ecm_db_multicast_tuple_instance_get_and_ref_next()
- * 	Return the next tuple instance node
+ * ecm_db_multicast_connection_get_and_ref_next()
+ * 	Return the next tuple instance node and
+ * 	take a ref count for 'ci', once done call ecm_db_multicast_connection_deref()
+ * 	to deref both 'ti' and 'ci'
  */
-struct ecm_db_multicast_tuple_instance *ecm_db_multicast_tuple_instance_get_and_ref_next(struct ecm_db_multicast_tuple_instance *ti)
+struct ecm_db_multicast_tuple_instance *ecm_db_multicast_connection_get_and_ref_next(struct ecm_db_multicast_tuple_instance *ti)
 {
 	struct ecm_db_multicast_tuple_instance *tin;
 	DEBUG_CHECK_MAGIC(ti, ECM_DB_MULTICAST_INSTANCE_MAGIC, "%p: magic failed", ti);
@@ -10373,11 +10401,12 @@ struct ecm_db_multicast_tuple_instance *ecm_db_multicast_tuple_instance_get_and_
 	tin = ti->next;
 	if (tin) {
 		_ecm_db_multicast_tuple_instance_ref(tin);
+		_ecm_db_connection_ref(tin->ci);
 	}
 	spin_unlock_bh(&ecm_db_lock);
 	return tin;
 }
-EXPORT_SYMBOL(ecm_db_multicast_tuple_instance_get_and_ref_next);
+EXPORT_SYMBOL(ecm_db_multicast_connection_get_and_ref_next);
 
 /*
  * ecm_db_multicast_tuple_instance_source_ip_get()
@@ -10561,16 +10590,17 @@ static void  _ecm_db_multicast_connection_to_interfaces_set_clear(struct ecm_db_
 }
 
 /*
- * ecm_db_multicast_connection_find_and_ref()
+ * ecm_db_multicast_connection_get_from_tuple()
  * 	Return the connection instance
  */
-struct ecm_db_connection_instance *ecm_db_multicast_connection_find_and_ref(struct ecm_db_multicast_tuple_instance *ti)
+struct ecm_db_connection_instance *ecm_db_multicast_connection_get_from_tuple(struct ecm_db_multicast_tuple_instance *ti)
 {
-	struct ecm_db_connection_instance *ci;
-	ci = ecm_db_connection_find_and_ref(ti->src_ip, ti->grp_ip, ti->proto, (int)ti->src_port, (int)ti->dst_port);
-	return ci;
+	DEBUG_CHECK_MAGIC(ti, ECM_DB_MULTICAST_INSTANCE_MAGIC, "%p: magic failed", ti);
+	DEBUG_ASSERT(ti->ci, "%p: Bad multicast connection instance \n", ti);
+
+	return ti->ci;
 }
-EXPORT_SYMBOL(ecm_db_multicast_connection_find_and_ref);
+EXPORT_SYMBOL(ecm_db_multicast_connection_get_from_tuple);
 
 /*
  * ecm_db_multicast_connection_to_interfaces_deref_all()
