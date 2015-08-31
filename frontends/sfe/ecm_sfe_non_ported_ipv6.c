@@ -1807,7 +1807,6 @@ unsigned int ecm_sfe_non_ported_ipv6_process(struct net_device *out_dev,
 		 */
 		dci = ecm_classifier_default_instance_alloc(nci, protocol, ecm_dir, src_port, dest_port);
 		if (!dci) {
-			feci->deref(feci);
 			ecm_db_mapping_deref(dest_mi);
 			ecm_db_node_deref(dest_ni);
 			ecm_db_mapping_deref(src_mi);

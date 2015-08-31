@@ -2001,7 +2001,6 @@ unsigned int ecm_sfe_ported_ipv6_process(struct net_device *out_dev,
 				aci->deref(aci);
 			} else {
 				dci->base.deref((struct ecm_classifier_instance *)dci);
-				feci->deref(feci);
 				ecm_db_mapping_deref(dest_mi);
 				ecm_db_node_deref(dest_ni);
 				ecm_db_mapping_deref(src_mi);
