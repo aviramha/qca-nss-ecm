@@ -2413,6 +2413,10 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 	int32_t src_dev_type;
 	int32_t current_interface_index;
 	bool from_local_addr;
+	bool next_dest_addr_valid;
+	bool next_dest_node_addr_valid;
+	ip_addr_t next_dest_addr;
+	uint8_t next_dest_node_addr[ETH_ALEN] = {0};
 
 	/*
 	 * Get a big endian of the IPv4 address we have been given as our starting point.
@@ -2568,6 +2572,10 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 		}
 	}
 
+	next_dest_addr_valid = true;
+	next_dest_node_addr_valid = false;
+	ECM_IP_ADDR_COPY(next_dest_addr, dest_addr);
+
 	/*
 	 * Iterate until we are done or get to the max number of interfaces we can record.
 	 * NOTE: current_interface_index tracks the position of the first interface position in interfaces[]
@@ -2652,17 +2660,10 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 					bool on_link;
 					ip_addr_t gw_addr = ECM_IP_ADDR_NULL;
 					uint8_t mac_addr[ETH_ALEN];
-					if (!ecm_interface_mac_addr_get(dest_addr, mac_addr, &on_link, gw_addr)) {
-						if (ip_version == 4) {
-							DEBUG_WARN("Unable to obtain MAC address for " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(dest_addr));
-							ecm_interface_send_arp_request(dest_dev, dest_addr, on_link, gw_addr);
-						}
-#ifdef ECM_IPV6_ENABLE
-						if (ip_version == 6) {
-							DEBUG_WARN("Unable to obtain MAC address for " ECM_IP_ADDR_OCTAL_FMT "\n", ECM_IP_ADDR_TO_OCTAL(dest_addr));
-							ecm_interface_send_neighbour_solicitation(dest_dev, dest_addr);
-						}
-#endif
+
+					if (next_dest_node_addr_valid) {
+						memcpy(mac_addr, next_dest_node_addr, ETH_ALEN);
+					} else if (!next_dest_addr_valid) {
 						dev_put(src_dev);
 						dev_put(dest_dev);
 
@@ -2671,6 +2672,29 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 						 */
 						ecm_db_connection_interfaces_deref(interfaces, current_interface_index);
 						return ECM_DB_IFACE_HEIRARCHY_MAX;
+					} else {
+						if (!ecm_interface_mac_addr_get(next_dest_addr, mac_addr, &on_link, gw_addr)) {
+							if (ip_version == 4) {
+								DEBUG_WARN("Unable to obtain MAC address for " ECM_IP_ADDR_DOT_FMT "\n",
+										ECM_IP_ADDR_TO_DOT(dest_addr));
+								ecm_interface_send_arp_request(dest_dev, dest_addr, on_link, gw_addr);
+							}
+#ifdef ECM_IPV6_ENABLE
+							if (ip_version == 6) {
+								DEBUG_WARN("Unable to obtain MAC address for " ECM_IP_ADDR_OCTAL_FMT "\n",
+										ECM_IP_ADDR_TO_OCTAL(dest_addr));
+								ecm_interface_send_neighbour_solicitation(dest_dev, dest_addr);
+							}
+#endif
+							dev_put(src_dev);
+							dev_put(dest_dev);
+
+							/*
+							 * Release the interfaces heirarchy we constructed to this point.
+							 */
+							ecm_db_connection_interfaces_deref(interfaces, current_interface_index);
+							return ECM_DB_IFACE_HEIRARCHY_MAX;
+						}
 					}
 					next_dev = br_port_dev_get(dest_dev, mac_addr);
 					if (!next_dev) {
@@ -2909,6 +2933,9 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 			 * Copy the dev hold into this, we will release the hold later
 			 */
 			next_dev = addressing.dev;
+			next_dest_addr_valid = false;
+			next_dest_node_addr_valid = true;
+			memcpy(next_dest_node_addr, addressing.pa.remote, ETH_ALEN);
 
 			DEBUG_TRACE("Net device: %p, next device: %p (%s)\n", dest_dev, next_dev, next_dev->name);
 
