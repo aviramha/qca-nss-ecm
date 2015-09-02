@@ -2248,11 +2248,6 @@ int ecm_nss_ipv6_init(struct dentry *dentry)
 	}
 #endif
 
-	if (!ecm_nss_ipv6_sync_queue_init()) {
-		DEBUG_ERROR("Failed to create ecm ipv6 connection sync workqueue\n");
-		goto task_cleanup;
-	}
-
 #ifdef ECM_MULTICAST_ENABLE
 	if (!ecm_nss_multicast_ipv6_debugfs_init(ecm_nss_ipv6_dentry)) {
 		DEBUG_ERROR("Failed to create ecm multicast files in debugfs\n");
@@ -2277,6 +2272,17 @@ int ecm_nss_ipv6_init(struct dentry *dentry)
 	 * Register this module with the Linux NSS Network driver
 	 */
 	ecm_nss_ipv6_nss_ipv6_mgr = nss_ipv6_notify_register(ecm_nss_ipv6_net_dev_callback, NULL);
+
+	if (!ecm_nss_ipv6_sync_queue_init()) {
+		DEBUG_ERROR("Failed to create ecm ipv6 connection sync workqueue\n");
+		nss_ipv6_notify_unregister();
+#ifdef ECM_MULTICAST_ENABLE
+		ecm_nss_multicast_ipv6_exit();
+#endif
+		nf_unregister_hooks(ecm_nss_ipv6_netfilter_hooks,
+				ARRAY_SIZE(ecm_nss_ipv6_netfilter_hooks));
+		goto task_cleanup;
+	}
 
 	return 0;
 
