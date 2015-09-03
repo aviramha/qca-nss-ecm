@@ -195,6 +195,9 @@ struct ecm_db_node_instance *ecm_nss_ipv6_node_establish_and_ref(struct ecm_fron
 	int i;
 	bool done;
 	uint8_t node_addr[ETH_ALEN];
+#ifdef ECM_INTERFACE_L2TPV2_ENABLE
+	ip_addr_t remote_ip;
+#endif
 
 	DEBUG_INFO("Establish node for " ECM_IP_ADDR_OCTAL_FMT "\n", ECM_IP_ADDR_TO_OCTAL(addr));
 
@@ -222,6 +225,9 @@ struct ecm_db_node_instance *ecm_nss_ipv6_node_establish_and_ref(struct ecm_fron
 #ifdef ECM_INTERFACE_PPPOE_ENABLE
 		struct ecm_db_interface_info_pppoe pppoe_info;
 #endif
+#ifdef ECM_INTERFACE_L2TPV2_ENABLE
+		struct ecm_db_interface_info_pppol2tpv2 pppol2tpv2_info;
+#endif
 		type = ecm_db_connection_iface_type_get(interface_list[i]);
 		DEBUG_INFO("Lookup node address, interface @ %d is type: %d\n", i, type);
 
@@ -246,6 +252,20 @@ struct ecm_db_node_instance *ecm_nss_ipv6_node_establish_and_ref(struct ecm_fron
 			done = true;
 			break;
 
+		case ECM_DB_IFACE_TYPE_PPPOL2TPV2:
+#ifdef ECM_INTERFACE_L2TPV2_ENABLE
+			ecm_db_iface_pppol2tpv2_session_info_get(interface_list[i], &pppol2tpv2_info);
+			ECM_HIN4_ADDR_TO_IP_ADDR(remote_ip, pppol2tpv2_info.ip.daddr);
+			if (unlikely(!ecm_interface_mac_addr_get(remote_ip, node_addr, &on_link, gw_addr))) {
+				DEBUG_TRACE("Failed to obtain mac for host " ECM_IP_ADDR_OCTAL_FMT "\n", ECM_IP_ADDR_TO_OCTAL(addr));
+				return NULL;
+			}
+			done = true;
+			break;
+#else
+			DEBUG_TRACE("PPPoL2TPV2 interface unsupported\n");
+			return NULL;
+#endif
 		case ECM_DB_IFACE_TYPE_VLAN:
 #ifdef ECM_INTERFACE_VLAN_ENABLE
 			/*
@@ -1037,12 +1057,21 @@ static unsigned int ecm_nss_ipv6_post_routing_hook(const struct nf_hook_ops *ops
 #endif
 
 #ifdef ECM_INTERFACE_PPP_ENABLE
+#ifdef ECM_INTERFACE_L2TPV2_ENABLE
+	/*
+	 * skip l2tpv3/pptp because we don't accelerate them
+	 */
+	if (ecm_interface_skip_l2tpv3_pptp(skb, out)) {
+		return NF_ACCEPT;
+	}
+#else
 	/*
 	 * skip l2tp/pptp because we don't accelerate them
 	 */
 	if (ecm_interface_skip_l2tp_pptp(skb, out)) {
 		return NF_ACCEPT;
 	}
+#endif
 #endif
 
 	/*
@@ -1704,7 +1733,6 @@ static void ecm_nss_ipv6_stats_sync_req_work(struct work_struct *work)
 	nicsm_req->index = 0;
 	queue_delayed_work(ecm_nss_ipv6_workqueue, &ecm_nss_ipv6_work, ECM_NSS_IPV6_STATS_SYNC_PERIOD);
 }
-
 
 /*
  * struct nf_hook_ops ecm_nss_ipv6_netfilter_hooks[]
