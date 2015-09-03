@@ -1382,6 +1382,7 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct ecm_front_e
 	 * Extract from the device more type-specific information
 	 */
 	if (dev_type == ARPHRD_ETHER) {
+
 		/*
 		 * Ethernet - but what sub type?
 		 */
@@ -1405,7 +1406,7 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct ecm_front_e
 			 * Establish this type of interface
 			 */
 			ii = ecm_interface_vlan_interface_establish(&type_info.vlan, dev_name, dev_interface_num, ae_interface_num, dev_mtu);
-			return ii;
+			goto identifier_update;
 		}
 #endif
 
@@ -1425,7 +1426,7 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct ecm_front_e
 			 * Establish this type of interface
 			 */
 			ii = ecm_interface_bridge_interface_establish(&type_info.bridge, dev_name, dev_interface_num, ae_interface_num, dev_mtu);
-			return ii;
+			goto identifier_update;
 		}
 
 #ifdef ECM_INTERFACE_BOND_ENABLE
@@ -1445,7 +1446,7 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct ecm_front_e
 			 * Establish this type of interface
 			 */
 			ii = ecm_interface_lag_interface_establish(&type_info.lag, dev_name, dev_interface_num, ae_interface_num, dev_mtu);
-			return ii;
+			goto identifier_update;
 		}
 #endif
 
@@ -1461,6 +1462,17 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct ecm_front_e
 		 * Establish this type of interface
 		 */
 		ii = ecm_interface_ethernet_interface_establish(&type_info.ethernet, dev_name, dev_interface_num, ae_interface_num, dev_mtu);
+
+identifier_update:
+		if (ii) {
+			/*
+			 * An interface identifier/ifindex can be change after network restart. Below
+			 * functtion will check interface_identifier present in 'ii' with new dev_interface_num.
+			 * If differ then update new ifindex and update the interface identifier hash table.
+			 */
+			ecm_db_iface_identifier_hash_table_entry_check_and_update(ii, dev_interface_num);
+		}
+
 		return ii;
 	}
 
