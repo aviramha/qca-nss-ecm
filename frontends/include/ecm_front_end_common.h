@@ -15,6 +15,8 @@
  */
 
 #include <linux/if_pppox.h>
+#include <net/netfilter/nf_conntrack.h>
+#include <net/netfilter/nf_conntrack_acct.h>
 
 #ifdef ECM_FRONT_END_NSS_ENABLE
 #include "ecm_nss_conntrack_notifier.h"
@@ -132,6 +134,50 @@ static inline void ecm_front_end_push_l2_encap_header(struct sk_buff *skb, uint3
 {
 	skb->data -= len;
 	skb->network_header -= len;
+}
+
+/*
+ * ecm_front_end_acceleration_rejected()
+ *      Check if the acceleration of a flow could be rejected quickly.
+ */
+static inline bool ecm_front_end_acceleration_rejected(struct sk_buff *skb)
+{
+	struct nf_conn *ct;
+	enum ip_conntrack_info ctinfo;
+	struct nf_conn_counter *acct;
+
+	ct = nf_ct_get(skb, &ctinfo);
+	if (unlikely(!ct)) {
+		/*
+		 * Maybe bridged traffic, no decision here.
+		 */
+		return false;
+	}
+
+	if (unlikely(nf_ct_is_untracked(ct))) {
+		/*
+		 * Untracked traffic certainly can't be accelerated.
+		 */
+		return true;
+	}
+
+#if (LINUX_VERSION_CODE <= KERNEL_VERSION(3, 6, 0))
+	acct = nf_conn_acct_find(ct);
+#else
+	acct = nf_conn_acct_find(ct)->counter;
+#endif
+	if (acct) {
+		long long packets = atomic64_read(&acct[CTINFO2DIR(ctinfo)].packets);
+		if ((packets > 0xff) && (packets & 0xff)) {
+			/*
+			 * Connection hits slow path at least 256 times, so it must be not able to accelerate.
+			 * But we also give it a chance to walk through ECM every 256 packets
+			 */
+			return true;
+		}
+	}
+
+	return false;
 }
 
 extern void ecm_front_end_conntrack_notifier_stop(int num);
