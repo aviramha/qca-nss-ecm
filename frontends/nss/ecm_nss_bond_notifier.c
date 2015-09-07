@@ -335,6 +335,8 @@ int ecm_nss_bond_notifier_init(struct dentry *dentry)
 	 */
 	ecm_nss_bond_notifier_nss_context = nss_register_lag_if(NSS_LAG0_INTERFACE_NUM, NULL, ecm_nss_bond_notifier_lag_event_cb, NULL);
 	ecm_nss_bond_notifier_nss_context = nss_register_lag_if(NSS_LAG1_INTERFACE_NUM, NULL, ecm_nss_bond_notifier_lag_event_cb, NULL);
+	ecm_nss_bond_notifier_nss_context = nss_register_lag_if(NSS_LAG2_INTERFACE_NUM, NULL, ecm_nss_bond_notifier_lag_event_cb, NULL);
+	ecm_nss_bond_notifier_nss_context = nss_register_lag_if(NSS_LAG3_INTERFACE_NUM, NULL, ecm_nss_bond_notifier_lag_event_cb, NULL);
 
 	/*
 	 * Register Link Aggregation callbacks with the bonding driver
@@ -366,6 +368,8 @@ void ecm_nss_bond_notifier_exit(void)
 	 */
 	nss_unregister_lag_if(NSS_LAG0_INTERFACE_NUM);
 	nss_unregister_lag_if(NSS_LAG1_INTERFACE_NUM);
+	nss_unregister_lag_if(NSS_LAG2_INTERFACE_NUM);
+	nss_unregister_lag_if(NSS_LAG3_INTERFACE_NUM);
 
 	/*
 	 * Remove the debugfs files recursively.
