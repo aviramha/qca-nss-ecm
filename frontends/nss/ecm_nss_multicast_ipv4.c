@@ -115,13 +115,13 @@ static int32_t ecm_nss_multicast_connection_to_interface_heirarchy_construct(str
 								      struct ecm_db_iface_instance *interfaces, ip_addr_t ip_src_addr, ip_addr_t ip_dest_addr,
 								      struct net_device *in_dev, struct net_device *brdev, uint8_t max_if, uint32_t *dst_dev,
 								      uint32_t *to_list_first, uint8_t *src_node_addr, bool is_routed,
-								      __be16 *layer4hdr)
+								      __be16 *layer4hdr, struct sk_buff *skb)
 {
 	int interface_instance_cnt;
 	if (is_routed) {
-		interface_instance_cnt = ecm_interface_multicast_heirarchy_construct_routed(feci, interfaces, in_dev, ip_src_addr, ip_dest_addr, max_if, dst_dev, to_list_first, layer4hdr);
+		interface_instance_cnt = ecm_interface_multicast_heirarchy_construct_routed(feci, interfaces, in_dev, ip_src_addr, ip_dest_addr, max_if, dst_dev, to_list_first, layer4hdr, skb);
 	} else {
-		interface_instance_cnt = ecm_interface_multicast_heirarchy_construct_bridged(feci, interfaces, brdev, ip_src_addr, ip_dest_addr, max_if, dst_dev, to_list_first, src_node_addr, layer4hdr);
+		interface_instance_cnt = ecm_interface_multicast_heirarchy_construct_bridged(feci, interfaces, brdev, ip_src_addr, ip_dest_addr, max_if, dst_dev, to_list_first, src_node_addr, layer4hdr, skb);
 	}
 
 	return interface_instance_cnt;
@@ -536,7 +536,7 @@ static int ecm_nss_multicast_ipv4_connection_update_accelerate(struct ecm_front_
 			 * Conflicting information may cause accel to be unsupported.
 			 */
 			switch (ii_type) {
-#ifdef ECM_INTERFACE_PPP_ENABLE
+#ifdef ECM_INTERFACE_PPPOE_ENABLE
 				struct ecm_db_interface_info_pppoe pppoe_info;
 #endif
 #ifdef ECM_INTERFACE_VLAN_ENABLE
@@ -586,7 +586,7 @@ static int ecm_nss_multicast_ipv4_connection_update_accelerate(struct ecm_front_
 				DEBUG_TRACE("%p: Ethernet - mac: %pM\n", nmci, to_nss_iface_address);
 				break;
 			case ECM_DB_IFACE_TYPE_PPPOE:
-#ifdef ECM_INTERFACE_PPP_ENABLE
+#ifdef ECM_INTERFACE_PPPOE_ENABLE
 				/*
 				 * More than one PPPoE in the list is not valid!
 				 */
@@ -950,7 +950,7 @@ static void ecm_nss_multicast_ipv4_connection_accelerate(struct ecm_front_end_co
 #ifdef ECM_INTERFACE_VLAN_ENABLE
 			struct ecm_db_interface_info_vlan vlan_info;
 #endif
-#ifdef ECM_INTERFACE_PPP_ENABLE
+#ifdef ECM_INTERFACE_PPPOE_ENABLE
 			struct ecm_db_interface_info_pppoe pppoe_info;
 #endif
 		case ECM_DB_IFACE_TYPE_BRIDGE:
@@ -979,7 +979,7 @@ static void ecm_nss_multicast_ipv4_connection_accelerate(struct ecm_front_end_co
 #endif
 			break;
 		case ECM_DB_IFACE_TYPE_PPPOE:
-#ifdef ECM_INTERFACE_PPP_ENABLE
+#ifdef ECM_INTERFACE_PPPOE_ENABLE
 			/*
 			 * More than one PPPoE in the list is not valid!
 			 */
@@ -1015,7 +1015,6 @@ static void ecm_nss_multicast_ipv4_connection_accelerate(struct ecm_front_end_co
 		kfree(nim);
 		return;
 	}
-
 
 	from_nat_ifaces_first = ecm_db_connection_from_nat_interfaces_get_and_ref(feci->ci, from_nat_ifaces);
 	from_nat_ifaces_identifier = ecm_db_iface_interface_identifier_get(from_nat_ifaces[ECM_DB_IFACE_HEIRARCHY_MAX - 1]);
@@ -1068,7 +1067,7 @@ static void ecm_nss_multicast_ipv4_connection_accelerate(struct ecm_front_end_co
 			 * Conflicting information may cause accel to be unsupported.
 			 */
 			switch (ii_type) {
-#ifdef ECM_INTERFACE_PPP_ENABLE
+#ifdef ECM_INTERFACE_PPPOE_ENABLE
 				struct ecm_db_interface_info_pppoe pppoe_info;
 #endif
 #ifdef ECM_INTERFACE_VLAN_ENABLE
@@ -1122,7 +1121,7 @@ static void ecm_nss_multicast_ipv4_connection_accelerate(struct ecm_front_end_co
 				DEBUG_TRACE("%p: Ethernet - mac: %pM, mtu %d\n", nmci, to_nss_iface_address, to_mtu);
 				break;
 			case ECM_DB_IFACE_TYPE_PPPOE:
-#ifdef ECM_INTERFACE_PPP_ENABLE
+#ifdef ECM_INTERFACE_PPPOE_ENABLE
 				/*
 				 * More than one PPPoE in the list is not valid!
 				 */
@@ -1939,7 +1938,7 @@ static void ecm_nss_multicast_ipv4_connection_regenerate(struct ecm_db_connectio
 	layer4hdr[1] = htons(port);
 
 	DEBUG_TRACE("%p: Update the 'from' interface heirarchy list\n", ci);
-	from_list_first = ecm_interface_heirarchy_construct(feci, from_list, ip_dest_addr, ip_src_addr, 4, protocol, in_dev, is_routed, in_dev, src_node_addr, dest_node_addr, layer4hdr);
+	from_list_first = ecm_interface_heirarchy_construct(feci, from_list, ip_dest_addr, ip_src_addr, 4, protocol, in_dev, is_routed, in_dev, src_node_addr, dest_node_addr, layer4hdr, NULL);
 	if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 		goto ecm_multicast_ipv4_retry_regen;
 	}
@@ -1948,7 +1947,7 @@ static void ecm_nss_multicast_ipv4_connection_regenerate(struct ecm_db_connectio
 	ecm_db_connection_interfaces_deref(from_list, from_list_first);
 
 	DEBUG_TRACE("%p: Update the 'from NAT' interface heirarchy list\n", ci);
-	from_nat_list_first = ecm_interface_heirarchy_construct(feci, from_nat_list, ip_dest_addr, ip_src_addr_nat, 4, protocol, in_dev_nat, is_routed, in_dev_nat, src_node_addr_nat, dest_node_addr, layer4hdr);
+	from_nat_list_first = ecm_interface_heirarchy_construct(feci, from_nat_list, ip_dest_addr, ip_src_addr_nat, 4, protocol, in_dev_nat, is_routed, in_dev_nat, src_node_addr_nat, dest_node_addr, layer4hdr, NULL);
 	if (from_nat_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 		goto ecm_multicast_ipv4_retry_regen;
 	}
@@ -2326,7 +2325,6 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 		}
 	}
 
-
 	DEBUG_TRACE("MCAST UDP src: " ECM_IP_ADDR_DOT_FMT ":%d, dest: " ECM_IP_ADDR_DOT_FMT ":%d, dir %d\n",
 			ECM_IP_ADDR_TO_DOT(ip_src_addr), src_port, ECM_IP_ADDR_TO_DOT(ip_dest_addr), dest_port, ecm_dir);
 
@@ -2416,7 +2414,7 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 		 * For this we also need the interface lists which we also set upon the new connection while we are at it.
 		 */
 		DEBUG_TRACE("%p: Create the 'from' interface heirarchy list\n", nci);
-		from_list_first = ecm_interface_heirarchy_construct(feci, from_list, ip_dest_addr, ip_src_addr, 4, protocol, in_dev, is_routed, in_dev, src_node_addr, dest_node_addr, (__be16 *)&udp_hdr);
+		from_list_first = ecm_interface_heirarchy_construct(feci, from_list, ip_dest_addr, ip_src_addr, 4, protocol, in_dev, is_routed, in_dev, src_node_addr, dest_node_addr, (__be16 *)&udp_hdr, skb);
 		if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			feci->deref(feci);
 			ecm_db_connection_deref(nci);
@@ -2427,7 +2425,7 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 		ecm_db_connection_from_interfaces_reset(nci, from_list, from_list_first);
 
 		DEBUG_TRACE("%p: Establish source node\n", nci);
-		src_ni = ecm_nss_ipv4_node_establish_and_ref(feci, in_dev, ip_src_addr, from_list, from_list_first, src_node_addr);
+		src_ni = ecm_nss_ipv4_node_establish_and_ref(feci, in_dev, ip_src_addr, from_list, from_list_first, src_node_addr, skb);
 		ecm_db_connection_interfaces_deref(from_list, from_list_first);
 		if (!src_ni) {
 			DEBUG_WARN("%p: Failed to establish source node\n", nci);
@@ -2483,7 +2481,7 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 
 		interface_idx_cnt = ecm_nss_multicast_connection_to_interface_heirarchy_construct(feci, to_list, ip_src_addr, ip_dest_addr, in_dev,
 												  out_dev->master, if_cnt, dst_dev, to_list_first,
-												  src_node_addr, is_routed, (__be16 *)&udp_hdr);
+												  src_node_addr, is_routed, (__be16 *)&udp_hdr, skb);
 		if (interface_idx_cnt == 0) {
 			ecm_db_node_deref(src_ni);
 			ecm_db_mapping_deref(src_mi);
@@ -2517,7 +2515,7 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 
 		DEBUG_TRACE("%p: Create destination node\n", nci);
 		ecm_db_multicast_copy_if_heirarchy(to_list_temp, to_list);
-		dest_ni = ecm_nss_ipv4_node_establish_and_ref(feci, out_dev, ip_dest_addr, to_list_temp, *to_list_first, dest_mac_addr);
+		dest_ni = ecm_nss_ipv4_node_establish_and_ref(feci, out_dev, ip_dest_addr, to_list_temp, *to_list_first, dest_mac_addr, skb);
 
 		/*
 		 * De-ref the Multicast destination interface list
@@ -2564,7 +2562,7 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 		}
 
 		DEBUG_TRACE("%p: Create the 'from NAT' interface heirarchy list\n", nci);
-		from_nat_list_first = ecm_interface_heirarchy_construct(feci, from_nat_list, ip_dest_addr, ip_src_addr_nat, 4, protocol, in_dev_nat, is_routed, in_dev_nat, src_node_addr, dest_node_addr, (__be16 *)&udp_hdr);
+		from_nat_list_first = ecm_interface_heirarchy_construct(feci, from_nat_list, ip_dest_addr, ip_src_addr_nat, 4, protocol, in_dev_nat, is_routed, in_dev_nat, src_node_addr, dest_node_addr, (__be16 *)&udp_hdr, skb);
 		if (from_nat_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			for (vif = 0; vif < ECM_DB_MULTICAST_IF_MAX; vif++) {
 				to_list_single = ecm_db_multicast_if_heirarchy_get(to_list, vif);
@@ -2587,7 +2585,7 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 		}
 		ecm_db_connection_from_nat_interfaces_reset(nci, from_nat_list, from_nat_list_first);
 
-		src_nat_ni = ecm_nss_ipv4_node_establish_and_ref(feci, in_dev_nat, ip_src_addr_nat, from_nat_list, from_nat_list_first, src_node_addr);
+		src_nat_ni = ecm_nss_ipv4_node_establish_and_ref(feci, in_dev_nat, ip_src_addr_nat, from_nat_list, from_nat_list_first, src_node_addr, skb);
 		ecm_db_connection_interfaces_deref(from_nat_list, from_nat_list_first);
 		if (!src_nat_ni) {
 			for (vif = 0; vif < ECM_DB_MULTICAST_IF_MAX; vif++) {
@@ -2808,7 +2806,7 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 			feci = ecm_db_connection_front_end_get_and_ref(ci);
 			interface_idx_cnt = ecm_nss_multicast_connection_to_interface_heirarchy_construct(feci, to_list, ip_src_addr, ip_dest_addr, in_dev,
 													  out_dev->master, if_cnt, dst_dev, to_list_first,
-													  src_node_addr, is_routed, (__be16 *)&udp_hdr);
+													  src_node_addr, is_routed, (__be16 *)&udp_hdr, skb);
 			feci->deref(feci);
 			if (interface_idx_cnt == 0) {
 				DEBUG_WARN("Failed to reconstruct 'to mc' heirarchy list\n");
@@ -3241,7 +3239,7 @@ static void ecm_br_multicast_update_event_callback(struct net_device *brdev, uin
 			port = (__be16)(ecm_db_connection_to_port_get(ci));
 			layer4hdr[1] = htons(port);
 
-			if_cnt = ecm_interface_multicast_heirarchy_construct_bridged(feci, to_list, brdev, src_ip, dest_ip, mc_update.if_join_cnt, mc_update.join_dev, to_list_first, src_node_addr, layer4hdr);
+			if_cnt = ecm_interface_multicast_heirarchy_construct_bridged(feci, to_list, brdev, src_ip, dest_ip, mc_update.if_join_cnt, mc_update.join_dev, to_list_first, src_node_addr, layer4hdr, NULL);
 			if (if_cnt == 0) {
 				DEBUG_WARN("Failed to obtain 'to_mcast_update' heirarchy list\n");
 				feci->deref(feci);
@@ -3360,7 +3358,6 @@ static void ecm_mfc_update_event_callback(__be32 group, __be32 origin, uint32_t 
 
 	DEBUG_TRACE("origin : group " ECM_IP_ADDR_DOT_FMT ":" ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(src_ip), ECM_IP_ADDR_TO_DOT(dest_ip));
 
-
 	/*
 	 * Access the 5-tuple information from the tuple_instance table, using the
 	 * source and group addresses
@@ -3457,7 +3454,7 @@ static void ecm_mfc_update_event_callback(__be32 group, __be32 origin, uint32_t 
 			port = (__be16)(ecm_db_connection_to_port_get(ci));
 			layer4hdr[1] = htons(port);
 
-			vif_cnt = ecm_interface_multicast_heirarchy_construct_routed(feci, to_list, NULL, src_ip, dest_ip, mc_update.if_join_cnt, mc_update.join_dev, to_list_first, layer4hdr);
+			vif_cnt = ecm_interface_multicast_heirarchy_construct_routed(feci, to_list, NULL, src_ip, dest_ip, mc_update.if_join_cnt, mc_update.join_dev, to_list_first, layer4hdr, NULL);
 			if (vif_cnt == 0) {
 				DEBUG_WARN("Failed to obtain 'to_mcast_update' heirarchy list\n");
 				feci->deref(feci);

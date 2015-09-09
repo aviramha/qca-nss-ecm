@@ -81,7 +81,6 @@ typedef void (*ecm_db_iface_final_callback_t)(void *arg);		/* Finaliser callback
 typedef void (*ecm_db_iface_listener_added_callback_t)(void *arg, struct ecm_db_iface_instance *ii);		/* Added callback */
 typedef void (*ecm_db_iface_listener_removed_callback_t)(void *arg, struct ecm_db_iface_instance *ii);		/* Removed callback */
 
-
 /*
  * Time out values - in seconds - used to configure timer groups
  */
@@ -242,6 +241,7 @@ enum ecm_db_iface_types {
 	ECM_DB_IFACE_TYPE_UNKNOWN,			/* Interface is unknown to the ECM */
 	ECM_DB_IFACE_TYPE_SIT,				/* IPv6 in IPv4 tunnel (SIT) interface */
 	ECM_DB_IFACE_TYPE_TUNIPIP6,			/* IPIP6 Tunnel (TUNNEL6) interface */
+	ECM_DB_IFACE_TYPE_PPPOL2TPV2,			/* Interface is a PPPoL2TPV2 interface (a specific form of PPP that we recognise in the ECM) */
 	ECM_DB_IFACE_TYPE_COUNT,			/* Number of interface types */
 };
 typedef enum ecm_db_iface_types ecm_db_iface_type_t;
@@ -271,11 +271,34 @@ struct ecm_db_interface_info_bridge {			/* type == ECM_DB_IFACE_TYPE_BRIDGE */
 	uint8_t address[ETH_ALEN];			/* MAC Address of this Interface */
 };
 
-#ifdef ECM_INTERFACE_PPP_ENABLE
+#ifdef ECM_INTERFACE_PPPOE_ENABLE
 struct ecm_db_interface_info_pppoe {			/* type == ECM_DB_IFACE_TYPE_PPPOE */
-       	uint16_t pppoe_session_id;			/* PPPoE session ID on this interface, when applicable */
+	uint16_t pppoe_session_id;			/* PPPoE session ID on this interface, when applicable */
 	uint8_t remote_mac[ETH_ALEN];			/* MAC Address of the PPPoE concentrator */
 };
+#endif
+#ifdef ECM_INTERFACE_L2TPV2_ENABLE
+struct ecm_db_interface_info_pppol2tpv2 {                  /* type == ECM_DB_IFACE_TYPE_PPPOL2TPV2 */
+	struct {
+		struct {
+			uint32_t tunnel_id;
+			uint32_t peer_tunnel_id;
+		} tunnel;
+		struct {
+			uint32_t session_id;
+			uint32_t peer_session_id;
+		} session;
+	} l2tp;
+
+	struct {
+		uint16_t sport, dport;
+	} udp;
+
+	struct {
+		uint32_t  saddr, daddr;
+	} ip;
+};
+
 #endif
 
 struct ecm_db_interface_info_unknown {			/* type == ECM_DB_IFACE_TYPE_UNKNOWN */
@@ -328,7 +351,7 @@ struct ecm_db_interface_info_tunipip6 {			/* type == ECM_DB_IFACE_TYPE_TUNIPIP6 
  * Therefore the first interface in the list is the outermost interface, which is for acceleration, hopefully an accel engine supported interface.
  * Lists have a finite size.
  */
-#define ECM_DB_IFACE_HEIRARCHY_MAX 10		/* This is the number of interfaces allowed in a heirarchy */
+#define ECM_DB_IFACE_HEIRARCHY_MAX 9 /* This is the number of interfaces allowed in a heirarchy */
 
 #ifdef ECM_MULTICAST_ENABLE
 /*

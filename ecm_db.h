@@ -20,7 +20,6 @@
 #ifndef ECM_DB_H_
 #define ECM_DB_H_
 
-
 uint32_t ecm_db_time_get(void);
 void ecm_db_connection_defunct_all(void);
 #ifdef ECM_DB_XREF_ENABLE
@@ -130,7 +129,7 @@ struct ecm_db_connection_instance *ecm_db_connection_find_and_ref(ip_addr_t host
 
 void ecm_db_iface_ethernet_address_get(struct ecm_db_iface_instance *ii, uint8_t *address);
 void ecm_db_iface_bridge_address_get(struct ecm_db_iface_instance *ii, uint8_t *address);
-#ifdef ECM_INTERFACE_PPP_ENABLE
+#ifdef ECM_INTERFACE_PPPOE_ENABLE
 void ecm_db_iface_pppoe_session_info_get(struct ecm_db_iface_instance *ii, struct ecm_db_interface_info_pppoe *pppoe_info);
 #endif
 #ifdef ECM_INTERFACE_VLAN_ENABLE
@@ -147,8 +146,12 @@ struct ecm_db_iface_instance *ecm_db_iface_find_and_ref_vlan(uint8_t *address, u
 #endif
 struct ecm_db_iface_instance *ecm_db_iface_find_and_ref_bridge(uint8_t *address);
 struct ecm_db_iface_instance *ecm_db_iface_find_and_ref_unknown(uint32_t os_specific_ident);
-#ifdef ECM_INTERFACE_PPP_ENABLE
+#ifdef ECM_INTERFACE_PPPOE_ENABLE
 struct ecm_db_iface_instance *ecm_db_iface_find_and_ref_pppoe(uint16_t pppoe_session_id, uint8_t *remote_mac);
+#endif
+#ifdef ECM_INTERFACE_L2TPV2_ENABLE
+void ecm_db_iface_pppol2tpv2_session_info_get(struct ecm_db_iface_instance *ii, struct ecm_db_interface_info_pppol2tpv2 *pppol2tpv2_info);
+struct ecm_db_iface_instance *ecm_db_iface_find_and_ref_pppol2tpv2(uint32_t pppol2tpv2_tunnel_id, uint32_t pppol2tpv2_session_id);
 #endif
 struct ecm_db_iface_instance *ecm_db_iface_find_and_ref_loopback(uint32_t os_specific_ident);
 #ifdef ECM_INTERFACE_IPSEC_ENABLE
@@ -266,8 +269,13 @@ void ecm_db_iface_add_bridge(struct ecm_db_iface_instance *ii, uint8_t *address,
 #ifdef ECM_INTERFACE_VLAN_ENABLE
 void ecm_db_iface_add_vlan(struct ecm_db_iface_instance *ii, uint8_t *address, uint16_t vlan_tag, uint16_t vlan_tpid, char *name, int32_t mtu, int32_t interface_identifier, int32_t ae_interface_identifier, ecm_db_iface_final_callback_t final, void *arg);
 #endif
-#ifdef ECM_INTERFACE_PPP_ENABLE
+
+#ifdef ECM_INTERFACE_PPPOE_ENABLE
 void ecm_db_iface_add_pppoe(struct ecm_db_iface_instance *ii, uint16_t pppoe_session_id, uint8_t *remote_mac, char *name, int32_t mtu, int32_t interface_identifier, int32_t ae_interface_identifier, ecm_db_iface_final_callback_t final, void *arg);
+#endif
+
+#ifdef ECM_INTERFACE_L2TPV2_ENABLE
+void ecm_db_iface_add_pppol2tpv2(struct ecm_db_iface_instance *ii, struct ecm_db_interface_info_pppol2tpv2 *pppol2tpv2_info, char *name, int32_t mtu, int32_t interface_identifier, int32_t ae_interface_identifier, ecm_db_iface_final_callback_t final, void *arg);
 #endif
 void ecm_db_iface_add_unknown(struct ecm_db_iface_instance *ii, uint32_t os_specific_ident, char *name, int32_t mtu, int32_t interface_identifier, int32_t ae_interface_identifier, ecm_db_iface_final_callback_t final, void *arg);
 void ecm_db_iface_add_loopback(struct ecm_db_iface_instance *ii, uint32_t os_specific_ident, char *name, int32_t mtu, int32_t interface_identifier, int32_t ae_interface_identifier, ecm_db_iface_final_callback_t final, void *arg);

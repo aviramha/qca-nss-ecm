@@ -51,14 +51,15 @@ struct neighbour *ecm_interface_ipv4_neigh_get(ip_addr_t addr);
 #ifdef ECM_IPV6_ENABLE
 struct neighbour *ecm_interface_ipv6_neigh_get(ip_addr_t addr);
 #endif
+bool ecm_interface_skip_l2tpv3_pptp(struct sk_buff *skb, const struct net_device *out);
 bool ecm_interface_skip_l2tp_pptp(struct sk_buff *skb, const struct net_device *out);
-struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct ecm_front_end_connection_instance *feci, struct net_device *dev);
+struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct ecm_front_end_connection_instance *feci, struct net_device *dev, struct sk_buff *skb);
 
 #ifdef ECM_MULTICAST_ENABLE
 int32_t ecm_interface_multicast_heirarchy_construct_routed(struct ecm_front_end_connection_instance *feci, struct ecm_db_iface_instance *interfaces, struct net_device *in_dev, ip_addr_t packet_src_addr, ip_addr_t packet_dest_addr, uint8_t maxvif, uint32_t *dst_dev, uint32_t *to_interface_first,
-__be16 *layer4hdr);
+__be16 *layer4hdr, struct sk_buff *skb);
 
-int32_t ecm_interface_multicast_heirarchy_construct_bridged(struct ecm_front_end_connection_instance *feci, struct ecm_db_iface_instance *interfaces, struct net_device *br_dev, ip_addr_t src_addr, ip_addr_t dest_addr, uint8_t mc_max_dst, int32_t *mc_dst_dev, uint32_t *to_interface_first, uint8_t *src_node_addr, __be16 *layer4hdr);
+int32_t ecm_interface_multicast_heirarchy_construct_bridged(struct ecm_front_end_connection_instance *feci, struct ecm_db_iface_instance *interfaces, struct net_device *br_dev, ip_addr_t src_addr, ip_addr_t dest_addr, uint8_t mc_max_dst, int32_t *mc_dst_dev, uint32_t *to_interface_first, uint8_t *src_node_addr, __be16 *layer4hdr, struct sk_buff *skb);
 
 void ecm_interface_multicast_stats_update(struct ecm_db_connection_instance *ci, uint32_t from_tx_packets, uint32_t from_tx_bytes, uint32_t from_rx_packets, uint32_t from_rx_bytes, uint32_t to_tx_packets, uint32_t to_tx_bytes, uint32_t to_rx_packets, uint32_t to_rx_bytes);
 
@@ -74,10 +75,11 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 					struct net_device *given_dest_dev, bool is_routed,
 					struct net_device *given_src_dev,
 					uint8_t *dest_node_addr, uint8_t *src_node_addr,
-					__be16 *layer4hdr);
+					__be16 *layer4hdr, struct sk_buff *skb);
 void ecm_interface_stats_update(struct ecm_db_connection_instance *ci, uint32_t from_tx_packets, uint32_t from_tx_bytes, uint32_t from_rx_packets, uint32_t from_rx_bytes, uint32_t to_tx_packets, uint32_t to_tx_bytes, uint32_t to_rx_packets, uint32_t to_rx_bytes);
 struct net_device *ecm_interface_dev_find_by_addr(ip_addr_t addr, bool *from_local_addr);
 void ecm_interface_stats_update(struct ecm_db_connection_instance *ci, uint32_t from_tx_packets, uint32_t from_tx_bytes, uint32_t from_rx_packets, uint32_t from_rx_bytes, uint32_t to_tx_packets, uint32_t to_tx_bytes, uint32_t to_rx_packets, uint32_t to_rx_bytes);
 
 struct net_device *ecm_interface_get_and_hold_dev_master(struct net_device *dev);
 void ecm_interface_dev_regenerate_connections(struct net_device *dev);
+struct net_device *ecm_interface_dev_find_by_local_addr(ip_addr_t addr);

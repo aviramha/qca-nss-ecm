@@ -471,7 +471,7 @@ static void ecm_sfe_non_ported_ipv6_connection_accelerate(struct ecm_front_end_c
 		 * Conflicting information may cause accel to be unsupported.
 		 */
 		switch (ii_type) {
-#ifdef ECM_INTERFACE_PPP_ENABLE
+#ifdef ECM_INTERFACE_PPPOE_ENABLE
 			struct ecm_db_interface_info_pppoe pppoe_info;
 #endif
 #ifdef ECM_INTERFACE_VLAN_ENABLE
@@ -511,7 +511,7 @@ static void ecm_sfe_non_ported_ipv6_connection_accelerate(struct ecm_front_end_c
 			DEBUG_TRACE("%p: Ethernet - mac: %pM\n", nnpci, from_sfe_iface_address);
 			break;
 		case ECM_DB_IFACE_TYPE_PPPOE:
-#ifdef ECM_INTERFACE_PPP_ENABLE
+#ifdef ECM_INTERFACE_PPPOE_ENABLE
 			/*
 			 * More than one PPPoE in the list is not valid!
 			 */
@@ -639,7 +639,7 @@ static void ecm_sfe_non_ported_ipv6_connection_accelerate(struct ecm_front_end_c
 		 * Conflicting information may cause accel to be unsupported.
 		 */
 		switch (ii_type) {
-#ifdef ECM_INTERFACE_PPP_ENABLE
+#ifdef ECM_INTERFACE_PPPOE_ENABLE
 			struct ecm_db_interface_info_pppoe pppoe_info;
 #endif
 #ifdef ECM_INTERFACE_VLAN_ENABLE
@@ -678,7 +678,7 @@ static void ecm_sfe_non_ported_ipv6_connection_accelerate(struct ecm_front_end_c
 			DEBUG_TRACE("%p: Ethernet - mac: %pM\n", nnpci, to_sfe_iface_address);
 			break;
 		case ECM_DB_IFACE_TYPE_PPPOE:
-#ifdef ECM_INTERFACE_PPP_ENABLE
+#ifdef ECM_INTERFACE_PPPOE_ENABLE
 			/*
 			 * More than one PPPoE in the list is not valid!
 			 */
@@ -1760,7 +1760,7 @@ unsigned int ecm_sfe_non_ported_ipv6_process(struct net_device *out_dev,
 		 * GGG TODO The empty list checks should not be needed, mapping_establish_and_ref() should fail out if there is no list anyway.
 		 */
 		DEBUG_TRACE("%p: Create the 'from' interface heirarchy list\n", nci);
-		from_list_first = ecm_interface_heirarchy_construct(feci, from_list, ip_dest_addr, ip_src_addr, 6, protocol, in_dev, is_routed, in_dev, src_node_addr, dest_node_addr, NULL);
+		from_list_first = ecm_interface_heirarchy_construct(feci, from_list, ip_dest_addr, ip_src_addr, 6, protocol, in_dev, is_routed, in_dev, src_node_addr, dest_node_addr, NULL, skb);
 		if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			feci->deref(feci);
 			ecm_db_connection_deref(nci);
@@ -1770,7 +1770,7 @@ unsigned int ecm_sfe_non_ported_ipv6_process(struct net_device *out_dev,
 		ecm_db_connection_from_interfaces_reset(nci, from_list, from_list_first);
 
 		DEBUG_TRACE("%p: Create source node\n", nci);
-		src_ni = ecm_sfe_ipv6_node_establish_and_ref(feci, in_dev, ip_src_addr, from_list, from_list_first, src_node_addr);
+		src_ni = ecm_sfe_ipv6_node_establish_and_ref(feci, in_dev, ip_src_addr, from_list, from_list_first, src_node_addr, skb);
 		ecm_db_connection_interfaces_deref(from_list, from_list_first);
 		if (!src_ni) {
 			feci->deref(feci);
@@ -1790,7 +1790,7 @@ unsigned int ecm_sfe_non_ported_ipv6_process(struct net_device *out_dev,
 		}
 
 		DEBUG_TRACE("%p: Create the 'to' interface heirarchy list\n", nci);
-		to_list_first = ecm_interface_heirarchy_construct(feci, to_list, ip_src_addr, ip_dest_addr, 6, protocol, out_dev, is_routed, in_dev, dest_node_addr, src_node_addr, NULL);
+		to_list_first = ecm_interface_heirarchy_construct(feci, to_list, ip_src_addr, ip_dest_addr, 6, protocol, out_dev, is_routed, in_dev, dest_node_addr, src_node_addr, NULL, skb);
 		if (to_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_mapping_deref(src_mi);
 			ecm_db_node_deref(src_ni);
@@ -1802,7 +1802,7 @@ unsigned int ecm_sfe_non_ported_ipv6_process(struct net_device *out_dev,
 		ecm_db_connection_to_interfaces_reset(nci, to_list, to_list_first);
 
 		DEBUG_TRACE("%p: Create dest node\n", nci);
-		dest_ni = ecm_sfe_ipv6_node_establish_and_ref(feci, out_dev, ip_dest_addr, to_list, to_list_first, dest_node_addr);
+		dest_ni = ecm_sfe_ipv6_node_establish_and_ref(feci, out_dev, ip_dest_addr, to_list, to_list_first, dest_node_addr, skb);
 		ecm_db_connection_interfaces_deref(to_list, to_list_first);
 		if (!dest_ni) {
 			ecm_db_mapping_deref(src_mi);
@@ -1943,7 +1943,7 @@ unsigned int ecm_sfe_non_ported_ipv6_process(struct net_device *out_dev,
 	 * Do we need to action generation change?
 	 */
 	if (unlikely(ecm_db_connection_regeneration_required_check(ci))) {
-		ecm_sfe_ipv6_connection_regenerate(ci, sender, out_dev, in_dev);
+		ecm_sfe_ipv6_connection_regenerate(ci, sender, out_dev, in_dev, skb);
 	}
 
 	/*

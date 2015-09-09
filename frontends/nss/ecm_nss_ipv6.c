@@ -187,7 +187,7 @@ static int ecm_nss_ipv6_stopped = 0;			/* When non-zero further traffic will not
 struct ecm_db_node_instance *ecm_nss_ipv6_node_establish_and_ref(struct ecm_front_end_connection_instance *feci,
 							struct net_device *dev, ip_addr_t addr,
 							struct ecm_db_iface_instance *interface_list[], int32_t interface_list_first,
-							uint8_t *given_node_addr)
+							uint8_t *given_node_addr, struct sk_buff *skb)
 {
 	struct ecm_db_node_instance *ni;
 	struct ecm_db_node_instance *nni;
@@ -219,7 +219,7 @@ struct ecm_db_node_instance *ecm_nss_ipv6_node_establish_and_ref(struct ecm_fron
 		ecm_db_iface_type_t type;
 		ip_addr_t gw_addr = ECM_IP_ADDR_NULL;
 		bool on_link = false;
-#ifdef ECM_INTERFACE_PPP_ENABLE
+#ifdef ECM_INTERFACE_PPPOE_ENABLE
 		struct ecm_db_interface_info_pppoe pppoe_info;
 #endif
 		type = ecm_db_connection_iface_type_get(interface_list[i]);
@@ -228,7 +228,7 @@ struct ecm_db_node_instance *ecm_nss_ipv6_node_establish_and_ref(struct ecm_fron
 		switch (type) {
 
 		case ECM_DB_IFACE_TYPE_PPPOE:
-#ifdef ECM_INTERFACE_PPP_ENABLE
+#ifdef ECM_INTERFACE_PPPOE_ENABLE
 			/*
 			 * Node address is the address of the remote PPPoE server
 			 */
@@ -305,7 +305,7 @@ struct ecm_db_node_instance *ecm_nss_ipv6_node_establish_and_ref(struct ecm_fron
 	/*
 	 * No node - establish iface
 	 */
-	ii = ecm_interface_establish_and_ref(feci, dev);
+	ii = ecm_interface_establish_and_ref(feci, dev, skb);
 	if (!ii) {
 		DEBUG_WARN("Failed to establish iface\n");
 		return NULL;
@@ -660,7 +660,7 @@ bool ecm_nss_ipv6_reclassify(struct ecm_db_connection_instance *ci, int assignme
  * classifiers permit this operation.
  */
 void ecm_nss_ipv6_connection_regenerate(struct ecm_db_connection_instance *ci, ecm_tracker_sender_type_t sender,
-							struct net_device *out_dev, struct net_device *in_dev)
+							struct net_device *out_dev, struct net_device *in_dev, struct sk_buff *skb)
 {
 	int i;
 	bool reclassify_allowed;
@@ -719,7 +719,7 @@ void ecm_nss_ipv6_connection_regenerate(struct ecm_db_connection_instance *ci, e
 	feci = ecm_db_connection_front_end_get_and_ref(ci);
 
 	DEBUG_TRACE("%p: Update the 'from' interface heirarchy list\n", ci);
-	from_list_first = ecm_interface_heirarchy_construct(feci, from_list, ip_dest_addr, ip_src_addr, 6, protocol, in_dev, is_routed, in_dev, src_node_addr, dest_node_addr, NULL);
+	from_list_first = ecm_interface_heirarchy_construct(feci, from_list, ip_dest_addr, ip_src_addr, 6, protocol, in_dev, is_routed, in_dev, src_node_addr, dest_node_addr, NULL, skb);
 	if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 		goto ecm_ipv6_retry_regen;
 	}
@@ -728,7 +728,7 @@ void ecm_nss_ipv6_connection_regenerate(struct ecm_db_connection_instance *ci, e
 	ecm_db_connection_interfaces_deref(from_list, from_list_first);
 
 	DEBUG_TRACE("%p: Update the 'to' interface heirarchy list\n", ci);
-	to_list_first = ecm_interface_heirarchy_construct(feci, to_list, ip_src_addr, ip_dest_addr, 6, protocol, out_dev, is_routed, in_dev, dest_node_addr, src_node_addr, NULL);
+	to_list_first = ecm_interface_heirarchy_construct(feci, to_list, ip_src_addr, ip_dest_addr, 6, protocol, out_dev, is_routed, in_dev, dest_node_addr, src_node_addr, NULL, skb);
 	if (to_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 		goto ecm_ipv6_retry_regen;
 	}

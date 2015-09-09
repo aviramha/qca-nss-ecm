@@ -36,7 +36,6 @@ typedef uint32_t ip_addr_t[4];
 #define ECM_IP_ADDR_MATCH(a, b) \
 	((a[0] == b[0]) && (a[1] == b[1]) && (a[2] == b[2]) && (a[3] == b[3]))
 
-
 #define ECM_IP_ADDR_IS_V4(a) \
 	((a[1] == 0x0000ffff) && !a[2] && !a[3])
 
@@ -352,7 +351,6 @@ static inline void ecm_ip_addr_to_string(char *str, ip_addr_t a)
 
 	sprintf(str, ECM_IP_ADDR_DOT_FMT, ECM_IP_ADDR_TO_DOT(a));
 }
-
 
 /*
  * ecm_string_to_ip_addr()

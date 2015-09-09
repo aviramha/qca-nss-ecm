@@ -68,10 +68,31 @@ ecm-$(ECM_INTERFACE_BOND_ENABLE) += frontends/nss/ecm_nss_bond_notifier.o
 ccflags-$(ECM_INTERFACE_BOND_ENABLE) += -DECM_INTERFACE_BOND_ENABLE
 
 # #############################################################################
-# Define ECM_INTERFACE_PPP_ENABLE=y in order
-# to enable support for PPP and, specifically, PPPoE acceleration.
+# Define ECM_INTERFACE_PPPOE_ENABLE=y in order
+# to enable support for PPPoE acceleration.
+# #############################################################################
+ECM_INTERFACE_PPPOE_ENABLE=y
+ccflags-$(ECM_INTERFACE_PPPOE_ENABLE) += -DECM_INTERFACE_PPPOE_ENABLE
+
+# #############################################################################
+# Define ECM_INTERFACE_L2TPV2_ENABLE=y in order
+# to enable support for l2tpv2 acceleration.
+# #############################################################################
+ifneq ($(findstring 3.4, $(KERNELVERSION)),)
+ECM_INTERFACE_L2TPV2_ENABLE=y
+endif
+ccflags-$(ECM_INTERFACE_L2TPV2_ENABLE) += -DECM_INTERFACE_L2TPV2_ENABLE
+
+# #############################################################################
+# if pppoe, l2tpv2 acceleration is enabled, ppp should
+# be enabled automatically
 # #############################################################################
 ECM_INTERFACE_PPP_ENABLE=y
+ifeq "$(ECM_INTERFACE_PPPOE_ENABLE)" "n"
+ifeq "$(ECM_INTERFACE_L2TPV2_ENABLE)" "n"
+ECM_INTERFACE_PPP_ENABLE=n
+endif
+endif
 ccflags-$(ECM_INTERFACE_PPP_ENABLE) += -DECM_INTERFACE_PPP_ENABLE
 
 # #############################################################################

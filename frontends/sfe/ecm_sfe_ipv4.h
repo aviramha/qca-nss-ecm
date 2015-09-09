@@ -170,11 +170,11 @@ extern struct ecm_classifier_instance *ecm_sfe_ipv4_assign_classifier(struct ecm
 extern bool ecm_sfe_ipv4_reclassify(struct ecm_db_connection_instance *ci, int assignment_count, struct ecm_classifier_instance *assignments[]);
 extern void ecm_sfe_ipv4_connection_regenerate(struct ecm_db_connection_instance *ci, ecm_tracker_sender_type_t sender,
 							struct net_device *out_dev, struct net_device *out_dev_nat,
-							struct net_device *in_dev, struct net_device *in_dev_nat, __be16 *layer4hdr);
+							struct net_device *in_dev, struct net_device *in_dev_nat, __be16 *layer4hdr, struct sk_buff *skb);
 extern struct ecm_db_node_instance *ecm_sfe_ipv4_node_establish_and_ref(struct ecm_front_end_connection_instance *feci,
 							struct net_device *dev, ip_addr_t addr,
 							struct ecm_db_iface_instance *interface_list[], int32_t interface_list_first,
-							uint8_t *given_node_addr);
+							uint8_t *given_node_addr, struct sk_buff *skb);
 extern struct ecm_db_host_instance *ecm_sfe_ipv4_host_establish_and_ref(ip_addr_t addr);
 extern struct ecm_db_mapping_instance *ecm_sfe_ipv4_mapping_establish_and_ref(ip_addr_t addr, int port);
 extern int ecm_sfe_ipv4_init(struct dentry *dentry);
