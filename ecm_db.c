@@ -4061,6 +4061,94 @@ void ecm_db_iface_bridge_address_get(struct ecm_db_iface_instance *ii, uint8_t *
 EXPORT_SYMBOL(ecm_db_iface_bridge_address_get);
 
 /*
+ * _ecm_db_iface_identifier_hash_table_insert_entry()
+ *	Calculate the hash index based on updated interface_identifier, and
+ *	re-insert into interface identifier chain.
+ *
+ *	Note: Must take ecm_db_lock before calling this.
+ */
+static void _ecm_db_iface_identifier_hash_table_insert_entry(struct ecm_db_iface_instance *ii, int32_t interface_identifier)
+{
+	ecm_db_iface_id_hash_t iface_id_hash_index;
+
+	/*
+	 * Compute hash chain for insertion
+	 */
+	iface_id_hash_index = ecm_db_iface_id_generate_hash_index(interface_identifier);
+	ii->iface_id_hash_index = iface_id_hash_index;
+
+	/*
+	 * Insert into interface identifier chain
+	 */
+	ii->iface_id_hash_next = ecm_db_iface_id_table[iface_id_hash_index];
+	if (ecm_db_iface_id_table[iface_id_hash_index]) {
+		ecm_db_iface_id_table[iface_id_hash_index]->iface_id_hash_prev = ii;
+	}
+
+	ecm_db_iface_id_table[iface_id_hash_index] = ii;
+	ecm_db_iface_id_table_lengths[iface_id_hash_index]++;
+	DEBUG_ASSERT(ecm_db_iface_id_table_lengths[iface_id_hash_index] > 0, "%p: invalid iface id table len %d\n", ii, ecm_db_iface_id_table_lengths[iface_id_hash_index]);
+}
+
+/*
+ * _ecm_db_iface_identifier_hash_table_remove_entry()
+ * 	Remove an entry of a given interface instance from interface identifier chain.
+ *
+ *	Note: Must take ecm_db_lock before calling this.
+ */
+static void _ecm_db_iface_identifier_hash_table_remove_entry(struct ecm_db_iface_instance *ii)
+{
+	/*
+	 * Remove from database if inserted
+	 */
+	if (!ii->flags & ECM_DB_IFACE_FLAGS_INSERTED) {
+		return;
+	}
+
+	/*
+	 * Link out of interface identifier hash table
+	 */
+	if (!ii->iface_id_hash_prev) {
+		DEBUG_ASSERT(ecm_db_iface_id_table[ii->iface_id_hash_index] == ii, "%p: hash table bad got %p for hash index %u\n", ii, ecm_db_iface_id_table[ii->iface_id_hash_index], ii->iface_id_hash_index);
+		ecm_db_iface_id_table[ii->iface_id_hash_index] = ii->iface_id_hash_next;
+	} else {
+		ii->iface_id_hash_prev->iface_id_hash_next = ii->iface_id_hash_next;
+	}
+
+	if (ii->iface_id_hash_next) {
+		ii->iface_id_hash_next->iface_id_hash_prev = ii->iface_id_hash_prev;
+	}
+
+	ii->iface_id_hash_next = NULL;
+	ii->iface_id_hash_prev = NULL;
+	ecm_db_iface_id_table_lengths[ii->iface_id_hash_index]--;
+	DEBUG_ASSERT(ecm_db_iface_id_table_lengths[ii->iface_id_hash_index] >= 0, "%p: invalid table len %d\n", ii, ecm_db_iface_id_table_lengths[ii->iface_id_hash_index]);
+}
+
+/*
+ * ecm_db_iface_identifier_hash_table_entry_check_and_update()
+ * 	Update the hash table entry of interface identifier hash table.
+ * 	First remove the 'ii' from curent hash index position, re-calculate new hash and re-insert
+ * 	the 'ii' at new hash index position into interface identifier hash table.
+ */
+void ecm_db_iface_identifier_hash_table_entry_check_and_update(struct ecm_db_iface_instance *ii, int32_t new_interface_identifier)
+{
+	DEBUG_CHECK_MAGIC(ii, ECM_DB_IFACE_INSTANCE_MAGIC, "%p: magic failed", ii);
+	spin_lock_bh(&ecm_db_lock);
+	if (ii->interface_identifier == new_interface_identifier) {
+		spin_unlock_bh(&ecm_db_lock);
+		return;
+	}
+
+	DEBUG_TRACE("%p: interface ifindex has changed Old %d, New %d \n", ii, ii->interface_identifier, new_interface_identifier);
+	_ecm_db_iface_identifier_hash_table_remove_entry(ii);
+	ii->interface_identifier = new_interface_identifier;
+	_ecm_db_iface_identifier_hash_table_insert_entry(ii, new_interface_identifier);
+	spin_unlock_bh(&ecm_db_lock);
+}
+EXPORT_SYMBOL(ecm_db_iface_identifier_hash_table_entry_check_and_update);
+
+/*
  * ecm_db_iface_find_and_ref_by_interface_identifier()
  *	Return an interface based on a hlos interface identifier
  */
