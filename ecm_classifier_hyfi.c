@@ -515,8 +515,9 @@ static void ecm_classifier_hyfi_reclassify(struct ecm_classifier_instance *ci)
  * ecm_classifier_hyfi_state_get()
  *	Return state
  */
-static int ecm_classifier_hyfi_state_get(struct ecm_classifier_instance *ci, char *buf, int buf_sz)
+static int ecm_classifier_hyfi_state_get(struct ecm_classifier_instance *ci, struct ecm_state_file_instance *sfi)
 {
+	int result;
 	struct ecm_classifier_hyfi_instance *chfi;
 	struct ecm_classifier_process_response process_response;
 
