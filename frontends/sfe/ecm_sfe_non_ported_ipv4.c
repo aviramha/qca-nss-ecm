@@ -95,6 +95,10 @@
  */
 struct ecm_sfe_non_ported_ipv4_connection_instance {
 	struct ecm_front_end_connection_instance base;		/* Base class */
+#ifdef CONFIG_XFRM
+	enum ecm_sfe_ipsec_state flow_ipsec_state;	/* Flow traffic need ipsec process or not */
+	enum ecm_sfe_ipsec_state return_ipsec_state;	/* Return traffic need ipsec process or not */
+#endif
 #if (DEBUG_LEVEL > 0)
 	uint16_t magic;
 #endif
@@ -871,6 +875,14 @@ static void ecm_sfe_non_ported_ipv4_connection_accelerate(struct ecm_front_end_c
 		nircm->dscp_rule.return_dscp = pr->return_dscp;
 		nircm->rule_flags |= SFE_RULE_CREATE_FLAG_DSCP_MARKING;
 		nircm->valid_flags |= SFE_RULE_CREATE_DSCP_MARKING_VALID;
+	}
+#endif
+
+#ifdef CONFIG_XFRM
+	nircm->direction_rule.flow_accel = (nnpci->flow_ipsec_state != ECM_SFE_IPSEC_STATE_TO_ENCRYPT);
+	nircm->direction_rule.return_accel = (nnpci->return_ipsec_state != ECM_SFE_IPSEC_STATE_TO_ENCRYPT);
+	if (!nircm->direction_rule.flow_accel || !nircm->direction_rule.return_accel) {
+		nircm->valid_flags |= SFE_RULE_CREATE_DIRECTION_VALID;
 	}
 #endif
 	/*
@@ -1851,6 +1863,16 @@ unsigned int ecm_sfe_non_ported_ipv4_process(struct net_device *out_dev, struct 
 			DEBUG_WARN("Failed to allocate front end\n");
 			return NF_ACCEPT;
 		}
+
+#ifdef CONFIG_XFRM
+		/*
+		 * Packet has been decrypted by ipsec, mark it in connection.
+		 */
+		if (unlikely(skb->sp)) {
+			((struct ecm_sfe_non_ported_ipv4_connection_instance *)feci)->flow_ipsec_state = ECM_SFE_IPSEC_STATE_WAS_DECRYPTED;
+			((struct ecm_sfe_non_ported_ipv4_connection_instance *)feci)->return_ipsec_state = ECM_SFE_IPSEC_STATE_TO_ENCRYPT;
+		}
+#endif
 
 		/*
 		 * Get the src and destination mappings.

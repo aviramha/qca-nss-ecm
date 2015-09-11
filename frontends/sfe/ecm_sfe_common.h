@@ -14,6 +14,17 @@
  **************************************************************************
  */
 
+#ifdef CONFIG_XFRM
+/*
+ * Which type of ipsec process traffic need.
+ */
+enum ecm_sfe_ipsec_state {
+	ECM_SFE_IPSEC_STATE_NONE = 0,
+	ECM_SFE_IPSEC_STATE_TO_ENCRYPT,
+	ECM_SFE_IPSEC_STATE_WAS_DECRYPTED
+};
+#endif
+
 /*
  * This macro converts ECM ip_addr_t to SFE IPv6 address
  */
