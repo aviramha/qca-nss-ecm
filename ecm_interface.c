@@ -2490,9 +2490,11 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 			dest_dev = given_dest_dev;
 			if (dest_dev) {
 				dev_hold(dest_dev);
-				DEBUG_TRACE("HACK: %s tunnel packet with dest_addr: " ECM_IP_ADDR_OCTAL_FMT " uses dev: %p(%s)\n",
-						(ip_version == 4) ? "IPV6" : "IPIP",
-						ECM_IP_ADDR_TO_OCTAL(dest_addr), dest_dev, dest_dev->name);
+				if (ip_version == 4) {
+					DEBUG_TRACE("HACK: %s tunnel packet with dest_addr: " ECM_IP_ADDR_DOT_FMT " uses dev: %p(%s)\n", "IPV6", ECM_IP_ADDR_TO_DOT(dest_addr), dest_dev, dest_dev->name);
+				} else {
+					DEBUG_TRACE("HACK: %s tunnel packet with dest_addr: " ECM_IP_ADDR_OCTAL_FMT " uses dev: %p(%s)\n", "IPIP", ECM_IP_ADDR_TO_OCTAL(dest_addr), dest_dev, dest_dev->name);
+				}
 			}
 		}
 	}
@@ -2543,9 +2545,11 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 			src_dev = given_src_dev;
 			if (src_dev) {
 				dev_hold(src_dev);
-				DEBUG_TRACE("HACK: %s tunnel packet with src_addr: " ECM_IP_ADDR_OCTAL_FMT " uses dev: %p(%s)\n",
-						(ip_version == 4) ? "IPV6" : "IPIP",
-						ECM_IP_ADDR_TO_OCTAL(src_addr), src_dev, src_dev->name);
+				if (ip_version == 4) {
+					DEBUG_TRACE("HACK: %s tunnel packet with src_addr: " ECM_IP_ADDR_DOT_FMT " uses dev: %p(%s)\n", "IPV6", ECM_IP_ADDR_TO_DOT(src_addr), src_dev, src_dev->name);
+				} else {
+					DEBUG_TRACE("HACK: %s tunnel packet with src_addr: " ECM_IP_ADDR_OCTAL_FMT " uses dev: %p(%s)\n", "IPIP", ECM_IP_ADDR_TO_OCTAL(src_addr), src_dev, src_dev->name);
+				}
 			}
 		}
 	}
