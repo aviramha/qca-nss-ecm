@@ -1719,6 +1719,7 @@ static struct ecm_sfe_non_ported_ipv4_connection_instance *ecm_sfe_non_ported_ip
 	feci->state_get = ecm_sfe_non_ported_ipv4_connection_state_get;
 #endif
 	feci->ae_interface_number_by_dev_get = ecm_sfe_common_get_interface_number_by_dev;
+	feci->regenerate = ecm_sfe_common_connection_regenerate;
 
 	return nnpci;
 }
