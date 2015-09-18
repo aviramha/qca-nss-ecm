@@ -2775,40 +2775,53 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 						/*
 						 * Determine destination MAC address for this routed packet
 						 */
-						if (!ecm_interface_mac_addr_get(dest_addr, dest_mac_addr,
-									&dest_on_link, dest_gw_addr)) {
-
-							/*
-							 * Find proper interfce from which to issue ARP
-							 * or neighbour solicitation packet.
-							 */
-							if (dest_dev_master) {
-								master_dev = dest_dev_master;
-							} else {
-								master_dev = dest_dev;
-							}
-
-							dev_hold(master_dev);
-
+						if (next_dest_node_addr_valid) {
+							memcpy(dest_mac_addr, next_dest_node_addr, ETH_ALEN);
+						} else if (!next_dest_addr_valid) {
+							dev_put(src_dev);
+							dev_put(dest_dev);
 							if (dest_dev_master) {
 								dev_put(dest_dev_master);
 							}
 
-							if (ip_version == 4) {
-								DEBUG_WARN("Unable to obtain MAC address for " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(dest_addr));
-								ecm_interface_send_arp_request(dest_dev, dest_addr, dest_on_link, dest_gw_addr);
-							}
-#ifdef ECM_IPV6_ENABLE
-							if (ip_version == 6) {
-								DEBUG_WARN("Unable to obtain MAC address for " ECM_IP_ADDR_OCTAL_FMT "\n",ECM_IP_ADDR_TO_OCTAL(dest_addr));
-								ecm_interface_send_neighbour_solicitation(master_dev, dest_addr);
-							}
-#endif
-							dev_put(src_dev);
-							dev_put(dest_dev);
-							dev_put(master_dev);
 							ecm_db_connection_interfaces_deref(interfaces, current_interface_index);
 							return ECM_DB_IFACE_HEIRARCHY_MAX;
+						} else {
+							if (!ecm_interface_mac_addr_get(dest_addr, dest_mac_addr,
+										&dest_on_link, dest_gw_addr)) {
+
+								/*
+								 * Find proper interfce from which to issue ARP
+								 * or neighbour solicitation packet.
+								 */
+								if (dest_dev_master) {
+									master_dev = dest_dev_master;
+								} else {
+									master_dev = dest_dev;
+								}
+
+								dev_hold(master_dev);
+
+								if (dest_dev_master) {
+									dev_put(dest_dev_master);
+								}
+
+								if (ip_version == 4) {
+									DEBUG_WARN("Unable to obtain MAC address for " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(dest_addr));
+									ecm_interface_send_arp_request(dest_dev, dest_addr, dest_on_link, dest_gw_addr);
+								}
+#ifdef ECM_IPV6_ENABLE
+								if (ip_version == 6) {
+									DEBUG_WARN("Unable to obtain MAC address for " ECM_IP_ADDR_OCTAL_FMT "\n",ECM_IP_ADDR_TO_OCTAL(dest_addr));
+									ecm_interface_send_neighbour_solicitation(master_dev, dest_addr);
+								}
+#endif
+								dev_put(src_dev);
+								dev_put(dest_dev);
+								dev_put(master_dev);
+								ecm_db_connection_interfaces_deref(interfaces, current_interface_index);
+								return ECM_DB_IFACE_HEIRARCHY_MAX;
+							}
 						}
 
 						if (dest_dev_master) {
