@@ -1916,11 +1916,6 @@ static void ecm_nss_multicast_ipv6_connection_regenerate(struct ecm_db_connectio
 	}
 
 	/*
-	 * Re-generation of state is successful.
-	 */
-	ecm_db_conection_regeneration_completed(ci);
-
-	/*
 	 * Now we action any classifier re-classify
 	 */
 	if (!reclassify_allowed) {
@@ -1928,12 +1923,7 @@ static void ecm_nss_multicast_ipv6_connection_regenerate(struct ecm_db_connectio
 		 * Regeneration came to a successful conclusion even though reclassification was denied
 		 */
 		DEBUG_WARN("%p: re-classify denied\n", ci);
-
-		/*
-		 * Release the assignments
-		 */
-		ecm_db_connection_assignments_release(assignment_count, assignments);
-		return;
+		goto ecm_multicast_ipv6_regen_done;
 	}
 
 	/*
@@ -1945,15 +1935,22 @@ static void ecm_nss_multicast_ipv6_connection_regenerate(struct ecm_db_connectio
 		 * We could not set up the classifiers to reclassify, it is safer to fail out and try again next time
 		 */
 		DEBUG_WARN("%p: Regeneration: reclassify failed\n", ci);
-		ecm_db_connection_assignments_release(assignment_count, assignments);
-		return;
+		goto ecm_multicast_ipv6_regen_done;
 	}
 	DEBUG_INFO("%p: reclassify success\n", ci);
+
+ecm_multicast_ipv6_regen_done:
 
 	/*
 	 * Release the assignments
 	 */
 	ecm_db_connection_assignments_release(assignment_count, assignments);
+
+	/*
+	 * Re-generation of state is successful.
+	 */
+	ecm_db_conection_regeneration_completed(ci);
+
 	return;
 
 ecm_multicast_ipv6_retry_regen:
