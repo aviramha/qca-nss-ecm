@@ -109,13 +109,10 @@ ccflags-$(ECM_INTERFACE_TUNIPIP6_ENABLE) += -DECM_INTERFACE_TUNIPIP6_ENABLE
 # Define ECM_MULTICAST_ENABLE=y in order to enable support for ECM Multicast
 # #############################################################################
 ifeq ($(ECM_FRONT_END_NSS_ENABLE), y)
-ifneq ($(findstring 3.4, $(KERNELVERSION)),)
-ECM_MULTICAST_ENABLE=y
-endif
-endif
 ecm-$(ECM_MULTICAST_ENABLE) += frontends/nss/ecm_nss_multicast_ipv4.o
 ecm-$(ECM_MULTICAST_ENABLE) += frontends/nss/ecm_nss_multicast_ipv6.o
 ccflags-$(ECM_MULTICAST_ENABLE) += -DECM_MULTICAST_ENABLE
+endif
 
 # #############################################################################
 # Define ECM_INTERFACE_VLAN_ENABLE=y in order to enable support for VLAN

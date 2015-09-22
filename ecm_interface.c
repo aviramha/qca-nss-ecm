@@ -2381,7 +2381,8 @@ int32_t ecm_interface_multicast_heirarchy_construct_routed(struct ecm_front_end_
 	if (in_dev && !mfc_update) {
 		if (ecm_front_end_is_bridge_port(in_dev)) {
 			src_dev_is_bridge = true;
-			br_dev_src = in_dev->master;
+			br_dev_src = ecm_interface_get_and_hold_dev_master(in_dev);
+			DEBUG_ASSERT(br_dev_src, "Expected a master\n");
 
 			/*
 	 		 * The source net_dev found as bridge slave. In case of routed interface
@@ -2431,8 +2432,9 @@ int32_t ecm_interface_multicast_heirarchy_construct_routed(struct ecm_front_end_
 				 */
 				return 0;
 			}
+
 			dest_dev = br_dev_src;
-			dev_hold(dest_dev);
+
 		}
 
 		dest_dev_type = dest_dev->type;

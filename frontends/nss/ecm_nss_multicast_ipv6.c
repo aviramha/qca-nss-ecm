@@ -2125,6 +2125,7 @@ unsigned int ecm_nss_multicast_ipv6_connection_process(struct net_device *out_de
 	bool br_dev_found_in_mfc = false;
 	int protocol = (int)orig_tuple->dst.protonum;
 	__be16 *layer4hdr = NULL;
+	struct net_device *out_dev_master = NULL;
 
 	if (protocol != IPPROTO_UDP) {
 		DEBUG_WARN("Invalid Protocol %d in skb %p\n", protocol, skb);
@@ -2207,15 +2208,17 @@ unsigned int ecm_nss_multicast_ipv6_connection_process(struct net_device *out_de
 			is_routed = true;
 			br_dev_found_in_mfc = ecm_interface_multicast_check_for_br_dev(mc_dest_if, mc_if_cnt);
 		} else {
+			out_dev_master =  ecm_interface_get_and_hold_dev_master(out_dev);
+			DEBUG_ASSERT(out_dev_master, "Expected a master\n");
 
 			/*
 			 * Packet flow is pure bridge. Try to query the snooper for the destination
 			 * interface list
 			 */
-			mc_if_cnt = mc_bridge_ipv6_get_if(out_dev->master, &origin6, &group6, ECM_DB_MULTICAST_IF_MAX, mc_dest_if);
+			mc_if_cnt = mc_bridge_ipv6_get_if(out_dev_master, &origin6, &group6, ECM_DB_MULTICAST_IF_MAX, mc_dest_if);
 			if (mc_if_cnt <= 0) {
 				DEBUG_WARN("Not found a valid MCS if count %d\n", mc_if_cnt);
-				return NF_ACCEPT;
+				goto done;
 			}
 
 			/*
@@ -2227,7 +2230,7 @@ unsigned int ecm_nss_multicast_ipv6_connection_process(struct net_device *out_de
 			mc_if_cnt = ecm_interface_multicast_check_for_src_ifindex(mc_dest_if, mc_if_cnt, in_dev->ifindex);
 			if (mc_if_cnt <= 0) {
 				DEBUG_WARN("Not found a valid MCS if count %d\n", mc_if_cnt);
-				return NF_ACCEPT;
+				goto done;
 			}
 		}
 	}
@@ -2238,7 +2241,7 @@ unsigned int ecm_nss_multicast_ipv6_connection_process(struct net_device *out_de
 	if (!is_routed) {
 		if (iph->ttl < 2) {
 			DEBUG_TRACE("%p: Ignoring, Multicast IPv6 Header has Hop Limit one\n", skb);
-			return NF_ACCEPT;
+			goto done;
 		}
 	}
 
@@ -2288,7 +2291,7 @@ unsigned int ecm_nss_multicast_ipv6_connection_process(struct net_device *out_de
 			/*
 			 * As we are terminating we just allow the packet to pass - it's no longer our concern
 			 */
-			return NF_ACCEPT;
+			goto done;
 		}
 		spin_unlock_bh(&ecm_nss_ipv6_lock);
 
@@ -2298,7 +2301,7 @@ unsigned int ecm_nss_multicast_ipv6_connection_process(struct net_device *out_de
 		nci = ecm_db_connection_alloc();
 		if (!nci) {
 			DEBUG_WARN("Failed to allocate connection\n");
-			return NF_ACCEPT;
+			goto done;
 		}
 
 		/*
@@ -2308,7 +2311,7 @@ unsigned int ecm_nss_multicast_ipv6_connection_process(struct net_device *out_de
 		if (!feci) {
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to allocate front end\n");
-			return NF_ACCEPT;
+			goto done;
 		}
 
 		/*
@@ -2318,7 +2321,7 @@ unsigned int ecm_nss_multicast_ipv6_connection_process(struct net_device *out_de
 		if (!tuple_instance) {
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to allocate tuple instance\n");
-			return NF_ACCEPT;
+			goto done;
 		}
 		/*
 		 * Create Destination MAC address using IP multicast destination address
@@ -2338,7 +2341,7 @@ unsigned int ecm_nss_multicast_ipv6_connection_process(struct net_device *out_de
 			ecm_db_connection_deref(nci);
 			ecm_db_multicast_tuple_instance_deref(tuple_instance);
 			DEBUG_WARN("Failed to obtain 'from' heirarchy list\n");
-			return NF_ACCEPT;
+			goto done;
 		}
 		ecm_db_connection_from_interfaces_reset(nci, from_list, from_list_first);
 
@@ -2350,7 +2353,7 @@ unsigned int ecm_nss_multicast_ipv6_connection_process(struct net_device *out_de
 			ecm_db_connection_deref(nci);
 			ecm_db_multicast_tuple_instance_deref(tuple_instance);
 			DEBUG_WARN("Failed to establish source node\n");
-			return NF_ACCEPT;
+			goto done;
 		}
 
 		DEBUG_TRACE("%p: Create source mapping\n", nci);
@@ -2361,7 +2364,7 @@ unsigned int ecm_nss_multicast_ipv6_connection_process(struct net_device *out_de
 			ecm_db_connection_deref(nci);
 			ecm_db_multicast_tuple_instance_deref(tuple_instance);
 			DEBUG_WARN("Failed to establish src mapping\n");
-			return NF_ACCEPT;
+			goto done;
 		}
 
 		DEBUG_TRACE("%p: Create the 'to' interface heirarchy list\n", nci);
@@ -2373,7 +2376,7 @@ unsigned int ecm_nss_multicast_ipv6_connection_process(struct net_device *out_de
 			feci->deref(feci);
 			ecm_db_connection_deref(nci);
 			ecm_db_multicast_tuple_instance_deref(tuple_instance);
-			return NF_ACCEPT;
+			goto done;
 		}
 
 		to_list_first = (int32_t *)kzalloc(sizeof(int32_t *) * ECM_DB_MULTICAST_IF_MAX, GFP_ATOMIC | __GFP_NOWARN);
@@ -2385,7 +2388,7 @@ unsigned int ecm_nss_multicast_ipv6_connection_process(struct net_device *out_de
 			ecm_db_connection_deref(nci);
 			ecm_db_multicast_tuple_instance_deref(tuple_instance);
 			kfree(to_list);
-			return NF_ACCEPT;
+			goto done;
 		}
 
 		/*
@@ -2397,7 +2400,7 @@ unsigned int ecm_nss_multicast_ipv6_connection_process(struct net_device *out_de
 			*to_first = ECM_DB_IFACE_HEIRARCHY_MAX;
 		}
 
-		interface_idx_cnt = ecm_nss_multicast_ipv6_interface_heirarchy_construct(feci, to_list, in_dev, out_dev->master, ip_src_addr,
+		interface_idx_cnt = ecm_nss_multicast_ipv6_interface_heirarchy_construct(feci, to_list, in_dev, out_dev_master, ip_src_addr,
 										      ip_dest_addr, mc_if_cnt, mc_dest_if, to_list_first, src_node_addr,  is_routed, skb);
 		if (interface_idx_cnt == 0) {
 			DEBUG_WARN("Failed to obtain 'to' heirarchy list\n");
@@ -2407,7 +2410,7 @@ unsigned int ecm_nss_multicast_ipv6_connection_process(struct net_device *out_de
 			ecm_db_connection_deref(nci);
 			kfree(to_list);
 			kfree(to_list_first);
-			return NF_ACCEPT;
+			goto done;
 		}
 
 		ret = ecm_db_multicast_connection_to_interfaces_reset(nci, to_list, to_list_first);
@@ -2427,7 +2430,7 @@ unsigned int ecm_nss_multicast_ipv6_connection_process(struct net_device *out_de
 			kfree(to_list);
 			kfree(to_list_first);
 			DEBUG_WARN("Failed to obtain 'to' heirarchy list\n");
-			return NF_ACCEPT;
+			goto done;
 		}
 
 		/*
@@ -2458,7 +2461,7 @@ unsigned int ecm_nss_multicast_ipv6_connection_process(struct net_device *out_de
 			kfree(to_list);
 			kfree(to_list_first);
 			DEBUG_WARN("Failed to establish dest node\n");
-			return NF_ACCEPT;
+			goto done;
 		}
 
 		DEBUG_TRACE("%p: Create dest mapping\n", nci);
@@ -2479,7 +2482,7 @@ unsigned int ecm_nss_multicast_ipv6_connection_process(struct net_device *out_de
 			kfree(to_list);
 			kfree(to_list_first);
 			DEBUG_WARN("Failed to establish dest mapping\n");
-			return NF_ACCEPT;
+			goto done;
 		}
 
 		/*
@@ -2503,7 +2506,7 @@ unsigned int ecm_nss_multicast_ipv6_connection_process(struct net_device *out_de
 			kfree(to_list);
 			kfree(to_list_first);
 			DEBUG_WARN("Failed to allocate default classifier\n");
-			return NF_ACCEPT;
+			goto done;
 		}
 		ecm_db_connection_classifier_assign(nci, (struct ecm_classifier_instance *)dci);
 
@@ -2533,7 +2536,7 @@ unsigned int ecm_nss_multicast_ipv6_connection_process(struct net_device *out_de
 				kfree(to_list);
 				kfree(to_list_first);
 				DEBUG_WARN("Failed to allocate classifiers assignments\n");
-				return NF_ACCEPT;
+				goto done;
 			}
 		}
 
@@ -2634,14 +2637,14 @@ unsigned int ecm_nss_multicast_ipv6_connection_process(struct net_device *out_de
 			to_list = (struct ecm_db_iface_instance *)kzalloc(ECM_DB_TO_MCAST_INTERFACES_SIZE, GFP_ATOMIC | __GFP_NOWARN);
 			if (!to_list) {
 				ecm_db_connection_deref(ci);
-				return NF_ACCEPT;
+				goto done;
 			}
 
 			to_list_first = (int32_t *)kzalloc(sizeof(int32_t *) * ECM_DB_MULTICAST_IF_MAX, GFP_ATOMIC | __GFP_NOWARN);
 			if (!to_list_first) {
 				ecm_db_connection_deref(ci);
 				kfree(to_list);
-				return NF_ACCEPT;
+				goto done;
 			}
 
 			for (i = 0; i < ECM_DB_MULTICAST_IF_MAX; i++) {
@@ -2650,7 +2653,7 @@ unsigned int ecm_nss_multicast_ipv6_connection_process(struct net_device *out_de
 			}
 
 			feci = ecm_db_connection_front_end_get_and_ref(ci);
-			interface_idx_cnt = ecm_nss_multicast_ipv6_interface_heirarchy_construct(feci, to_list, in_dev, out_dev->master,\
+			interface_idx_cnt = ecm_nss_multicast_ipv6_interface_heirarchy_construct(feci, to_list, in_dev, out_dev_master,\
 												   ip_src_addr, ip_dest_addr, mc_if_cnt,\
 												   mc_dest_if, to_list_first, src_node_addr,
 												   is_routed, skb);
@@ -2660,7 +2663,7 @@ unsigned int ecm_nss_multicast_ipv6_connection_process(struct net_device *out_de
 				ecm_db_connection_deref(ci);
 				kfree(to_list);
 				kfree(to_list_first);
-				return NF_ACCEPT;
+				goto done;
 			}
 
 			ret = ecm_db_multicast_connection_to_interfaces_reset(ci, to_list, to_list_first);
@@ -2684,7 +2687,7 @@ unsigned int ecm_nss_multicast_ipv6_connection_process(struct net_device *out_de
 			 */
 			if (ret < 0) {
 				ecm_db_connection_deref(ci);
-				return NF_ACCEPT;
+				goto done;
 			}
 		}
 	}
@@ -2694,7 +2697,7 @@ unsigned int ecm_nss_multicast_ipv6_connection_process(struct net_device *out_de
 	 */
 	if (!ecm_db_connection_defunct_timer_touch(ci)) {
 		ecm_db_connection_deref(ci);
-		return NF_ACCEPT;
+		goto done;
 	}
 
 	/*
@@ -2847,7 +2850,7 @@ unsigned int ecm_nss_multicast_ipv6_connection_process(struct net_device *out_de
 		DEBUG_TRACE("%p: drop: %p\n", ci, skb);
 		ecm_db_connection_data_totals_update_dropped(ci, (sender == ECM_TRACKER_SENDER_TYPE_SRC)? true : false, skb->len, 1);
 		ecm_db_connection_deref(ci);
-		return NF_ACCEPT;
+		goto done;
 	}
 	ecm_db_connection_data_totals_update(ci, (sender == ECM_TRACKER_SENDER_TYPE_SRC)? true : false, skb->len, 1);
 
@@ -2867,11 +2870,13 @@ unsigned int ecm_nss_multicast_ipv6_connection_process(struct net_device *out_de
 		feci = ecm_db_connection_front_end_get_and_ref(ci);
 		ecm_nss_multicast_ipv6_connection_accelerate(feci, &prevalent_pr);
 		feci->deref(feci);
-	} else {
-		goto done;
 	}
-done:
 	ecm_db_connection_deref(ci);
+
+done:
+	if (out_dev_master) {
+		dev_put(out_dev_master);
+	}
 	return NF_ACCEPT;
 }
 

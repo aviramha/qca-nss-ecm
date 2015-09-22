@@ -2166,6 +2166,7 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 	int dest_port;
 	int src_port_nat = 0;
 	struct net_device *in_dev_nat = NULL;
+	struct net_device *out_dev_master = NULL;
 	struct ecm_db_multicast_tuple_instance *tuple_instance;
 	struct ecm_db_connection_instance *ci;
 	ip_addr_t match_addr;
@@ -2268,14 +2269,18 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 			is_routed = true;
 			br_dev_found_in_mfc = ecm_interface_multicast_check_for_br_dev(dst_dev, if_cnt);
 		} else {
+			out_dev_master =  ecm_interface_get_and_hold_dev_master(out_dev);
+			DEBUG_ASSERT(out_dev_master, "Expected a master\n");
+
+
 			/*
 			 * Packet flow is pure bridge. Try to query the snooper for the destination
 			 * interface list
 			 */
-			if_cnt = mc_bridge_ipv4_get_if(out_dev->master, ip_src, ip_grp, ECM_DB_MULTICAST_IF_MAX, dst_dev);
+			if_cnt = mc_bridge_ipv4_get_if(out_dev_master, ip_src, ip_grp, ECM_DB_MULTICAST_IF_MAX, dst_dev);
 			if (if_cnt <= 0) {
 				DEBUG_WARN("Not found a valid MCS if count %d\n", if_cnt);
-				return NF_ACCEPT;
+				goto done;
 			}
 
 			/*
@@ -2287,7 +2292,7 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 			if_cnt = ecm_interface_multicast_check_for_src_ifindex(dst_dev, if_cnt, in_dev->ifindex);
 			if (if_cnt <= 0) {
 				DEBUG_WARN("Not found a valid MCS if count %d\n", if_cnt);
-				return NF_ACCEPT;
+				goto done;
 			}
 		}
 	}
@@ -2298,7 +2303,7 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 	if (!is_routed) {
 		if (iph->ttl < 2) {
 			DEBUG_TRACE("%p: Ignoring, Multicast IPv4 Header has TTL one\n", skb);
-			return NF_ACCEPT;
+			goto done;
 		}
 	}
 
@@ -2315,7 +2320,7 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 		 */
 		in_dev_nat = ecm_interface_dev_find_by_addr(ip_src_addr_nat, &from_local_addr);
 		if (!in_dev_nat) {
-			return NF_ACCEPT;
+			goto done;
 		}
 
 		/*
@@ -2335,7 +2340,7 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 		 * list for a NAT flow, which should not happen.
 		 */
 		if (!nat_if_found) {
-			return NF_ACCEPT;
+			goto done;
 		}
 	}
 
@@ -2385,7 +2390,7 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 			/*
 			 * As we are terminating we just allow the packet to pass - it's no longer our concern
 			 */
-			return NF_ACCEPT;
+			goto done;
 		}
 		spin_unlock_bh(&ecm_nss_ipv4_lock);
 
@@ -2395,7 +2400,7 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 		nci = ecm_db_connection_alloc();
 		if (!nci) {
 			DEBUG_WARN("Failed to allocate connection\n");
-			return NF_ACCEPT;
+			goto done;
 		}
 
 		/*
@@ -2405,7 +2410,7 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 		if (!feci) {
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to allocate front end\n");
-			return NF_ACCEPT;
+			goto done;
 		}
 
 		/*
@@ -2415,7 +2420,7 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 		if (!tuple_instance) {
 			ecm_db_connection_deref(nci);
 			DEBUG_WARN("Failed to allocate tuple instance\n");
-			return NF_ACCEPT;
+			goto done;
 		}
 
 		/*
@@ -2434,7 +2439,7 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 			ecm_db_connection_deref(nci);
 			ecm_db_multicast_tuple_instance_deref(tuple_instance);
 			DEBUG_WARN("Failed to obtain 'from' heirarchy list\n");
-			return NF_ACCEPT;
+			goto done;
 		}
 		ecm_db_connection_from_interfaces_reset(nci, from_list, from_list_first);
 
@@ -2446,7 +2451,7 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 			feci->deref(feci);
 			ecm_db_connection_deref(nci);
 			ecm_db_multicast_tuple_instance_deref(tuple_instance);
-			return NF_ACCEPT;
+			goto done;
 		}
 
 		DEBUG_TRACE("%p: Create source mapping\n", nci);
@@ -2457,7 +2462,7 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 			feci->deref(feci);
 			ecm_db_connection_deref(nci);
 			ecm_db_multicast_tuple_instance_deref(tuple_instance);
-			return NF_ACCEPT;
+			goto done;
 		}
 
 		to_list = (struct ecm_db_iface_instance *)kzalloc(ECM_DB_TO_MCAST_INTERFACES_SIZE, GFP_ATOMIC | __GFP_NOWARN);
@@ -2468,7 +2473,7 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 			feci->deref(feci);
 			ecm_db_connection_deref(nci);
 			ecm_db_multicast_tuple_instance_deref(tuple_instance);
-			return NF_ACCEPT;
+			goto done;
 		}
 
 		to_list_first = (int32_t *)kzalloc(sizeof(int32_t *) * ECM_DB_MULTICAST_IF_MAX, GFP_ATOMIC | __GFP_NOWARN);
@@ -2481,7 +2486,7 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 			ecm_db_connection_deref(nci);
 			ecm_db_multicast_tuple_instance_deref(tuple_instance);
 			kfree(to_list);
-			return NF_ACCEPT;
+			goto done;
 		}
 
 		/*
@@ -2494,7 +2499,7 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 		}
 
 		interface_idx_cnt = ecm_nss_multicast_connection_to_interface_heirarchy_construct(feci, to_list, ip_src_addr, ip_dest_addr, in_dev,
-												  out_dev->master, if_cnt, dst_dev, to_list_first,
+												  out_dev_master, if_cnt, dst_dev, to_list_first,
 												  src_node_addr, is_routed, layer4hdr, skb);
 		if (interface_idx_cnt == 0) {
 			ecm_db_node_deref(src_ni);
@@ -2505,7 +2510,7 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 			kfree(to_list);
 			kfree(to_list_first);
 			DEBUG_WARN("%p: Failed to obtain mutlicast 'to' heirarchy list\n", nci);
-			return NF_ACCEPT;
+			goto done;
 		}
 		ret = ecm_db_multicast_connection_to_interfaces_reset(nci, to_list, to_list_first);
 		if (ret < 0) {
@@ -2524,7 +2529,7 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 			kfree(to_list);
 			kfree(to_list_first);
 			DEBUG_WARN("%p: Failed to obtain mutlicast 'to' heirarchy list\n", nci);
-			return NF_ACCEPT;
+			goto done;
 		}
 
 		DEBUG_TRACE("%p: Create destination node\n", nci);
@@ -2550,7 +2555,7 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 			kfree(to_list);
 			kfree(to_list_first);
 			DEBUG_WARN("Failed to establish destination node\n");
-			return NF_ACCEPT;
+			goto done;
 		}
 
 		DEBUG_TRACE("%p: Create source mapping\n", nci);
@@ -2572,7 +2577,7 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 			kfree(to_list);
 			kfree(to_list_first);
 			DEBUG_WARN("Failed to establish dst mapping\n");
-			return NF_ACCEPT;
+			goto done;
 		}
 
 		DEBUG_TRACE("%p: Create the 'from NAT' interface heirarchy list\n", nci);
@@ -2595,7 +2600,7 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 			kfree(to_list);
 			kfree(to_list_first);
 			DEBUG_WARN("Failed to obtain 'from NAT' heirarchy list\n");
-			return NF_ACCEPT;
+			goto done;
 		}
 		ecm_db_connection_from_nat_interfaces_reset(nci, from_nat_list, from_nat_list_first);
 
@@ -2619,7 +2624,7 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 			kfree(to_list);
 			kfree(to_list_first);
 			DEBUG_WARN("Failed to obtain 'from NAT' node\n");
-			return NF_ACCEPT;
+			goto done;
 		}
 
 		DEBUG_TRACE("%p: Create from NAT mapping\n", nci);
@@ -2644,7 +2649,7 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 			kfree(to_list);
 			kfree(to_list_first);
 			DEBUG_WARN("Failed to establish from nat mapping\n");
-			return NF_ACCEPT;
+			goto done;
 		}
 
 		/*
@@ -2671,7 +2676,7 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 			kfree(to_list);
 			kfree(to_list_first);
 			DEBUG_WARN("Failed to allocate default classifier\n");
-			return NF_ACCEPT;
+			goto done;
 		}
 		ecm_db_connection_classifier_assign(nci, (struct ecm_classifier_instance *)dci);
 
@@ -2704,7 +2709,7 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 				kfree(to_list);
 				kfree(to_list_first);
 				DEBUG_WARN("Failed to allocate classifiers assignments\n");
-				return NF_ACCEPT;
+				goto done;
 			}
 		}
 
@@ -2799,14 +2804,14 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 			to_list = (struct ecm_db_iface_instance *)kzalloc(ECM_DB_TO_MCAST_INTERFACES_SIZE, GFP_ATOMIC | __GFP_NOWARN);
 			if (!to_list) {
 				ecm_db_connection_deref(ci);
-				return NF_ACCEPT;
+				goto done;
 			}
 
 			to_list_first = (int32_t *)kzalloc(sizeof(int32_t *) * ECM_DB_MULTICAST_IF_MAX, GFP_ATOMIC | __GFP_NOWARN);
 			if (!to_list_first) {
 				ecm_db_connection_deref(ci);
 				kfree(to_list);
-				return NF_ACCEPT;
+				goto done;
 			}
 
 			/*
@@ -2819,7 +2824,7 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 
 			feci = ecm_db_connection_front_end_get_and_ref(ci);
 			interface_idx_cnt = ecm_nss_multicast_connection_to_interface_heirarchy_construct(feci, to_list, ip_src_addr, ip_dest_addr, in_dev,
-													  out_dev->master, if_cnt, dst_dev, to_list_first,
+													  out_dev_master, if_cnt, dst_dev, to_list_first,
 													  src_node_addr, is_routed, (__be16 *)&udp_hdr, skb);
 			feci->deref(feci);
 			if (interface_idx_cnt == 0) {
@@ -2827,7 +2832,7 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 				ecm_db_connection_deref(ci);
 				kfree(to_list);
 				kfree(to_list_first);
-				return NF_ACCEPT;
+				goto done;
 			}
 
 			ret = ecm_db_multicast_connection_to_interfaces_reset(ci, to_list, to_list_first);
@@ -2850,7 +2855,7 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 			 */
 			if (ret < 0) {
 				ecm_db_connection_deref(ci);
-				return NF_ACCEPT;
+				goto done;
 			}
 		}
 	}
@@ -2860,7 +2865,7 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 	 */
 	if (!ecm_db_connection_defunct_timer_touch(ci)) {
 		ecm_db_connection_deref(ci);
-		return NF_ACCEPT;
+		goto done;
 	}
 
 	/*
@@ -3013,7 +3018,7 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 		DEBUG_TRACE("%p: drop: %p\n", ci, skb);
 		ecm_db_connection_data_totals_update_dropped(ci, (sender == ECM_TRACKER_SENDER_TYPE_SRC)? true : false, skb->len, 1);
 		ecm_db_connection_deref(ci);
-		return NF_ACCEPT;
+		goto done;
 	}
 	ecm_db_multicast_connection_data_totals_update(ci, false, skb->len, 1);
 
@@ -3025,11 +3030,13 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 		feci = ecm_db_connection_front_end_get_and_ref(ci);
 		ecm_nss_multicast_ipv4_connection_accelerate(feci, &prevalent_pr);
 		feci->deref(feci);
-	} else {
-		goto done;
 	}
-done:
 	ecm_db_connection_deref(ci);
+
+done:
+	if (out_dev_master) {
+		dev_put(out_dev_master);
+	}
 	return NF_ACCEPT;
 }
 
