@@ -63,3 +63,16 @@ static inline int32_t ecm_nss_common_get_interface_number_by_dev(struct net_devi
 	return nss_cmn_get_interface_number_by_dev(dev);
 }
 
+/*
+ * ecm_nss_common_connection_regenerate()
+ *	Re-generate a specific connection in NSS front end
+ */
+static inline void ecm_nss_common_connection_regenerate(struct ecm_front_end_connection_instance *feci, struct ecm_db_connection_instance *ci)
+{
+	/*
+	 * Flag the connection as needing re-generation.
+	 * Re-generation occurs when we next see traffic OR an acceleration engine sync for this connection.
+	 * Refer to front end protocol specific process() functions.
+	 */
+	ecm_db_connection_regeneration_needed(ci);
+}

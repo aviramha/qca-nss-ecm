@@ -1729,6 +1729,7 @@ static struct ecm_sfe_ported_ipv4_connection_instance *ecm_sfe_ported_ipv4_conne
 	feci->state_get = ecm_sfe_ported_ipv4_connection_state_get;
 #endif
 	feci->ae_interface_number_by_dev_get = ecm_sfe_common_get_interface_number_by_dev;
+	feci->regenerate = ecm_sfe_common_connection_regenerate;
 
 	if (protocol == IPPROTO_TCP) {
 		npci->ported_accelerated_count_index = ECM_SFE_PORTED_IPV4_PROTO_TCP;

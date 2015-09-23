@@ -1982,6 +1982,27 @@ void ecm_db_regeneration_needed(void)
 EXPORT_SYMBOL(ecm_db_regeneration_needed);
 
 /*
+ * ecm_db_connection_regenerate()
+ *	Re-generate a specific connection
+ */
+void ecm_db_connection_regenerate(struct ecm_db_connection_instance *ci)
+{
+	struct ecm_front_end_connection_instance *feci;
+
+	DEBUG_TRACE("Regenerate connection: %p\n", ci);
+
+	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed", ci);
+
+	/*
+	 * Notify front end to regenerate a connection.
+	 */
+	feci = ecm_db_connection_front_end_get_and_ref(ci);
+	feci->regenerate(feci, ci);
+	feci->deref(feci);
+}
+EXPORT_SYMBOL(ecm_db_connection_regenerate);
+
+/*
  * ecm_db_connection_direction_get()
  *	Return direction of the connection.
  *
@@ -5986,7 +6007,7 @@ void ecm_db_connection_regenerate_by_assignment_type(ecm_classifier_type_t ca_ty
 		struct ecm_db_connection_instance *cin;
 
 		DEBUG_TRACE("%p: Re-generate: %d\n", ci, ca_type);
-		ecm_db_connection_regeneration_needed(ci);
+		ecm_db_connection_regenerate(ci);
 
 		cin = ecm_db_connection_by_classifier_type_assignment_get_and_ref_next(ci, ca_type);
 		ecm_db_connection_by_classifier_type_assignment_deref(ci, ca_type);

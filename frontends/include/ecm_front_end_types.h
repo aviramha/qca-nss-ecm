@@ -74,6 +74,7 @@ typedef int (*ecm_front_end_connection_state_get_callback_t)(struct ecm_front_en
 											 */
 #endif
 typedef int32_t (*ecm_front_end_connection_ae_interface_number_by_dev_get_method_t)(struct net_device *dev);
+typedef void (*ecm_front_end_connection_regenerate_method_t)(struct ecm_front_end_connection_instance *feci, struct ecm_db_connection_instance *ci);
 
 /*
  * Acceleration limiting modes.
@@ -115,6 +116,8 @@ struct ecm_front_end_connection_instance {
 	ecm_front_end_connection_accel_ceased_method_t accel_ceased;		/* Acceleration has stopped */
 	ecm_front_end_connection_ae_interface_number_by_dev_get_method_t ae_interface_number_by_dev_get;
 										/* Get the acceleration engine interface number from the dev instance */
+	ecm_front_end_connection_regenerate_method_t regenerate;
+										/* regenerate a connection */
 #ifdef ECM_STATE_OUTPUT_ENABLE
 	ecm_front_end_connection_state_get_callback_t state_get;		/* Obtain state for this object */
 #endif

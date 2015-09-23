@@ -3211,37 +3211,6 @@ EXPORT_SYMBOL(ecm_interface_multicast_stats_update);
 #endif
 
 /*
- * ecm_interface_regenerate_connection()
- *	Re-generate a specific connection
- */
-void ecm_interface_regenerate_connection(struct ecm_db_connection_instance *ci)
-{
-	struct ecm_front_end_connection_instance *feci;
-
-	DEBUG_TRACE("Regenerate connection: %p\n", ci);
-
-	/*
-	 * Flag the connection as needing re-generation.
-	 * Re-generation occurs when we next see traffic OR an acceleration engine sync for this connection.
-	 * Refer to front end protocol specific process() functions.
-	 */
-	ecm_db_connection_regeneration_needed(ci);
-
-	/*
-	 * If the connection is accelerated then force deceleration.
-	 * Under normal circumstances deceleration would occur on the next sync received,
-	 * however, there is a situation where a sync may not occur if, say, a cable has been pulled.
-	 * The acceleration engine would see no further traffic to trigger sending a sync and so
-	 * re-generation would not occur.
-	 * The connection would stall and no-regeneration would happen leaving the connection in bad state.
-	 * NOTE: We can just call decelerate() upon the front end - if its not accelerated this will have no effect.
-	 */
-	feci = ecm_db_connection_front_end_get_and_ref(ci);
-	feci->decelerate(feci);
-	feci->deref(feci);
-}
-
-/*
  * ecm_interface_regenerate_connections()
  *	Cause regeneration of all connections that are using the specified interface.
  */
@@ -3285,7 +3254,7 @@ static void ecm_interface_regenerate_connections(struct ecm_db_iface_instance *i
 		cin = ecm_db_connection_iface_from_get_and_ref_next(ci_from);
 
 		DEBUG_TRACE("%p: Regenerate: %p", ii, ci_from);
-		ecm_db_connection_regeneration_needed(ci_from);
+		ecm_db_connection_regenerate(ci_from);
 		ecm_db_connection_deref(ci_from);
 		ci_from = cin;
 	}
@@ -3296,7 +3265,7 @@ static void ecm_interface_regenerate_connections(struct ecm_db_iface_instance *i
 		cin = ecm_db_connection_iface_to_get_and_ref_next(ci_to);
 
 		DEBUG_TRACE("%p: Regenerate: %p", ii, ci_to);
-		ecm_db_connection_regeneration_needed(ci_to);
+		ecm_db_connection_regenerate(ci_to);
 		ecm_db_connection_deref(ci_to);
 		ci_to = cin;
 	}
@@ -3310,7 +3279,7 @@ static void ecm_interface_regenerate_connections(struct ecm_db_iface_instance *i
 		cin = ecm_db_connection_iface_nat_from_get_and_ref_next(ci_from_nat);
 
 		DEBUG_TRACE("%p: Regenerate: %p", ii, ci_from_nat);
-		ecm_db_connection_regeneration_needed(ci_from_nat);
+		ecm_db_connection_regenerate(ci_from_nat);
 		ecm_db_connection_deref(ci_from_nat);
 		ci_from_nat = cin;
 	}
@@ -3321,7 +3290,7 @@ static void ecm_interface_regenerate_connections(struct ecm_db_iface_instance *i
 		cin = ecm_db_connection_iface_nat_to_get_and_ref_next(ci_to_nat);
 
 		DEBUG_TRACE("%p: Regenerate: %p", ii, ci_to_nat);
-		ecm_db_connection_regeneration_needed(ci_to_nat);
+		ecm_db_connection_regenerate(ci_to_nat);
 		ecm_db_connection_deref(ci_to_nat);
 		ci_to_nat = cin;
 	}
@@ -3341,7 +3310,7 @@ static void ecm_interface_regenerate_connections(struct ecm_db_iface_instance *i
 		 */
 		if (ecm_db_multicast_connection_to_interfaces_set_check(ci_mcast)
 				&& ecm_db_connection_regeneration_required_peek(ci_mcast)) {
-			ecm_db_connection_regeneration_needed(ci_mcast);
+			ecm_db_connection_regenerate(ci_mcast);
 		}
 
 		cin = ecm_db_connection_get_and_ref_next(ci_mcast);

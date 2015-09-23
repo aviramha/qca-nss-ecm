@@ -79,6 +79,7 @@ bool ecm_db_connection_regeneration_required_check(struct ecm_db_connection_inst
 bool ecm_db_connection_regeneration_required_peek(struct ecm_db_connection_instance *ci);
 void ecm_db_connection_regeneration_needed(struct ecm_db_connection_instance *ci);
 void ecm_db_regeneration_needed(void);
+void ecm_db_connection_regenerate(struct ecm_db_connection_instance *ci);
 #ifdef ECM_DB_CTA_TRACK_ENABLE
 void ecm_db_connection_regenerate_by_assignment_type(ecm_classifier_type_t ca_type);
 void ecm_db_connection_make_defunct_by_assignment_type(ecm_classifier_type_t ca_type);

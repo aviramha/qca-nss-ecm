@@ -1654,6 +1654,7 @@ static struct ecm_nss_ported_ipv6_connection_instance *ecm_nss_ported_ipv6_conne
 	feci->state_get = ecm_nss_ported_ipv6_connection_state_get;
 #endif
 	feci->ae_interface_number_by_dev_get = ecm_nss_common_get_interface_number_by_dev;
+	feci->regenerate = ecm_nss_common_connection_regenerate;
 
 	if (protocol == IPPROTO_TCP) {
 		npci->ported_accelerated_count_index = ECM_NSS_PORTED_IPV6_PROTO_TCP;
