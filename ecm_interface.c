@@ -3527,7 +3527,7 @@ static void ecm_interface_list_stats_update(int iface_list_first, struct ecm_db_
 #ifdef ECM_INTERFACE_PPPOE_ENABLE
 			case ECM_DB_IFACE_TYPE_PPPOE:
 				DEBUG_INFO("PPPOE\n");
-				ppp_update_stats(dev, rx_packets, rx_bytes, tx_packets, tx_bytes);
+				ppp_update_stats(dev, rx_packets, rx_bytes, tx_packets, tx_bytes, 0, 0, 0, 0);
 				break;
 #endif
 			default:
