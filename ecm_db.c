@@ -256,6 +256,9 @@ struct ecm_db_iface_instance {
 #ifdef ECM_INTERFACE_L2TPV2_ENABLE
 		struct ecm_db_interface_info_pppol2tpv2 pppol2tpv2;	/* type == ECM_DB_IFACE_TYPE_PPPOL2TPV2 */
 #endif
+#ifdef ECM_INTERFACE_PPTP_ENABLE
+		struct ecm_db_interface_info_pptp pptp;			/* type == ECM_DB_IFACE_TYPE_PPTP */
+#endif
 		struct ecm_db_interface_info_unknown unknown;		/* type == ECM_DB_IFACE_TYPE_UNKNOWN */
 		struct ecm_db_interface_info_loopback loopback;		/* type == ECM_DB_IFACE_TYPE_LOOPBACK */
 #ifdef ECM_INTERFACE_IPSEC_ENABLE
@@ -882,7 +885,8 @@ static char *ecm_db_interface_type_names[ECM_DB_IFACE_TYPE_COUNT] = {
 	"UNKNOWN",
 	"SIT",
 	"TUNIPIP6",
-	"PPPoL2TPV2"
+	"PPPoL2TPV2",
+	"PPTP"
 };
 
 /*
@@ -3958,6 +3962,18 @@ static inline ecm_db_iface_hash_t ecm_db_iface_generate_hash_index_pppol2tpv2(ui
 
 #endif
 
+#ifdef ECM_INTERFACE_PPTP_ENABLE
+/*
+ * ecm_db_iface_generate_hash_index_pptp()
+ *	Calculate the hash index.
+ */
+static inline ecm_db_iface_hash_t ecm_db_iface_generate_hash_index_pptp(uint16_t pptp_src_call_id, uint16_t pptp_dst_call_id)
+{
+	uint32_t hash_val;
+	hash_val = (uint32_t)jhash_2words(pptp_src_call_id, pptp_dst_call_id, ecm_db_jhash_rnd);
+	return (ecm_db_iface_hash_t)(hash_val & (ECM_DB_IFACE_HASH_SLOTS - 1));
+}
+#endif
 /*
  * ecm_db_iface_generate_hash_index_unknown()
  * 	Calculate the hash index.
@@ -4536,6 +4552,65 @@ struct ecm_db_iface_instance *ecm_db_iface_find_and_ref_pppol2tpv2(uint32_t pppo
 }
 EXPORT_SYMBOL(ecm_db_iface_find_and_ref_pppol2tpv2);
 
+#endif
+
+#ifdef ECM_INTERFACE_PPTP_ENABLE
+/*
+ * ecm_db_iface_pptp_session_info_get
+ *	get pptp specific info
+ */
+void ecm_db_iface_pptp_session_info_get(struct ecm_db_iface_instance *ii, struct ecm_db_interface_info_pptp *pptp_info)
+{
+	DEBUG_CHECK_MAGIC(ii, ECM_DB_IFACE_INSTANCE_MAGIC, "%p: magic failed", ii);
+	DEBUG_ASSERT(ii->type == ECM_DB_IFACE_TYPE_PPTP, "%p: Bad type, expected pptp, actual: %d\n", ii, ii->type);
+	spin_lock_bh(&ecm_db_lock);
+	memcpy(pptp_info, &ii->type_info.pptp, sizeof(struct ecm_db_interface_info_pptp));
+	spin_unlock_bh(&ecm_db_lock);
+}
+EXPORT_SYMBOL(ecm_db_iface_pptp_session_info_get);
+
+/*
+ * ecm_db_iface_find_and_ref_pptp()
+ *	Lookup and return a iface reference if any
+ */
+struct ecm_db_iface_instance *ecm_db_iface_find_and_ref_pptp(uint32_t pptp_src_call_id, uint32_t pptp_dst_call_id)
+{
+	ecm_db_iface_hash_t hash_index;
+	struct ecm_db_iface_instance *ii;
+
+	/*
+	 * Compute the hash chain index and prepare to walk the chain
+	 */
+	hash_index = ecm_db_iface_generate_hash_index_pptp(pptp_src_call_id, pptp_dst_call_id);
+
+	DEBUG_TRACE("Lookup pptp iface with local_call_id = %d, remote_call_id = %d, hash = 0x%x\n", pptp_src_call_id,
+									pptp_dst_call_id, hash_index);
+
+	/*
+	 * Iterate the chain looking for a host with matching details
+	 */
+	spin_lock_bh(&ecm_db_lock);
+	ii = ecm_db_iface_table[hash_index];
+
+	while (ii) {
+		if ((ii->type != ECM_DB_IFACE_TYPE_PPTP)
+				|| (ii->type_info.pptp.src_call_id != pptp_src_call_id)
+				|| (ii->type_info.pptp.dst_call_id != pptp_dst_call_id)) {
+			ii = ii->hash_next;
+			continue;
+		}
+
+		_ecm_db_iface_ref(ii);
+		spin_unlock_bh(&ecm_db_lock);
+		DEBUG_TRACE("iface found %p\n", ii);
+		return ii;
+	}
+	spin_unlock_bh(&ecm_db_lock);
+
+	DEBUG_TRACE("Iface not found\n");
+	return NULL;
+}
+EXPORT_SYMBOL(ecm_db_iface_find_and_ref_pptp);
 #endif
 
 /*
@@ -7710,6 +7785,45 @@ static int ecm_db_iface_pppol2tpv2_state_get(struct ecm_db_iface_instance *ii, s
 
 #endif
 
+#ifdef ECM_INTERFACE_PPTP_ENABLE
+/*
+ * ecm_db_iface_pptp_state_get()
+ *	Return interface type specific state
+ */
+static int ecm_db_iface_pptp_state_get(struct ecm_db_iface_instance *ii, struct ecm_state_file_instance *sfi)
+{
+	int result;
+	struct ecm_db_interface_info_pptp type_info;
+
+	DEBUG_CHECK_MAGIC(ii, ECM_DB_IFACE_INSTANCE_MAGIC, "%p: magic failed\n", ii);
+	spin_lock_bh(&ecm_db_lock);
+	memcpy(&type_info, &ii->type_info, sizeof(struct ecm_db_interface_info_pptp));
+	spin_unlock_bh(&ecm_db_lock);
+
+	result = ecm_state_prefix_add(sfi, "pptp");
+	if (result) {
+		return result;
+	}
+
+	result = ecm_db_iface_state_get_base(ii, sfi);
+	if (result) {
+		return result;
+	}
+
+	result = ecm_state_write(sfi, "local_call_id", "%u", type_info.src_call_id);
+	if (result) {
+		return result;
+	}
+
+	result = ecm_state_write(sfi, "peer_call_id", "%u", type_info.dst_call_id);
+	if (result) {
+		return result;
+	}
+
+	return ecm_state_prefix_remove(sfi);
+}
+#endif
+
 /*
  * ecm_db_iface_unknown_state_get()
  * 	Return interface type specific state
@@ -9545,6 +9659,123 @@ void ecm_db_iface_add_pppol2tpv2(struct ecm_db_iface_instance *ii, struct ecm_db
 }
 EXPORT_SYMBOL(ecm_db_iface_add_pppol2tpv2);
 
+#endif
+
+#ifdef ECM_INTERFACE_PPTP_ENABLE
+/*
+ * ecm_db_iface_add_pptp()
+ *	Add a iface instance into the database
+ */
+void ecm_db_iface_add_pptp(struct ecm_db_iface_instance *ii, struct ecm_db_interface_info_pptp *pptp_info,
+					char *name, int32_t mtu, int32_t interface_identifier,
+					int32_t ae_interface_identifier, ecm_db_iface_final_callback_t final,
+					void *arg)
+{
+	ecm_db_iface_hash_t hash_index;
+	ecm_db_iface_id_hash_t iface_id_hash_index;
+	struct ecm_db_listener_instance *li;
+	struct ecm_db_interface_info_pptp *type_info;
+
+	DEBUG_CHECK_MAGIC(ii, ECM_DB_IFACE_INSTANCE_MAGIC, "%p: magic failed\n", ii);
+	spin_lock_bh(&ecm_db_lock);
+#ifdef ECM_DB_XREF_ENABLE
+	DEBUG_ASSERT((ii->nodes == NULL) && (ii->node_count == 0), "%p: nodes not null\n", ii);
+#endif
+	DEBUG_ASSERT(!(ii->flags & ECM_DB_IFACE_FLAGS_INSERTED), "%p: inserted\n", ii);
+	DEBUG_ASSERT(name, "%p: no name given\n", ii);
+	spin_unlock_bh(&ecm_db_lock);
+
+	/*
+	 * Record general info
+	 */
+	ii->type = ECM_DB_IFACE_TYPE_PPTP;
+#ifdef ECM_STATE_OUTPUT_ENABLE
+	ii->state_get = ecm_db_iface_pptp_state_get;
+#endif
+	ii->arg = arg;
+	ii->final = final;
+	strlcpy(ii->name, name, IFNAMSIZ);
+	ii->mtu = mtu;
+	ii->interface_identifier = interface_identifier;
+	ii->ae_interface_identifier = ae_interface_identifier;
+
+	/*
+	 * Type specific info
+	 */
+	type_info = &ii->type_info.pptp;
+	memcpy(type_info, pptp_info, sizeof(struct ecm_db_interface_info_pptp));
+
+	/*
+	 * Compute hash chain for insertion
+	 */
+	hash_index = ecm_db_iface_generate_hash_index_pptp(type_info->src_call_id,
+							  type_info->dst_call_id);
+	ii->hash_index = hash_index;
+
+	iface_id_hash_index = ecm_db_iface_id_generate_hash_index(interface_identifier);
+	ii->iface_id_hash_index = iface_id_hash_index;
+	/*
+	 * Add into the global list
+	 */
+	spin_lock_bh(&ecm_db_lock);
+	ii->flags |= ECM_DB_IFACE_FLAGS_INSERTED;
+	ii->prev = NULL;
+	ii->next = ecm_db_interfaces;
+	if (ecm_db_interfaces) {
+		ecm_db_interfaces->prev = ii;
+	}
+	ecm_db_interfaces = ii;
+
+	/*
+	 * Insert into chain
+	 */
+	ii->hash_next = ecm_db_iface_table[hash_index];
+	if (ecm_db_iface_table[hash_index]) {
+		ecm_db_iface_table[hash_index]->hash_prev = ii;
+	}
+	ecm_db_iface_table[hash_index] = ii;
+	ecm_db_iface_table_lengths[hash_index]++;
+	DEBUG_ASSERT(ecm_db_iface_table_lengths[hash_index] > 0, "%p: invalid table len %d\n", ii, ecm_db_iface_table_lengths[hash_index]);
+
+	DEBUG_INFO("%p: interface inserted at hash index %u, hash prev is %p, type: %d\n", ii, ii->hash_index, ii->hash_prev, ii->type);
+
+	/*
+	 * Insert into interface identifier chain
+	 */
+	ii->iface_id_hash_next = ecm_db_iface_id_table[iface_id_hash_index];
+	if (ecm_db_iface_id_table[iface_id_hash_index]) {
+		ecm_db_iface_id_table[iface_id_hash_index]->iface_id_hash_prev = ii;
+	}
+	ecm_db_iface_id_table[iface_id_hash_index] = ii;
+	ecm_db_iface_id_table_lengths[iface_id_hash_index]++;
+	DEBUG_ASSERT(ecm_db_iface_id_table_lengths[iface_id_hash_index] > 0, "%p: invalid iface id table len %d\n", ii, ecm_db_iface_id_table_lengths[iface_id_hash_index]);
+
+	/*
+	 * Set time of addition
+	 */
+	ii->time_added = ecm_db_time;
+	spin_unlock_bh(&ecm_db_lock);
+
+	/*
+	 * Throw add event to the listeners
+	 */
+	DEBUG_TRACE("%p: Throw iface added event\n", ii);
+	li = ecm_db_listeners_get_and_ref_first();
+	while (li) {
+		struct ecm_db_listener_instance *lin;
+		if (li->iface_added) {
+			li->iface_added(li->arg, ii);
+		}
+
+		/*
+		 * Get next listener
+		 */
+		lin = ecm_db_listener_get_and_ref_next(li);
+		ecm_db_listener_deref(li);
+		li = lin;
+	}
+}
+EXPORT_SYMBOL(ecm_db_iface_add_pptp);
 #endif
 
 /*

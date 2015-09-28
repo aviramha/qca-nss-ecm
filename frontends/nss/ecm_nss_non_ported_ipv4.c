@@ -387,7 +387,10 @@ static void ecm_nss_non_ported_ipv4_connection_accelerate(struct ecm_front_end_c
 	uint8_t from_nss_iface_address[ETH_ALEN];
 	uint8_t to_nss_iface_address[ETH_ALEN];
 	ip_addr_t addr;
-	struct nss_ipv4_msg nim;
+#if defined(ECM_INTERFACE_L2TPV2_ENABLE) ||  defined(ECM_INTERFACE_PPTP_ENABLE)
+	struct net_device *dev __attribute__((unused));
+#endif
+	struct nss_ipv4_msg *nim;
 	struct nss_ipv4_rule_create_msg *nircm;
 	struct ecm_classifier_instance *assignments[ECM_CLASSIFIER_TYPES];
 	int aci_index;
@@ -413,7 +416,7 @@ static void ecm_nss_non_ported_ipv4_connection_accelerate(struct ecm_front_end_c
 	 * For non-ported protocols we only support IPv6 in 4 or ESP
 	 */
 	protocol = ecm_db_connection_protocol_get(feci->ci);
-	if ((protocol != IPPROTO_IPV6) && (protocol != IPPROTO_ESP)) {
+	if ((protocol != IPPROTO_IPV6) && (protocol != IPPROTO_ESP) && (protocol != IPPROTO_GRE)) {
 		spin_lock_bh(&feci->lock);
 		feci->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_RULE;
 		spin_unlock_bh(&feci->lock);
@@ -429,19 +432,24 @@ static void ecm_nss_non_ported_ipv4_connection_accelerate(struct ecm_front_end_c
 		return;
 	}
 
+	nim = (struct nss_ipv4_msg *)kzalloc(sizeof(struct nss_ipv4_msg), GFP_ATOMIC | __GFP_NOWARN);
+	if (!nim) {
+		DEBUG_WARN("%p: no memory for nss ipv4 message structure instance: %p\n", feci, feci->ci);
+		return;
+	}
+
 	/*
 	 * Okay construct an accel command.
 	 * Initialise creation structure.
 	 * NOTE: We leverage the app_data void pointer to be our 32 bit connection serial number.
 	 * When we get it back we re-cast it to a uint32 and do a faster connection lookup.
 	 */
-	memset(&nim, 0, sizeof(struct nss_ipv4_msg));
-	nss_ipv4_msg_init(&nim, NSS_IPV4_RX_INTERFACE, NSS_IPV4_TX_CREATE_RULE_MSG,
+	nss_ipv4_msg_init(nim, NSS_IPV4_RX_INTERFACE, NSS_IPV4_TX_CREATE_RULE_MSG,
 			sizeof(struct nss_ipv4_rule_create_msg),
 			ecm_nss_non_ported_ipv4_connection_callback,
 			(void *)ecm_db_connection_serial_get(feci->ci));
 
-	nircm = &nim.msg.rule_create;
+	nircm = &nim->msg.rule_create;
 	nircm->valid_flags = 0;
 	nircm->rule_flags = 0;
 
@@ -652,6 +660,31 @@ static void ecm_nss_non_ported_ipv4_connection_accelerate(struct ecm_front_end_c
 #else
 			rule_invalid = true;
 			DEBUG_TRACE("%p: IPSEC - unsupported\n", nnpci);
+#endif
+			break;
+		case ECM_DB_IFACE_TYPE_PPTP:
+#ifdef ECM_INTERFACE_PPTP_ENABLE
+			/*
+			 * pptp packets from lan to wan gets routed twice.
+			 *	1. eth1-->br-lan to pptp
+			 *	2. pptp ---> eth0.
+			 * we need to push nss rule for both. Requirement
+			 * mandidates multiple session per tunnel and all tunnel
+			 * packets has same 5 tuple info. So need to create a
+			 * special static pptp interface with nss to identify
+			 * packets from wan side. So pptp--->eth0 rule to be
+			 * pushed with this static interface.
+			 */
+			ecm_db_connection_from_address_get(feci->ci, addr);
+			dev = ecm_interface_dev_find_by_local_addr(addr);
+			if (likely(dev)) {
+				dev_put(dev);
+				from_nss_iface_id =  NSS_PPTP_INTERFACE;
+				nircm->conn_rule.flow_interface_num = from_nss_iface_id;
+			}
+#else
+			rule_invalid = true;
+			DEBUG_TRACE("%p: PPTP - unsupported\n", nnpci);
 #endif
 			break;
 		default:
@@ -875,6 +908,20 @@ static void ecm_nss_non_ported_ipv4_connection_accelerate(struct ecm_front_end_c
 	 * The flow_ip is where the connection established from
 	 */
 	ecm_db_connection_from_address_get(feci->ci, addr);
+
+	/*
+	 * Get MTU information
+	 */
+	nircm->conn_rule.flow_mtu = (uint32_t)ecm_db_connection_from_iface_mtu_get(feci->ci);
+#ifdef ECM_INTERFACE_PPTP_ENABLE
+	if (unlikely(from_nss_iface_id ==  NSS_PPTP_INTERFACE)) {
+		dev = ecm_interface_dev_find_by_local_addr(addr);
+		if (likely(dev)) {
+			nircm->conn_rule.flow_mtu = dev->mtu;
+			dev_put(dev);
+		}
+	}
+#endif
 	ECM_IP_ADDR_TO_HIN4_ADDR(nircm->tuple.flow_ip, addr);
 
 	/*
@@ -951,7 +998,6 @@ static void ecm_nss_non_ported_ipv4_connection_accelerate(struct ecm_front_end_c
 	/*
 	 * Get MTU information
 	 */
-	nircm->conn_rule.flow_mtu = (uint32_t)ecm_db_connection_from_iface_mtu_get(feci->ci);
 	nircm->conn_rule.return_mtu = (uint32_t)ecm_db_connection_to_iface_mtu_get(feci->ci);
 
 	/*
@@ -1048,6 +1094,7 @@ static void ecm_nss_non_ported_ipv4_connection_accelerate(struct ecm_front_end_c
 	if (regen_occurrances != ecm_db_connection_regeneration_occurrances_get(feci->ci)) {
 		DEBUG_INFO("%p: connection:%p regen occurred - aborting accel rule.\n", feci, feci->ci);
 		ecm_nss_ipv4_accel_pending_clear(feci, ECM_FRONT_END_ACCELERATION_MODE_DECEL);
+		kfree(nim);
 		return;
 	}
 
@@ -1069,7 +1116,7 @@ static void ecm_nss_non_ported_ipv4_connection_accelerate(struct ecm_front_end_c
 	/*
 	 * Call the rule create function
 	 */
-	nss_tx_status = nss_ipv4_tx(ecm_nss_ipv4_nss_ipv4_mgr, &nim);
+	nss_tx_status = nss_ipv4_tx(ecm_nss_ipv4_nss_ipv4_mgr, nim);
 	if (nss_tx_status == NSS_TX_SUCCESS) {
 		/*
 		 * Reset the driver_fail count - transmission was okay here.
@@ -1077,8 +1124,11 @@ static void ecm_nss_non_ported_ipv4_connection_accelerate(struct ecm_front_end_c
 		spin_lock_bh(&feci->lock);
 		feci->stats.driver_fail = 0;
 		spin_unlock_bh(&feci->lock);
+		kfree(nim);
 		return;
 	}
+
+	kfree(nim);
 
 	/*
 	 * Release that ref!
@@ -1109,6 +1159,7 @@ static void ecm_nss_non_ported_ipv4_connection_accelerate(struct ecm_front_end_c
 non_ported_accel_bad_rule:
 	;
 
+	kfree(nim);
 	/*
 	 * Jump to here when rule data is bad and an offload command cannot be constructed
 	 */
@@ -1739,7 +1790,7 @@ unsigned int ecm_nss_non_ported_ipv4_process(struct net_device *out_dev, struct 
 	 * Look up a connection.
 	 */
 	protocol = (int)orig_tuple->dst.protonum;
-	if ((protocol == IPPROTO_IPV6) || (protocol == IPPROTO_ESP)) {
+	if ((protocol == IPPROTO_IPV6) || (protocol == IPPROTO_ESP || (protocol == IPPROTO_GRE))) {
 		src_port = 0;
 		src_port_nat = 0;
 		dest_port = 0;

@@ -188,7 +188,7 @@ struct ecm_db_node_instance *ecm_nss_ipv4_node_establish_and_ref(struct ecm_fron
 	int i;
 	bool done;
 	uint8_t node_addr[ETH_ALEN];
-#ifdef ECM_INTERFACE_L2TPV2_ENABLE
+#if defined(ECM_INTERFACE_L2TPV2_ENABLE) || defined(ECM_INTERFACE_PPTP_ENABLE)
 	ip_addr_t local_ip, remote_ip;
 #endif
 
@@ -221,6 +221,9 @@ struct ecm_db_node_instance *ecm_nss_ipv4_node_establish_and_ref(struct ecm_fron
 #endif
 #ifdef ECM_INTERFACE_L2TPV2_ENABLE
 		struct ecm_db_interface_info_pppol2tpv2 pppol2tpv2_info;
+#endif
+#ifdef ECM_INTERFACE_PPTP_ENABLE
+		struct ecm_db_interface_info_pptp pptp_info;
 #endif
 		type = ecm_db_connection_iface_type_get(interface_list[i]);
 		DEBUG_INFO("Lookup node address, interface @ %d is type: %d\n", i, type);
@@ -271,6 +274,30 @@ struct ecm_db_node_instance *ecm_nss_ipv4_node_establish_and_ref(struct ecm_fron
 			return NULL;
 #endif
 
+		case ECM_DB_IFACE_TYPE_PPTP:
+#ifdef ECM_INTERFACE_PPTP_ENABLE
+			ecm_db_iface_pptp_session_info_get(interface_list[i], &pptp_info);
+			ECM_HIN4_ADDR_TO_IP_ADDR(local_ip, pptp_info.src_ip);
+			ECM_HIN4_ADDR_TO_IP_ADDR(remote_ip, pptp_info.dst_ip);
+			if (ECM_IP_ADDR_MATCH(local_ip, addr)) {
+				if (unlikely(!ecm_interface_mac_addr_get(local_ip, node_addr, &on_link, gw_addr))) {
+					DEBUG_TRACE("failed to obtain node address for " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(local_ip));
+					return NULL;
+				}
+
+			} else {
+				if (unlikely(!ecm_interface_mac_addr_get(remote_ip, node_addr, &on_link, gw_addr))) {
+					DEBUG_TRACE("failed to obtain node address for host " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(remote_ip));
+					return NULL;
+				}
+			}
+
+			done = true;
+			break;
+#else
+			DEBUG_TRACE("PPTP interface unsupported\n");
+			return NULL;
+#endif
 		case ECM_DB_IFACE_TYPE_VLAN:
 #ifdef ECM_INTERFACE_VLAN_ENABLE
 			/*
@@ -1349,18 +1376,27 @@ static unsigned int ecm_nss_ipv4_post_routing_hook(const struct nf_hook_ops *ops
 #endif
 
 #ifdef ECM_INTERFACE_PPP_ENABLE
-#ifdef ECM_INTERFACE_L2TPV2_ENABLE
+#ifndef ECM_INTERFACE_PPTP_ENABLE
 	/*
-	 * skip l2tpv3/pptp because we don't accelerate them
+	 * skip pptp because we don't accelerate them
 	 */
-	if (ecm_interface_skip_l2tpv3_pptp(skb, out)) {
+	if (ecm_interface_skip_pptp(skb, out)) {
+		return NF_ACCEPT;
+	}
+#endif
+#ifndef ECM_INTERFACE_L2TPV2_ENABLE
+	/*
+	 * skip l2tp v2 and v3, because we don't accelerate them
+	 */
+	if (ecm_interface_skip_l2tp_packet_by_version(skb, out, 2) ||
+		ecm_interface_l2tp_version_check(skb, out, 3)) {
 		return NF_ACCEPT;
 	}
 #else
 	/*
-	 * skip l2tp/pptp because we don't accelerate them
+	 * skip l2tpv3 because we don't accelerate them
 	 */
-	if (ecm_interface_skip_l2tp_pptp(skb, out)) {
+	if (ecm_interface_skip_l2tp_packet_by_version(skb, out, 3)) {
 		return NF_ACCEPT;
 	}
 #endif

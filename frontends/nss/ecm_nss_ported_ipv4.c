@@ -330,10 +330,10 @@ static void ecm_nss_ported_ipv4_connection_accelerate(struct ecm_front_end_conne
 	uint8_t from_nss_iface_address[ETH_ALEN];
 	uint8_t to_nss_iface_address[ETH_ALEN];
 	ip_addr_t addr;
-#ifdef ECM_INTERFACE_L2TPV2_ENABLE
+#if defined(ECM_INTERFACE_L2TPV2_ENABLE) || defined(ECM_INTERFACE_PPTP_ENABLE)
 	struct net_device *dev;
 #endif
-	struct nss_ipv4_msg nim;
+	struct nss_ipv4_msg *nim;
 	struct nss_ipv4_rule_create_msg *nircm;
 	struct ecm_classifier_instance *assignments[ECM_CLASSIFIER_TYPES];
 	int aci_index;
@@ -363,19 +363,24 @@ static void ecm_nss_ported_ipv4_connection_accelerate(struct ecm_front_end_conne
 		return;
 	}
 
+	nim = (struct nss_ipv4_msg *)kzalloc(sizeof(struct nss_ipv4_msg), GFP_ATOMIC | __GFP_NOWARN);
+	if (!nim) {
+		DEBUG_WARN("%p: no memory for nss ipv4 message structure instance: %p\n", feci, feci->ci);
+		return;
+	}
+
 	/*
 	 * Okay construct an accel command.
 	 * Initialise creation structure.
 	 * NOTE: We leverage the app_data void pointer to be our 32 bit connection serial number.
 	 * When we get it back we re-cast it to a uint32 and do a faster connection lookup.
 	 */
-	memset(&nim, 0, sizeof(struct nss_ipv4_msg));
-	nss_ipv4_msg_init(&nim, NSS_IPV4_RX_INTERFACE, NSS_IPV4_TX_CREATE_RULE_MSG,
+	nss_ipv4_msg_init(nim, NSS_IPV4_RX_INTERFACE, NSS_IPV4_TX_CREATE_RULE_MSG,
 			sizeof(struct nss_ipv4_rule_create_msg),
 			ecm_nss_ported_ipv4_connection_callback,
 			(void *)ecm_db_connection_serial_get(feci->ci));
 
-	nircm = &nim.msg.rule_create;
+	nircm = &nim->msg.rule_create;
 	nircm->valid_flags = 0;
 	nircm->rule_flags = 0;
 
@@ -793,6 +798,31 @@ static void ecm_nss_ported_ipv4_connection_accelerate(struct ecm_front_end_conne
 			DEBUG_TRACE("%p: IPSEC - unsupported\n", npci);
 #endif
 			break;
+		case ECM_DB_IFACE_TYPE_PPTP:
+#ifdef ECM_INTERFACE_PPTP_ENABLE
+			/*
+			 * pptp packets from lan to wan gets routed twice.
+			 *	1. eth1-->br-lan to pptp
+			 *	2. pptp ---> eth0.
+			 * we need to push nss rule for both. Requirement
+			 * mandidates multiple session per tunnel and all tunnel
+			 * packets has same 5 tuple info. So need to create a
+			 * special static pptp interface with nss to identify
+			 * packets from wan side. So pptp--->eth0 rule to be
+			 * pushed with this static interface.
+			 */
+			ecm_db_connection_to_address_get(feci->ci, addr);
+			dev = ecm_interface_dev_find_by_local_addr(addr);
+			if (likely(dev)) {
+				dev_put(dev);
+				from_nss_iface_id =  NSS_PPTP_INTERFACE;
+				nircm->conn_rule.flow_interface_num = from_nss_iface_id;
+			}
+#else
+			rule_invalid = true;
+			DEBUG_TRACE("%p: PPTP - unsupported\n", npci);
+#endif
+			break;
 		default:
 			DEBUG_TRACE("%p: Ignoring: %d (%s)\n", npci, ii_type, ii_name);
 		}
@@ -1110,6 +1140,7 @@ static void ecm_nss_ported_ipv4_connection_accelerate(struct ecm_front_end_conne
 	if (regen_occurrances != ecm_db_connection_regeneration_occurrances_get(feci->ci)) {
 		DEBUG_INFO("%p: connection:%p regen occurred - aborting accel rule.\n", feci, feci->ci);
 		ecm_nss_ipv4_accel_pending_clear(feci, ECM_FRONT_END_ACCELERATION_MODE_DECEL);
+		kfree(nim);
 		return;
 	}
 
@@ -1131,7 +1162,7 @@ static void ecm_nss_ported_ipv4_connection_accelerate(struct ecm_front_end_conne
 	/*
 	 * Call the rule create function
 	 */
-	nss_tx_status = nss_ipv4_tx(ecm_nss_ipv4_nss_ipv4_mgr, &nim);
+	nss_tx_status = nss_ipv4_tx(ecm_nss_ipv4_nss_ipv4_mgr, nim);
 	if (nss_tx_status == NSS_TX_SUCCESS) {
 		/*
 		 * Reset the driver_fail count - transmission was okay here.
@@ -1139,8 +1170,11 @@ static void ecm_nss_ported_ipv4_connection_accelerate(struct ecm_front_end_conne
 		spin_lock_bh(&feci->lock);
 		feci->stats.driver_fail = 0;
 		spin_unlock_bh(&feci->lock);
+		kfree(nim);
 		return;
 	}
+
+	kfree(nim);
 
 	/*
 	 * Release that ref!
@@ -1170,6 +1204,8 @@ static void ecm_nss_ported_ipv4_connection_accelerate(struct ecm_front_end_conne
 
 ported_accel_bad_rule:
 	;
+
+	kfree(nim);
 
 	/*
 	 * Jump to here when rule data is bad and an offload command cannot be constructed
@@ -1305,7 +1341,6 @@ static void ecm_nss_ported_ipv4_connection_decelerate(struct ecm_front_end_conne
 	nss_tx_status_t nss_tx_status;
 
 	DEBUG_CHECK_MAGIC(npci, ECM_NSS_PORTED_IPV4_CONNECTION_INSTANCE_MAGIC, "%p: magic failed", npci);
-
 	/*
 	 * If decelerate is in error or already pending then ignore
 	 */

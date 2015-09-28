@@ -242,6 +242,7 @@ enum ecm_db_iface_types {
 	ECM_DB_IFACE_TYPE_SIT,				/* IPv6 in IPv4 tunnel (SIT) interface */
 	ECM_DB_IFACE_TYPE_TUNIPIP6,			/* IPIP6 Tunnel (TUNNEL6) interface */
 	ECM_DB_IFACE_TYPE_PPPOL2TPV2,			/* Interface is a PPPoL2TPV2 interface (a specific form of PPP that we recognise in the ECM) */
+	ECM_DB_IFACE_TYPE_PPTP,				/* Interface is a PPTP interface */
 	ECM_DB_IFACE_TYPE_COUNT,			/* Number of interface types */
 };
 typedef enum ecm_db_iface_types ecm_db_iface_type_t;
@@ -299,6 +300,15 @@ struct ecm_db_interface_info_pppol2tpv2 {                  /* type == ECM_DB_IFA
 	} ip;
 };
 
+#endif
+
+#ifdef ECM_INTERFACE_PPTP_ENABLE
+struct ecm_db_interface_info_pptp {
+	uint32_t src_ip;
+	uint32_t dst_ip;
+	uint16_t src_call_id;
+	uint16_t dst_call_id;
+};
 #endif
 
 struct ecm_db_interface_info_unknown {			/* type == ECM_DB_IFACE_TYPE_UNKNOWN */

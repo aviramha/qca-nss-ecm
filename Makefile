@@ -80,13 +80,24 @@ ECM_INTERFACE_L2TPV2_ENABLE=y
 ccflags-$(ECM_INTERFACE_L2TPV2_ENABLE) += -DECM_INTERFACE_L2TPV2_ENABLE
 
 # #############################################################################
-# if pppoe, l2tpv2 acceleration is enabled, ppp should
+# Define ECM_INTERFACE_PPTP_ENABLE=y in order
+# to enable support for pptp acceleration.
+# #############################################################################
+ifneq ($(findstring 3.4, $(KERNELVERSION)),)
+ECM_INTERFACE_PPTP_ENABLE=y
+endif
+ccflags-$(ECM_INTERFACE_PPTP_ENABLE) += -DECM_INTERFACE_PPTP_ENABLE
+
+# #############################################################################
+# if pppoe, l2tpv2, pptp acceleration is enabled, ppp should
 # be enabled automatically
 # #############################################################################
 ECM_INTERFACE_PPP_ENABLE=y
 ifeq "$(ECM_INTERFACE_PPPOE_ENABLE)" "n"
 ifeq "$(ECM_INTERFACE_L2TPV2_ENABLE)" "n"
+ifeq "$(ECM_INTERFACE_PPTP_ENABLE)" "n"
 ECM_INTERFACE_PPP_ENABLE=n
+endif
 endif
 endif
 ccflags-$(ECM_INTERFACE_PPP_ENABLE) += -DECM_INTERFACE_PPP_ENABLE

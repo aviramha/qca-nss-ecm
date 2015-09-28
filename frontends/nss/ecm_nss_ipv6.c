@@ -1065,9 +1065,17 @@ static unsigned int ecm_nss_ipv6_post_routing_hook(const struct nf_hook_ops *ops
 #ifdef ECM_INTERFACE_PPP_ENABLE
 #ifdef ECM_INTERFACE_L2TPV2_ENABLE
 	/*
-	 * skip l2tpv3/pptp because we don't accelerate them
+	 * skip l2tpv3 because we don't accelerate them
 	 */
-	if (ecm_interface_skip_l2tpv3_pptp(skb, out)) {
+	if (ecm_interface_skip_l2tp_packet_by_version(skb, out, 3)) {
+		return NF_ACCEPT;
+	}
+
+	/*
+	 * Skip PPTP beacuse we don't support acceleration for
+	 * IPv6 inner header over PPTP
+	 */
+	if (ecm_interface_skip_pptp(skb, out)) {
 		return NF_ACCEPT;
 	}
 #else

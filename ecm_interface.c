@@ -74,6 +74,9 @@
 #ifdef ECM_INTERFACE_L2TPV2_ENABLE
 #include <linux/if_pppol2tp.h>
 #endif
+#ifdef ECM_INTERFACE_PPTP_ENABLE
+#include <linux/netfilter/nf_conntrack_proto_gre.h>
+#endif
 #endif
 
 /*
@@ -785,15 +788,14 @@ struct neighbour *ecm_interface_ipv6_neigh_get(ip_addr_t addr)
 #endif
 
 #ifdef ECM_INTERFACE_PPP_ENABLE
-#ifdef ECM_INTERFACE_L2TPV2_ENABLE
 /*
- * ecm_interface_skip_l2tpv3_pptp()
+ * ecm_interface_skip_pptp()
  *	skip pptp tunnel encapsulated traffic
  *
- * ECM does not handle  PPTP and l2tpv3,
+ * ECM does not handle PPTP,
  * this function detects packets of that type so they can be skipped over to improve their throughput.
  */
-bool ecm_interface_skip_l2tpv3_pptp(struct sk_buff *skb, const struct net_device *out)
+bool ecm_interface_skip_pptp(struct sk_buff *skb, const struct net_device *out)
 {
 	struct ppp_channel *ppp_chan[1];
 	int px_proto;
@@ -814,25 +816,6 @@ bool ecm_interface_skip_l2tpv3_pptp(struct sk_buff *skb, const struct net_device
 			return true;
 		}
 
-		/*
-		 * Check for L2TPv3 packets
-		 */
-		if (px_proto == PX_PROTO_OL2TP) {
-			struct pppol2tp_common_addr info;
-			if (pppol2tp_channel_addressing_get(ppp_chan[0], &info)) {
-				ppp_release_channels(ppp_chan, 1);
-				return true;
-			}
-
-			if (info.tunnel_version == 2) {
-				ppp_release_channels(ppp_chan, 1);
-				return false;
-			}
-			if (info.tunnel_version == 3) {
-				ppp_release_channels(ppp_chan, 1);
-				return true;
-			}
-		}
 		ppp_release_channels(ppp_chan, 1);
 	}
 
@@ -858,6 +841,64 @@ bool ecm_interface_skip_l2tpv3_pptp(struct sk_buff *skb, const struct net_device
 			return true;
 		}
 
+		ppp_release_channels(ppp_chan, 1);
+	}
+
+	dev_put(in);
+	return false;
+}
+
+/*
+ * ecm_interface_skip_l2tp_packet_by_version()
+ *	Check version of l2tp tunnel encapsulated traffic
+ *
+ * ECM does not handle l2tp,
+ * this function detects packets of that type so they can be skipped over to improve their throughput.
+ */
+bool ecm_interface_skip_l2tp_packet_by_version(struct sk_buff *skb, const struct net_device *out, int ver)
+{
+	struct ppp_channel *ppp_chan[1];
+	int px_proto;
+	struct net_device *in;
+
+	if (out->type == ARPHRD_PPP) {
+		if (ppp_hold_channels((struct net_device *)out, ppp_chan, 1) != 1) {
+			return true;
+		}
+
+		px_proto = ppp_channel_get_protocol(ppp_chan[0]);
+
+		/*
+		 * Check for L2TPv3 packets
+		 */
+		if (px_proto == PX_PROTO_OL2TP) {
+			struct pppol2tp_common_addr info;
+			if (pppol2tp_channel_addressing_get(ppp_chan[0], &info)) {
+				ppp_release_channels(ppp_chan, 1);
+				return true;
+			}
+
+			if (info.tunnel_version == ver) {
+				ppp_release_channels(ppp_chan, 1);
+				return true;
+			}
+		}
+		ppp_release_channels(ppp_chan, 1);
+	}
+
+	in = dev_get_by_index(&init_net, skb->skb_iif);
+	if (!in) {
+		return true;
+	}
+
+	if (in->type == ARPHRD_PPP) {
+		if (__ppp_hold_channels((struct net_device *)in, ppp_chan, 1) != 1) {
+			dev_put(in);
+			return true;
+		}
+
+		px_proto = ppp_channel_get_protocol(ppp_chan[0]);
+
 		/*
 		 * Check for L2TPv3 pkts
 		 */
@@ -868,12 +909,8 @@ bool ecm_interface_skip_l2tpv3_pptp(struct sk_buff *skb, const struct net_device
 				dev_put(in);
 				return true;
 			}
-			if (info.tunnel_version == 2) {
-				ppp_release_channels(ppp_chan, 1);
-				dev_put(in);
-				return false;
-			}
-			if (info.tunnel_version == 3) {
+
+			if (info.tunnel_version == ver) {
 				ppp_release_channels(ppp_chan, 1);
 				dev_put(in);
 				return true;
@@ -885,7 +922,6 @@ bool ecm_interface_skip_l2tpv3_pptp(struct sk_buff *skb, const struct net_device
 	dev_put(in);
 	return false;
 }
-#endif
 
 /*
  * ecm_interface_skip_l2tp_pptp()
@@ -1240,6 +1276,59 @@ static struct ecm_db_iface_instance *ecm_interface_pppol2tpv2_interface_establis
 
 #endif
 
+#ifdef ECM_INTERFACE_PPTP_ENABLE
+/*
+ * ecm_interface_pptp_interface_establish()
+ *	Returns a reference to a iface of the PPTP type, possibly creating one if necessary.
+ *	Returns NULL on failure or a reference to interface.
+ */
+static struct ecm_db_iface_instance *ecm_interface_pptp_interface_establish(struct ecm_db_interface_info_pptp *type_info,
+							char *dev_name, int32_t dev_interface_num, int32_t ae_interface_num, int32_t mtu)
+{
+	struct ecm_db_iface_instance *nii;
+	struct ecm_db_iface_instance *ii;
+
+	DEBUG_INFO("Establish PPTP iface: %s with local call id %u peer call id %u\n", dev_name, type_info->src_call_id,
+				type_info->dst_call_id);
+	/*
+	 * Locate the iface
+	 */
+	ii = ecm_db_iface_find_and_ref_pptp(type_info->src_call_id, type_info->dst_call_id);
+	if (ii) {
+		DEBUG_TRACE("%p: iface established\n", ii);
+		ecm_db_iface_update_ae_interface_identifier(ii, ae_interface_num);
+		return ii;
+	}
+
+	/*
+	 * No iface - create one
+	 */
+	nii = ecm_db_iface_alloc();
+	if (!nii) {
+		DEBUG_WARN("Failed to establish iface\n");
+		return NULL;
+	}
+
+	/*
+	 * Add iface into the database, atomically to avoid races creating the same thing
+	 */
+	spin_lock_bh(&ecm_interface_lock);
+	ii = ecm_db_iface_find_and_ref_pptp(type_info->src_call_id, type_info->dst_call_id);
+	if (ii) {
+		spin_unlock_bh(&ecm_interface_lock);
+		ecm_db_iface_deref(nii);
+		ecm_db_iface_update_ae_interface_identifier(ii, ae_interface_num);
+		return ii;
+	}
+
+	ecm_db_iface_add_pptp(nii, type_info, dev_name, mtu, dev_interface_num, ae_interface_num, NULL, nii);
+	spin_unlock_bh(&ecm_interface_lock);
+
+	DEBUG_TRACE("%p: pptp iface established\n", nii);
+	return nii;
+}
+#endif
+
 /*
  * ecm_interface_unknown_interface_establish()
  *	Returns a reference to a iface of the UNKNOWN type, possibly creating one if necessary.
@@ -1530,6 +1619,9 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct ecm_front_e
 #ifdef ECM_INTERFACE_L2TPV2_ENABLE
 		struct ecm_db_interface_info_pppol2tpv2 pppol2tpv2;		/* type == ECM_DB_IFACE_TYPE_PPPOL2TPV2 */
 #endif
+#ifdef ECM_INTERFACE_PPTP_ENABLE
+		struct ecm_db_interface_info_pptp pptp;			/* type == ECM_DB_IFACE_TYPE_PPTP */
+#endif
 		struct ecm_db_interface_info_unknown unknown;		/* type == ECM_DB_IFACE_TYPE_UNKNOWN */
 		struct ecm_db_interface_info_loopback loopback;		/* type == ECM_DB_IFACE_TYPE_LOOPBACK */
 #ifdef ECM_INTERFACE_IPSEC_ENABLE
@@ -1552,8 +1644,16 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct ecm_front_e
 #ifdef ECM_INTERFACE_PPPOE_ENABLE
 	struct pppoe_opt addressing;
 #endif
+#ifdef ECM_INTERFACE_PPTP_ENABLE
+	int protocol = IPPROTO_IP;
+	struct pptp_opt opt;
+	struct iphdr *v4_hdr = NULL;
+	if (skb) {
+		v4_hdr = ip_hdr(skb);
+		protocol = v4_hdr->protocol;
+	}
 #endif
-
+#endif
 	/*
 	 * Get basic information about the given device
 	 */
@@ -1852,6 +1952,53 @@ identifier_update:
 	}
 #endif
 
+#ifdef ECM_INTERFACE_PPTP_ENABLE
+	if ((protocol == IPPROTO_GRE) && skb && v4_hdr) {
+		struct gre_hdr_pptp *gre_hdr;
+		uint16_t proto;
+		int ret;
+
+		skb_pull(skb, sizeof(struct iphdr));
+		gre_hdr = (struct gre_hdr_pptp *)(skb->data);
+		proto = ntohs(gre_hdr->protocol);
+		if ((gre_hdr->version == GRE_VERSION_PPTP) && (proto == GRE_PROTOCOL_PPTP)) {
+			ret = pptp_session_find(&opt, gre_hdr->call_id, v4_hdr->daddr);
+			if (ret < 0) {
+				skb_push(skb, sizeof(struct iphdr));
+				DEBUG_WARN("PPTP session info not found\n");
+				return NULL;
+			}
+
+			/*
+			 * Get PPTP session info
+			 */
+			type_info.pptp.src_call_id = ntohs(opt.src_addr.call_id);
+			type_info.pptp.dst_call_id = ntohs(opt.dst_addr.call_id);
+			type_info.pptp.src_ip = ntohl(opt.src_addr.sin_addr.s_addr);
+			type_info.pptp.dst_ip = ntohl(opt.dst_addr.sin_addr.s_addr);
+
+			skb_push(skb, sizeof(struct iphdr));
+
+			/*
+			 * Establish this type of interface
+			 */
+			ii = ecm_interface_pptp_interface_establish(&type_info.pptp, dev_name, dev_interface_num, ae_interface_num, dev_mtu);
+			return ii;
+		}
+
+		skb_push(skb, sizeof(struct iphdr));
+
+		DEBUG_TRACE("Unknown GRE protocol \n");
+		type_info.unknown.os_specific_ident = dev_interface_num;
+
+		/*
+		 * Establish this type of interface
+		 */
+		ii = ecm_interface_unknown_interface_establish(&type_info.unknown, dev_name, dev_interface_num, ae_interface_num, dev_mtu);
+		return ii;
+	}
+#endif
+
 	/*
 	 * PPP - but what is the channel type?
 	 * First: If this is multi-link then we do not support it
@@ -1955,6 +2102,29 @@ identifier_update:
 		return ii;
 	}
 #endif
+
+#ifdef ECM_INTERFACE_PPTP_ENABLE
+	if (channel_protocol == PX_PROTO_PPTP) {
+		pptp_channel_addressing_get(&opt, ppp_chan[0]);
+
+		/*
+		 * Get PPTP session info
+		 */
+		type_info.pptp.src_call_id = ntohs(opt.src_addr.call_id);
+		type_info.pptp.dst_call_id = ntohs(opt.dst_addr.call_id);
+		type_info.pptp.src_ip = ntohl(opt.src_addr.sin_addr.s_addr);
+		type_info.pptp.dst_ip = ntohl(opt.dst_addr.sin_addr.s_addr);
+
+		DEBUG_TRACE("Net device: %p PPTP source call id: %d,n", dev, type_info.pptp.src_call_id);
+		ppp_release_channels(ppp_chan, 1);
+
+		/*
+		 * Establish this type of interface
+		 */
+		ii = ecm_interface_pptp_interface_establish(&type_info.pptp, dev_name, dev_interface_num, ae_interface_num, dev_mtu);
+		return ii;
+	}
+#endif
 	DEBUG_TRACE("Net device: %p PPP channel protocol: %d - Unknown to the ECM\n", dev, channel_protocol);
 	type_info.unknown.os_specific_ident = dev_interface_num;
 
@@ -1968,7 +2138,6 @@ identifier_update:
 	 */
 	ii = ecm_interface_unknown_interface_establish(&type_info.unknown, dev_name, dev_interface_num, ae_interface_num, dev_mtu);
 	return ii;
-
 #endif
 }
 EXPORT_SYMBOL(ecm_interface_establish_and_ref);
@@ -2817,6 +2986,20 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 	}
 #endif
 
+#ifdef ECM_INTERFACE_PPTP_ENABLE
+	/*
+	 * if the address is a local address and indev=PPTP.
+	 */
+	if (protocol == IPPROTO_GRE && given_dest_dev && given_dest_dev->type == ARPHRD_PPP) {
+		dev_put(dest_dev);
+		dest_dev = given_dest_dev;
+		if (dest_dev) {
+			dev_hold(dest_dev);
+			DEBUG_TRACE("PPTP packet tunnel packet with dest_addr: " ECM_IP_ADDR_OCTAL_FMT " uses dev: %p(%s)\n", ECM_IP_ADDR_TO_OCTAL(dest_addr), dest_dev, dest_dev->name);
+		}
+	}
+#endif
+
 	if (!dest_dev) {
 		DEBUG_WARN("dest_addr: " ECM_IP_ADDR_OCTAL_FMT " - cannot locate device\n", ECM_IP_ADDR_TO_OCTAL(dest_addr));
 		return ECM_DB_IFACE_HEIRARCHY_MAX;
@@ -2936,7 +3119,6 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 	while (current_interface_index > 0) {
 		struct ecm_db_iface_instance *ii;
 		struct net_device *next_dev;
-
 		/*
 		 * Get the ecm db interface instance for the device at hand
 		 */
@@ -3258,6 +3440,13 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 					DEBUG_TRACE("Net device: %p PPP channel is PPPoL2TPV2\n", dest_dev);
 					break;
 				}
+			}
+#endif
+
+#ifdef ECM_INTERFACE_PPTP_ENABLE
+			if (protocol == IPPROTO_GRE && dest_dev && dest_dev->type == ARPHRD_PPP) {
+				DEBUG_TRACE("Net device: %p PPP channel is PPTP\n", dest_dev);
+				break;
 			}
 #endif
 			/*
