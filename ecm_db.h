@@ -149,6 +149,7 @@ struct ecm_db_iface_instance *ecm_db_iface_find_and_ref_unknown(uint32_t os_spec
 #ifdef ECM_INTERFACE_PPPOE_ENABLE
 struct ecm_db_iface_instance *ecm_db_iface_find_and_ref_pppoe(uint16_t pppoe_session_id, uint8_t *remote_mac);
 #endif
+void ecm_db_iface_update_ae_interface_identifier(struct ecm_db_iface_instance *ii, int32_t ae_interface_identifier);
 #ifdef ECM_INTERFACE_L2TPV2_ENABLE
 void ecm_db_iface_pppol2tpv2_session_info_get(struct ecm_db_iface_instance *ii, struct ecm_db_interface_info_pppol2tpv2 *pppol2tpv2_info);
 struct ecm_db_iface_instance *ecm_db_iface_find_and_ref_pppol2tpv2(uint32_t pppol2tpv2_tunnel_id, uint32_t pppol2tpv2_session_id);

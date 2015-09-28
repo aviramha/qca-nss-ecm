@@ -4470,8 +4470,25 @@ struct ecm_db_iface_instance *ecm_db_iface_find_and_ref_pppoe(uint16_t pppoe_ses
 EXPORT_SYMBOL(ecm_db_iface_find_and_ref_pppoe);
 #endif
 
-#ifdef ECM_INTERFACE_L2TPV2_ENABLE
+/*
+ * ecm_db_iface_update_ae_interface_identifier()
+ *	update ae_interface_identifier in iface instance.
+ */
+void ecm_db_iface_update_ae_interface_identifier(struct ecm_db_iface_instance *ii, int32_t ae_interface_identifier)
+{
+	DEBUG_CHECK_MAGIC(ii, ECM_DB_IFACE_INSTANCE_MAGIC, "%p: magic failed", ii);
 
+	spin_lock_bh(&ecm_db_lock);
+	if (ii->ae_interface_identifier == ae_interface_identifier) {
+		spin_unlock_bh(&ecm_db_lock);
+		return;
+	}
+	ii->ae_interface_identifier = ae_interface_identifier;
+	spin_unlock_bh(&ecm_db_lock);
+}
+EXPORT_SYMBOL(ecm_db_iface_update_ae_interface_identifier);
+
+#ifdef ECM_INTERFACE_L2TPV2_ENABLE
 /*
  * ecm_db_iface_pppol2tpv2_session_info_get
  *	get l2tpv2 specific info

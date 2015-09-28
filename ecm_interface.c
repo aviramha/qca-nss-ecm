@@ -1254,6 +1254,7 @@ static struct ecm_db_iface_instance *ecm_interface_pppol2tpv2_interface_establis
 	ii = ecm_db_iface_find_and_ref_pppol2tpv2(type_info->l2tp.tunnel.tunnel_id, type_info->l2tp.session.session_id);
 	if (ii) {
 		DEBUG_TRACE("%p: iface established\n", ii);
+		ecm_db_iface_update_ae_interface_identifier(ii, ae_interface_num);
 		return ii;
 	}
 
@@ -1274,6 +1275,7 @@ static struct ecm_db_iface_instance *ecm_interface_pppol2tpv2_interface_establis
 	if (ii) {
 		spin_unlock_bh(&ecm_interface_lock);
 		ecm_db_iface_deref(nii);
+		ecm_db_iface_update_ae_interface_identifier(ii, ae_interface_num);
 		return ii;
 	}
 
@@ -1842,78 +1844,79 @@ identifier_update:
 	 */
 	if (skb && skb->sk && (skb->sk->sk_protocol == IPPROTO_UDP)
 	    && (udp_sk(skb->sk)->encap_type == UDP_ENCAP_L2TPINUDP)) {
-		struct sock *sk = NULL;
-		struct inet_sock *inet = NULL;
-		struct l2tp_session *session = NULL;
-		struct l2tp_session *temp_session = NULL;
-		struct l2tp_tunnel *tunnel = NULL;
-		int hash;
-		struct hlist_node *walk = NULL;
+		if (skb->skb_iif == dev->ifindex) {
+			struct sock *sk = NULL;
+			struct inet_sock *inet = NULL;
+			struct l2tp_session *session = NULL;
+			struct l2tp_tunnel *tunnel = NULL;
+			int hash;
+			struct hlist_node *walk = NULL;
+			bool session_found = false;
 
-		/*
-		 * PPPoL2TPV2 channel
-		 */
-		DEBUG_TRACE("%p:  PPP channel is PPPoL2TPV2 (%s)\n", dev, dev->name);
+			/*
+			 * PPPoL2TPV2 channel
+			 */
+			DEBUG_TRACE("%p:  PPP channel is PPPoL2TPV2 (%s)\n", dev, dev->name);
 
-		/*
-		 * Get the L2TP tunnel socket this packet is associated with
-		 */
-		sk = skb->sk;
-		tunnel = l2tp_sock_to_tunnel(sk);
-		if (tunnel == NULL) {
-			return NULL;
-		}
+			/*
+			 * Get the L2TP tunnel socket this packet is associated with
+			 */
+			sk = skb->sk;
+			tunnel = l2tp_sock_to_tunnel(sk);
+			if (tunnel == NULL) {
+				return NULL;
+			}
 
-		/*
-		 * Check L2TPv2 tunnel version
-		 */
-		if (tunnel->version != 2) {
-			sock_put(sk);
-			return NULL;
-		}
+			/*
+			 * Check L2TPv2 tunnel version
+			 */
+			if (tunnel->version != 2) {
+				sock_put(sk);
+				return NULL;
+			}
 
-		/*
-		 * Find the L2TP session this packet is associated with
-		 */
-		read_lock_bh(&tunnel->hlist_lock);
-		for (hash = 0; hash < L2TP_HASH_SIZE; hash++) {
-			hlist_for_each_entry(temp_session, walk,
-					     &tunnel->session_hlist[hash], hlist) {
-				if (!strcmp(temp_session->ifname, dev_name)) {
-					session = temp_session;
-					break;
+			type_info.pppol2tpv2.l2tp.tunnel.tunnel_id = tunnel->tunnel_id;
+			type_info.pppol2tpv2.l2tp.tunnel.peer_tunnel_id = tunnel->peer_tunnel_id;
+
+			/*
+			 * Find the L2TP session this packet is associated with
+			 */
+			rcu_read_lock_bh();
+			for (hash = 0; hash < L2TP_HASH_SIZE; hash++) {
+				hlist_for_each_entry_rcu(session, walk,
+						     &tunnel->session_hlist[hash], hlist) {
+					if (!strcmp(session->ifname, dev_name)) {
+						type_info.pppol2tpv2.l2tp.session.session_id = session->session_id;
+						type_info.pppol2tpv2.l2tp.session.peer_session_id = session->peer_session_id;
+						session_found = true;
+						break;
+					}
 				}
 			}
-		}
-		read_unlock_bh(&tunnel->hlist_lock);
+			rcu_read_unlock_bh();
 
-		if (session == NULL) {
+			if (!session_found) {
+				sock_put(sk);
+				return NULL;
+			}
+
+			inet = inet_sk(sk);
+
+			type_info.pppol2tpv2.udp.sport = ntohs(inet->inet_sport);
+			type_info.pppol2tpv2.udp.dport = ntohs(inet->inet_sport);
+			type_info.pppol2tpv2.ip.saddr = ntohl(inet->inet_saddr);
+			type_info.pppol2tpv2.ip.daddr = ntohl(inet->inet_daddr);
+
 			sock_put(sk);
-			return NULL;
+
+			DEBUG_TRACE("%p: found PPPo2L2TP session\n", dev);
+
+			/*
+			 * Establish this type of interface
+			 */
+			ii = ecm_interface_pppol2tpv2_interface_establish(&type_info.pppol2tpv2, dev_name, dev_interface_num, ae_interface_num, dev_mtu);
+			return ii;
 		}
-
-		inet = inet_sk(sk);
-		l2tp_session_inc_refcount(session);
-
-		type_info.pppol2tpv2.l2tp.tunnel.tunnel_id = tunnel->tunnel_id;
-		type_info.pppol2tpv2.l2tp.tunnel.peer_tunnel_id = tunnel->peer_tunnel_id;
-		type_info.pppol2tpv2.l2tp.session.session_id = session->session_id;
-		type_info.pppol2tpv2.l2tp.session.peer_session_id = session->peer_session_id;
-		type_info.pppol2tpv2.udp.sport = ntohs(inet->inet_sport);
-		type_info.pppol2tpv2.udp.dport = ntohs(inet->inet_sport);
-		type_info.pppol2tpv2.ip.saddr = ntohl(inet->inet_saddr);
-		type_info.pppol2tpv2.ip.daddr = ntohl(inet->inet_daddr);
-
-		l2tp_session_dec_refcount(session);
-		sock_put(sk);
-
-		DEBUG_TRACE("%p: found PPPo2L2TP session\n", dev);
-
-		/*
-		 * Establish this type of interface
-		 */
-		ii = ecm_interface_pppol2tpv2_interface_establish(&type_info.pppol2tpv2, dev_name, dev_interface_num, ae_interface_num, dev_mtu);
-		return ii;
 	}
 #endif
 
@@ -2968,6 +2971,22 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 		}
 	}
 
+#ifdef ECM_INTERFACE_L2TPV2_ENABLE
+	/*
+	 * if the address is a local address and indev=l2tp.
+	 */
+	if (skb && skb->sk && (skb->sk->sk_protocol == IPPROTO_UDP) && (udp_sk(skb->sk)->encap_type == UDP_ENCAP_L2TPINUDP)) {
+		if (dest_dev != given_src_dev) {
+			dev_put(src_dev);
+			src_dev = given_src_dev;
+			if (src_dev) {
+				dev_hold(src_dev);
+				DEBUG_TRACE("l2tp tunnel packet with src_addr: " ECM_IP_ADDR_OCTAL_FMT " uses dev: %p(%s)\n", ECM_IP_ADDR_TO_OCTAL(src_addr), src_dev, src_dev->name);
+			}
+		}
+	}
+#endif
+
 	if (!src_dev) {
 		DEBUG_WARN("src_addr: " ECM_IP_ADDR_OCTAL_FMT " - cannot locate device\n", ECM_IP_ADDR_TO_OCTAL(src_addr));
 		dev_put(dest_dev);
@@ -3329,8 +3348,10 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 
 #ifdef ECM_INTERFACE_L2TPV2_ENABLE
 			if (skb && skb->sk && (skb->sk->sk_protocol == IPPROTO_UDP) && (udp_sk(skb->sk)->encap_type == UDP_ENCAP_L2TPINUDP)) {
-				DEBUG_TRACE("Net device: %p PPP channel is PPPoL2TPV2\n", dest_dev);
-				break;
+				if (skb->skb_iif == dest_dev->ifindex) {
+					DEBUG_TRACE("Net device: %p PPP channel is PPPoL2TPV2\n", dest_dev);
+					break;
+				}
 			}
 #endif
 			/*
