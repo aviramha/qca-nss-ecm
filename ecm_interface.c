@@ -72,8 +72,7 @@
 #ifdef ECM_INTERFACE_PPP_ENABLE
 #include <linux/if_pppox.h>
 #ifdef ECM_INTERFACE_L2TPV2_ENABLE
-#include <linux/l2tp.h>
-#include <linux/../../net/l2tp/l2tp_core.h>
+#include <linux/if_pppol2tp.h>
 #endif
 #endif
 
@@ -771,15 +770,7 @@ bool ecm_interface_skip_l2tpv3_pptp(struct sk_buff *skb, const struct net_device
 	struct ppp_channel *ppp_chan[1];
 	int px_proto;
 	struct net_device *in;
-	bool ret = true;
-	struct sock *sk = NULL;
-	struct l2tp_session *session = NULL;
-	struct l2tp_tunnel *tunnel = NULL;
-	struct ppp_channel *pch = NULL;
 
-	/*
-	 * skip first pass of l2tpv3/pptp tunnel encapsulated traffic
-	 */
 	if (out->type == ARPHRD_PPP) {
 		if (ppp_hold_channels((struct net_device *)out, ppp_chan, 1) != 1) {
 			return true;
@@ -788,7 +779,7 @@ bool ecm_interface_skip_l2tpv3_pptp(struct sk_buff *skb, const struct net_device
 		px_proto = ppp_channel_get_protocol(ppp_chan[0]);
 
 		/*
-		 * Skip packets for PPPoPPTP channel
+		 * Skip PPTP packets
 		 */
 		if (px_proto == PX_PROTO_PPTP) {
 			ppp_release_channels(ppp_chan, 1);
@@ -796,141 +787,74 @@ bool ecm_interface_skip_l2tpv3_pptp(struct sk_buff *skb, const struct net_device
 		}
 
 		/*
-		 * Check for PPPoL2TP channel
+		 * Check for L2TPv3 packets
 		 */
 		if (px_proto == PX_PROTO_OL2TP) {
-			pch = ppp_chan[0];
-			sk = pch->private;
-			sock_hold(sk);
-
-			/*
-			 * Get L2TP session for this PPP channel
-			 */
-			session = (struct l2tp_session *)(sk->sk_user_data);
-			if ((session == NULL) || (session->magic != L2TP_SESSION_MAGIC)) {
-				sock_put(sk);
+			struct pppol2tp_common_addr info;
+			if (pppol2tp_channel_addressing_get(ppp_chan[0], &info)) {
 				ppp_release_channels(ppp_chan, 1);
 				return true;
 			}
 
-			tunnel = session->tunnel;
-
-			/*
-			 * Check L2TP tunnel version
-			 */
-			if (tunnel->version == 2) {
-				ret = false;
-			} else {
-				ret = true;
+			if (info.tunnel_version == 2) {
+				ppp_release_channels(ppp_chan, 1);
+				return false;
 			}
-
-			sock_put(sk);
-			ppp_release_channels(ppp_chan, 1);
-			return ret;
+			if (info.tunnel_version == 3) {
+				ppp_release_channels(ppp_chan, 1);
+				return true;
+			}
 		}
-
 		ppp_release_channels(ppp_chan, 1);
-		return false;
 	}
 
 	in = dev_get_by_index(&init_net, skb->skb_iif);
-	if (in && in->type == ARPHRD_PPP) {
-		/*
-		 * Skip L2TPv3 IP encapsulated packets
-		 */
-		if ((skb->sk) && (skb->sk->sk_protocol == IPPROTO_L2TP)) {
+	if (!in) {
+		return true;
+	}
+
+	if (in->type == ARPHRD_PPP) {
+		if (__ppp_hold_channels((struct net_device *)in, ppp_chan, 1) != 1) {
 			dev_put(in);
 			return true;
 		}
 
-		/*
-		 * Chack for L2TP UDP encapsulated packets
-		 */
-		if ((skb->sk) && (skb->sk->sk_protocol == IPPROTO_UDP)
-		    && (udp_sk(skb->sk)->encap_type == UDP_ENCAP_L2TPINUDP)) {
-			/*
-			 * Get the L2TP tunnel socket this packet is associated with
-			 */
-			sk = skb->sk;
-			tunnel = l2tp_sock_to_tunnel(sk);
-			if (tunnel == NULL) {
-				dev_put(in);
-				return false;
-			}
-
-			if (tunnel->version == 2) {
-				ret = false;
-			} else {
-				ret = true;
-			}
-
-			dev_put(in);
-			sock_put(sk);
-			return ret;
-		}
-
-		/*
-		 * Packet is not associated with a L2TP tunnel socket.
-		 * Check 'in' netdevice for type of PPPoX channel.
-		 */
-		if (ppp_hold_channels((struct net_device *)in, ppp_chan, 1) != 1) {
-			dev_put(in);
-			return true;
-		}
-
-		dev_put(in);
 		px_proto = ppp_channel_get_protocol(ppp_chan[0]);
 
 		/*
-		 * Skip packets for PPPoPPTP channel
+		 * Skip PPTP pkts
 		 */
 		if (px_proto == PX_PROTO_PPTP) {
 			ppp_release_channels(ppp_chan, 1);
+			dev_put(in);
 			return true;
 		}
 
 		/*
-		 * Check for PPPoL2TP channel
+		 * Check for L2TPv3 pkts
 		 */
 		if (px_proto == PX_PROTO_OL2TP) {
-			pch = ppp_chan[0];
-			sk = pch->private;
-			sock_hold(sk);
-
-			/*
-			 * Get L2TP session for this PPP channel
-			 */
-			session = (struct l2tp_session *)(sk->sk_user_data);
-			if ((session == NULL) || (session->magic != L2TP_SESSION_MAGIC)) {
-				sock_put(sk);
+			struct pppol2tp_common_addr info;
+			if (pppol2tp_channel_addressing_get(ppp_chan[0], &info)) {
 				ppp_release_channels(ppp_chan, 1);
+				dev_put(in);
 				return true;
 			}
-
-			tunnel = session->tunnel;
-
-			/*
-			 * Check L2TP tunnel version
-			 */
-			if (tunnel->version == 2) {
-				ret = false;
-			} else {
-				ret = true;
+			if (info.tunnel_version == 2) {
+				ppp_release_channels(ppp_chan, 1);
+				dev_put(in);
+				return false;
 			}
-
-			sock_put(sk);
-			ppp_release_channels(ppp_chan, 1);
-			return ret;
+			if (info.tunnel_version == 3) {
+				ppp_release_channels(ppp_chan, 1);
+				dev_put(in);
+				return true;
+			}
 		}
-
 		ppp_release_channels(ppp_chan, 1);
-		return false;
 	}
 
-	if (in) {
-		dev_put(in);
-	}
-
+	dev_put(in);
 	return false;
 }
 #endif
@@ -1845,71 +1769,51 @@ identifier_update:
 	if (skb && skb->sk && (skb->sk->sk_protocol == IPPROTO_UDP)
 	    && (udp_sk(skb->sk)->encap_type == UDP_ENCAP_L2TPINUDP)) {
 		if (skb->skb_iif == dev->ifindex) {
-			struct sock *sk = NULL;
-			struct inet_sock *inet = NULL;
-			struct l2tp_session *session = NULL;
-			struct l2tp_tunnel *tunnel = NULL;
-			int hash;
-			struct hlist_node *walk = NULL;
-			bool session_found = false;
+			struct pppol2tp_common_addr info;
 
-			/*
-			 * PPPoL2TPV2 channel
-			 */
-			DEBUG_TRACE("%p:  PPP channel is PPPoL2TPV2 (%s)\n", dev, dev->name);
+			if (__ppp_is_multilink(dev) > 0) {
+				DEBUG_TRACE("Net device: %p is MULTILINK PPP - Unknown to the ECM\n", dev);
+				type_info.unknown.os_specific_ident = dev_interface_num;
 
-			/*
-			 * Get the L2TP tunnel socket this packet is associated with
-			 */
-			sk = skb->sk;
-			tunnel = l2tp_sock_to_tunnel(sk);
-			if (tunnel == NULL) {
+				/*
+				 * Establish this type of interface
+				 */
+				ii = ecm_interface_unknown_interface_establish(&type_info.unknown, dev_name, dev_interface_num, ae_interface_num, dev_mtu);
+				return ii;
+			}
+			channel_count = __ppp_hold_channels(dev, ppp_chan, 1);
+			if (channel_count != 1) {
+				DEBUG_TRACE("Net device: %p PPP has %d channels - ECM cannot handle this (interface becomes Unknown type)\n",
+					    dev, channel_count);
+				type_info.unknown.os_specific_ident = dev_interface_num;
+
+				/*
+				 * Establish this type of interface
+				 */
+				ii = ecm_interface_unknown_interface_establish(&type_info.unknown, dev_name, dev_interface_num, ae_interface_num, dev_mtu);
+				return ii;
+			}
+
+			if (pppol2tp_channel_addressing_get(ppp_chan[0], &info)) {
+				ppp_release_channels(ppp_chan, 1);
 				return NULL;
 			}
 
-			/*
-			 * Check L2TPv2 tunnel version
-			 */
-			if (tunnel->version != 2) {
-				sock_put(sk);
-				return NULL;
-			}
-
-			type_info.pppol2tpv2.l2tp.tunnel.tunnel_id = tunnel->tunnel_id;
-			type_info.pppol2tpv2.l2tp.tunnel.peer_tunnel_id = tunnel->peer_tunnel_id;
+			type_info.pppol2tpv2.l2tp.tunnel.tunnel_id = info.local_tunnel_id;
+			type_info.pppol2tpv2.l2tp.tunnel.peer_tunnel_id = info.remote_tunnel_id;
+			type_info.pppol2tpv2.l2tp.session.session_id = info.local_session_id;
+			type_info.pppol2tpv2.l2tp.session.peer_session_id = info.remote_session_id;
+			type_info.pppol2tpv2.udp.sport = ntohs(info.local_addr.sin_port);
+			type_info.pppol2tpv2.udp.dport = ntohs(info.remote_addr.sin_port);
+			type_info.pppol2tpv2.ip.saddr = ntohl(info.local_addr.sin_addr.s_addr);
+			type_info.pppol2tpv2.ip.daddr = ntohl(info.remote_addr.sin_addr.s_addr);
 
 			/*
-			 * Find the L2TP session this packet is associated with
+			 * Release the channel.  Note that next_dev is still (correctly) held.
 			 */
-			rcu_read_lock_bh();
-			for (hash = 0; hash < L2TP_HASH_SIZE; hash++) {
-				hlist_for_each_entry_rcu(session, walk,
-						     &tunnel->session_hlist[hash], hlist) {
-					if (!strcmp(session->ifname, dev_name)) {
-						type_info.pppol2tpv2.l2tp.session.session_id = session->session_id;
-						type_info.pppol2tpv2.l2tp.session.peer_session_id = session->peer_session_id;
-						session_found = true;
-						break;
-					}
-				}
-			}
-			rcu_read_unlock_bh();
+			ppp_release_channels(ppp_chan, 1);
 
-			if (!session_found) {
-				sock_put(sk);
-				return NULL;
-			}
-
-			inet = inet_sk(sk);
-
-			type_info.pppol2tpv2.udp.sport = ntohs(inet->inet_sport);
-			type_info.pppol2tpv2.udp.dport = ntohs(inet->inet_sport);
-			type_info.pppol2tpv2.ip.saddr = ntohl(inet->inet_saddr);
-			type_info.pppol2tpv2.ip.daddr = ntohl(inet->inet_daddr);
-
-			sock_put(sk);
-
-			DEBUG_TRACE("%p: found PPPo2L2TP session\n", dev);
+			DEBUG_TRACE("Net device: %p PPPo2L2TP session: %d,n", dev, type_info.pppol2tpv2.l2tp.session.peer_session_id);
 
 			/*
 			 * Establish this type of interface
@@ -1962,59 +1866,21 @@ identifier_update:
 
 #ifdef ECM_INTERFACE_L2TPV2_ENABLE
 	if (channel_protocol == PX_PROTO_OL2TP) {
-		struct ppp_channel *pch = ppp_chan[0];
-		struct sock *sk = NULL;
-		struct sock *tunsk = NULL;
-		struct l2tp_session *session = NULL;
-		struct l2tp_tunnel *tunnel = NULL;
-		struct inet_sock *inet = NULL;
+		struct pppol2tp_common_addr info;
 
-		/*
-		 * PPPoL2TPV2 channel
-		 */
-		DEBUG_TRACE("Net device: %p PPP channel is PPPoL2TPV2 %s\n", dev, dev->name);
-
-		sk = pch->private;
-		sock_hold(sk);
-
-		/*
-		 * Get L2TP session
-		 */
-		session = (struct l2tp_session *)(sk->sk_user_data);
-		if ((session == NULL) || (session->magic != L2TP_SESSION_MAGIC)) {
-			sock_put(sk);
+		if (pppol2tp_channel_addressing_get(ppp_chan[0], &info)) {
 			ppp_release_channels(ppp_chan, 1);
 			return NULL;
 		}
 
-		l2tp_session_inc_refcount(session);
-		sock_put(sk);
-
-		/*
-		 * Get L2TPv2 tunnel
-		 */
-		tunnel = session->tunnel;
-		if (tunnel->version != 2) {
-			l2tp_session_dec_refcount(session);
-			ppp_release_channels(ppp_chan, 1);
-			return NULL;
-		}
-
-		tunsk = tunnel->sock;
-		sock_hold(tunsk);
-		inet = inet_sk(tunsk);
-
-		type_info.pppol2tpv2.l2tp.tunnel.tunnel_id = tunnel->tunnel_id;
-		type_info.pppol2tpv2.l2tp.tunnel.peer_tunnel_id = tunnel->peer_tunnel_id;
-		type_info.pppol2tpv2.l2tp.session.session_id = session->session_id;
-		type_info.pppol2tpv2.l2tp.session.peer_session_id = session->peer_session_id;
-		type_info.pppol2tpv2.udp.sport = ntohs(inet->inet_sport);
-		type_info.pppol2tpv2.udp.dport = ntohs(inet->inet_sport);
-		type_info.pppol2tpv2.ip.saddr = ntohl(inet->inet_saddr);
-		type_info.pppol2tpv2.ip.daddr = ntohl(inet->inet_daddr);
-
-		l2tp_session_dec_refcount(session);
-		sock_put(tunsk);
+		type_info.pppol2tpv2.l2tp.tunnel.tunnel_id = info.local_tunnel_id;
+		type_info.pppol2tpv2.l2tp.tunnel.peer_tunnel_id = info.remote_tunnel_id;
+		type_info.pppol2tpv2.l2tp.session.session_id = info.local_session_id;
+		type_info.pppol2tpv2.l2tp.session.peer_session_id = info.remote_session_id;
+		type_info.pppol2tpv2.udp.sport = ntohs(info.local_addr.sin_port);
+		type_info.pppol2tpv2.udp.dport = ntohs(info.remote_addr.sin_port);
+		type_info.pppol2tpv2.ip.saddr = ntohl(info.local_addr.sin_addr.s_addr);
+		type_info.pppol2tpv2.ip.daddr = ntohl(info.remote_addr.sin_addr.s_addr);
 
 		/*
 		 * Release the channel.  Note that next_dev is still (correctly) held.
