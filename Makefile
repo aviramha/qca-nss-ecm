@@ -78,9 +78,7 @@ ccflags-$(ECM_INTERFACE_PPPOE_ENABLE) += -DECM_INTERFACE_PPPOE_ENABLE
 # Define ECM_INTERFACE_L2TPV2_ENABLE=y in order
 # to enable support for l2tpv2 acceleration.
 # #############################################################################
-ifneq ($(findstring 3.4, $(KERNELVERSION)),)
 ECM_INTERFACE_L2TPV2_ENABLE=y
-endif
 ccflags-$(ECM_INTERFACE_L2TPV2_ENABLE) += -DECM_INTERFACE_L2TPV2_ENABLE
 
 # #############################################################################
