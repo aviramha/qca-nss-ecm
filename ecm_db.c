@@ -32,6 +32,7 @@
 #include <asm/unaligned.h>
 #include <asm/uaccess.h>	/* for put_user */
 #include <net/ipv6.h>
+#include <net/ip6_route.h>
 #include <linux/inet.h>
 #include <linux/in.h>
 #include <linux/udp.h>
@@ -11449,6 +11450,200 @@ void ecm_db_traverse_node_to_nat_connection_list_and_decelerate(
 	DEBUG_INFO("%p: Defuncting to node's nat connection list complete\n", node);
 }
 #endif
+
+/*
+ * ecm_db_connection_ipv6_from_ct_get_and_ref()
+ *	Return, if any, a connection given a ct
+ */
+struct ecm_db_connection_instance *ecm_db_connection_ipv6_from_ct_get_and_ref(struct nf_conn *ct)
+{
+	struct nf_conntrack_tuple orig_tuple;
+	struct nf_conntrack_tuple reply_tuple;
+	ip_addr_t host1_addr;
+	ip_addr_t host2_addr;
+	int host1_port;
+	int host2_port;
+	int protocol;
+
+	/*
+	 * Look up the associated connection for this conntrack connection
+	 */
+	orig_tuple = ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple;
+	reply_tuple = ct->tuplehash[IP_CT_DIR_REPLY].tuple;
+	ECM_NIN6_ADDR_TO_IP_ADDR(host1_addr, orig_tuple.src.u3.in6);
+	ECM_NIN6_ADDR_TO_IP_ADDR(host2_addr, reply_tuple.src.u3.in6);
+	protocol = orig_tuple.dst.protonum;
+	if (protocol == IPPROTO_TCP) {
+		host1_port = ntohs(orig_tuple.src.u.tcp.port);
+		host2_port = ntohs(reply_tuple.src.u.tcp.port);
+	} else if (protocol == IPPROTO_UDP) {
+		host1_port = ntohs(orig_tuple.src.u.udp.port);
+		host2_port = ntohs(reply_tuple.src.u.udp.port);
+	} else if ((protocol == IPPROTO_IPIP)) {
+		host1_port = 0;
+		host2_port = 0;
+	} else {
+		host1_port = -protocol;
+		host2_port = -protocol;
+	}
+
+	DEBUG_TRACE("%p: lookup src: " ECM_IP_ADDR_OCTAL_FMT ":%d, "
+		    "dest: " ECM_IP_ADDR_OCTAL_FMT ":%d, "
+		    "protocol %d\n",
+		    ct,
+		    ECM_IP_ADDR_TO_OCTAL(host1_addr),
+		    host1_port,
+		    ECM_IP_ADDR_TO_OCTAL(host2_addr),
+		    host2_port,
+		    protocol);
+
+	return ecm_db_connection_find_and_ref(host1_addr,
+					      host2_addr,
+					      protocol,
+					      host1_port,
+					      host2_port);
+}
+
+/*
+ * ecm_db_connection_ipv4_from_ct_get_and_ref()
+ *	Return, if any, a connection given a ct
+ */
+struct ecm_db_connection_instance *ecm_db_connection_ipv4_from_ct_get_and_ref(struct nf_conn *ct)
+{
+	struct nf_conntrack_tuple orig_tuple;
+	struct nf_conntrack_tuple reply_tuple;
+	ip_addr_t host1_addr;
+	ip_addr_t host2_addr;
+	int host1_port;
+	int host2_port;
+	int protocol;
+
+	/*
+	 * Look up the associated connection for this conntrack connection
+	 */
+	orig_tuple = ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple;
+	reply_tuple = ct->tuplehash[IP_CT_DIR_REPLY].tuple;
+	ECM_NIN4_ADDR_TO_IP_ADDR(host1_addr, orig_tuple.src.u3.ip);
+	ECM_NIN4_ADDR_TO_IP_ADDR(host2_addr, reply_tuple.src.u3.ip);
+	protocol = orig_tuple.dst.protonum;
+	if (protocol == IPPROTO_TCP) {
+		host1_port = ntohs(orig_tuple.src.u.tcp.port);
+		host2_port = ntohs(reply_tuple.src.u.tcp.port);
+	} else if (protocol == IPPROTO_UDP) {
+		host1_port = ntohs(orig_tuple.src.u.udp.port);
+		host2_port = ntohs(reply_tuple.src.u.udp.port);
+	} else if ((protocol == IPPROTO_IPV6) || (protocol == IPPROTO_ESP)) {
+		host1_port = 0;
+		host2_port = 0;
+	} else {
+		host1_port = -protocol;
+		host2_port = -protocol;
+	}
+
+	DEBUG_TRACE("%p: lookup src: " ECM_IP_ADDR_DOT_FMT ":%d, "
+		    "dest: " ECM_IP_ADDR_DOT_FMT ":%d, "
+		    "protocol %d\n",
+		    ct,
+		    ECM_IP_ADDR_TO_DOT(host1_addr),
+		    host1_port,
+		    ECM_IP_ADDR_TO_DOT(host2_addr),
+		    host2_port,
+		    protocol);
+
+	return ecm_db_connection_find_and_ref(host1_addr,
+					      host2_addr,
+					      protocol,
+					      host1_port,
+					      host2_port);
+}
+ /*
+  * ecm_db_iproute_connection_cmp()
+  *     This is the "iterate" function passed to the nf_ct_iterate_cleanup()
+  *     function.
+  */
+static int ecm_db_iproute_connection_cmp(struct nf_conn *i, void *data)
+{
+	struct ecm_db_connection_instance *ci;
+
+	/*
+	 * Go through the conntarck entries and if they are found in ECM db,
+	 * decelerate and defunct the connection.
+	 */
+	ci = ecm_db_connection_ipv4_from_ct_get_and_ref(i);
+	if (ci) {
+		ecm_db_connection_decelerate_and_defunct(ci);
+		ecm_db_connection_deref(ci);
+	}
+
+	return 0;
+}
+
+/*
+ * ecm_db_iproute_table_update_event()
+ *	This is a call back for "routing table update event for IPv4"
+ */
+static int ecm_db_iproute_table_update_event(struct notifier_block *nb,
+					       unsigned long event,
+					       void *ptr)
+{
+	DEBUG_TRACE("iproute table update event\n");
+
+#if (LINUX_VERSION_CODE <= KERNEL_VERSION(3, 11, 0))
+	nf_ct_iterate_cleanup(&init_net, ecm_db_iproute_connection_cmp, 0);
+#else
+	nf_ct_iterate_cleanup(&init_net, ecm_db_iproute_connection_cmp, 0, 0, 0);
+#endif
+	return NOTIFY_DONE;
+}
+
+static struct notifier_block ecm_db_iproute_table_update_nb = {
+	.notifier_call = ecm_db_iproute_table_update_event,
+};
+
+ /*
+  * ecm_db_ip6route_connection_cmp()
+  *     This is the "iterate" function passed to the nf_ct_iterate_cleanup()
+  *     function.
+  */
+static int ecm_db_ip6route_connection_cmp(struct nf_conn *i, void *data)
+{
+	struct ecm_db_connection_instance *ci;
+
+	/*
+	 * Go through the conntarck entries and if they are found in ECM db,
+	 * decelerate and defunct the connection.
+	 */
+	ci = ecm_db_connection_ipv6_from_ct_get_and_ref(i);
+	if (ci) {
+		ecm_db_connection_decelerate_and_defunct(ci);
+		ecm_db_connection_deref(ci);
+	}
+
+	return 0;
+}
+
+/*
+ * ecm_db_ip6route_table_update_event()
+ *	This is a call back for "routing table update event for IPv6"
+ */
+static int ecm_db_ip6route_table_update_event(struct notifier_block *nb,
+					       unsigned long event,
+					       void *ptr)
+{
+	DEBUG_TRACE("ip6route table update event\n");
+
+#if (LINUX_VERSION_CODE <= KERNEL_VERSION(3, 11, 0))
+	nf_ct_iterate_cleanup(&init_net, ecm_db_ip6route_connection_cmp, 0);
+#else
+	nf_ct_iterate_cleanup(&init_net, ecm_db_ip6route_connection_cmp, 0, 0, 0);
+#endif
+	return NOTIFY_DONE;
+}
+
+static struct notifier_block ecm_db_ip6route_table_update_nb = {
+	.notifier_call = ecm_db_ip6route_table_update_event,
+};
+
 /*
  * ecm_db_init()
  */
@@ -11590,6 +11785,12 @@ int ecm_db_init(struct dentry *dentry)
 	 */
 	memset(ecm_db_connection_classifier_type_assignments, 0, sizeof(ecm_db_connection_classifier_type_assignments));
 #endif
+	/*
+	 * register for route table modification events
+	 */
+	ip_rt_register_notifier(&ecm_db_iproute_table_update_nb);
+	rt6_register_notifier(&ecm_db_ip6route_table_update_nb);
+
 	return 0;
 
 init_cleanup:
@@ -11627,5 +11828,11 @@ void ecm_db_exit(void)
 	if (ecm_db_dentry) {
 		debugfs_remove_recursive(ecm_db_dentry);
 	}
+
+	/*
+	 * unregister for route table update events
+	 */
+	ip_rt_unregister_notifier(&ecm_db_iproute_table_update_nb);
+	rt6_unregister_notifier(&ecm_db_ip6route_table_update_nb);
 }
 EXPORT_SYMBOL(ecm_db_exit);
