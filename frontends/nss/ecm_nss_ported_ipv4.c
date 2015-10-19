@@ -612,7 +612,7 @@ static void ecm_nss_ported_ipv4_connection_accelerate(struct ecm_front_end_conne
 			dev = ecm_interface_dev_find_by_local_addr(addr);
 			if (likely(dev)) {
 				dev_put(dev);
-				from_nss_iface_id =  NSS_L2TPV2_INTERFACE;
+				from_nss_iface_id = NSS_L2TPV2_INTERFACE;
 				nircm->conn_rule.flow_interface_num = from_nss_iface_id;
 			}
 #else
@@ -850,6 +850,20 @@ static void ecm_nss_ported_ipv4_connection_accelerate(struct ecm_front_end_conne
 	 * The flow_ip is where the connection established from
 	 */
 	ecm_db_connection_from_address_get(feci->ci, addr);
+
+	/*
+	 * Get MTU information
+	 */
+	nircm->conn_rule.flow_mtu = (uint32_t)ecm_db_connection_from_iface_mtu_get(feci->ci);
+#ifdef ECM_INTERFACE_L2TPV2_ENABLE
+	if (unlikely(from_nss_iface_id == NSS_L2TPV2_INTERFACE)) {
+		dev = ecm_interface_dev_find_by_local_addr(addr);
+		if (likely(dev)) {
+			nircm->conn_rule.flow_mtu = dev->mtu;
+			dev_put(dev);
+		}
+	}
+#endif
 	ECM_IP_ADDR_TO_HIN4_ADDR(nircm->tuple.flow_ip, addr);
 
 	/*
@@ -859,6 +873,11 @@ static void ecm_nss_ported_ipv4_connection_accelerate(struct ecm_front_end_conne
 	 * the NAT'ed version would be the same as the normal address
 	 */
 	ecm_db_connection_to_address_nat_get(feci->ci, addr);
+
+	/*
+	 * Get MTU information
+	 */
+	nircm->conn_rule.return_mtu = (uint32_t)ecm_db_connection_to_iface_mtu_get(feci->ci);
 	ECM_IP_ADDR_TO_HIN4_ADDR(nircm->tuple.return_ip, addr);
 
 	/*
@@ -922,25 +941,6 @@ static void ecm_nss_ported_ipv4_connection_accelerate(struct ecm_front_end_conne
 	if ((ecm_dir == ECM_DB_DIRECTION_INGRESS_NAT) || (ecm_dir == ECM_DB_DIRECTION_EGRESS_NAT)) {
 		memcpy(nircm->conn_rule.return_mac, dest_mac_xlate, ETH_ALEN);
 	}
-
-	/*
-	 * Get MTU information
-	 */
-	nircm->conn_rule.flow_mtu = (uint32_t)ecm_db_connection_from_iface_mtu_get(feci->ci);
-	nircm->conn_rule.return_mtu = (uint32_t)ecm_db_connection_to_iface_mtu_get(feci->ci);
-
-#ifdef ECM_INTERFACE_L2TPV2_ENABLE
-	/*
-	 * pppd sets the mtu of l2tp interface. This
-	 * depends on configuration. We have to set the
-	 * static interface mtu as maximum.
-	 * Else l2tp static interface in firmware may reject
-	 * packets from wan side.
-	 */
-	if (unlikely(from_nss_iface_id ==  NSS_L2TPV2_INTERFACE)) {
-		nircm->conn_rule.flow_mtu = 1500;
-	}
-#endif
 
 	if (protocol == IPPROTO_TCP) {
 		/*
