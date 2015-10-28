@@ -4207,14 +4207,10 @@ struct ecm_db_iface_instance *ecm_db_iface_find_and_ref_by_interface_identifier(
 	 */
 	spin_lock_bh(&ecm_db_lock);
 	ii = ecm_db_iface_id_table[hash_index];
-	if (ii) {
-		_ecm_db_iface_ref(ii);
-	}
-	spin_unlock_bh(&ecm_db_lock);
 	while (ii) {
-		struct ecm_db_iface_instance *iin;
-
 		if (ii->interface_identifier == interface_id) {
+			_ecm_db_iface_ref(ii);
+			spin_unlock_bh(&ecm_db_lock);
 			DEBUG_TRACE("iface found %p\n", ii);
 			return ii;
 		}
@@ -4222,15 +4218,9 @@ struct ecm_db_iface_instance *ecm_db_iface_find_and_ref_by_interface_identifier(
 		/*
 		 * Try next
 		 */
-		spin_lock_bh(&ecm_db_lock);
-		iin = ii->iface_id_hash_next;
-		if (iin) {
-			_ecm_db_iface_ref(iin);
-		}
-		spin_unlock_bh(&ecm_db_lock);
-		ecm_db_iface_deref(ii);
-		ii = iin;
+		ii = ii->iface_id_hash_next;
 	}
+	spin_unlock_bh(&ecm_db_lock);
 	DEBUG_TRACE("Iface not found\n");
 	return NULL;
 }
@@ -4813,13 +4803,7 @@ static struct ecm_db_connection_instance *ecm_db_connection_find_and_ref_chain(e
 	 */
 	spin_lock_bh(&ecm_db_lock);
 	ci = ecm_db_connection_table[hash_index];
-	if (ci) {
-		_ecm_db_connection_ref(ci);
-	}
-	spin_unlock_bh(&ecm_db_lock);
 	while (ci) {
-		struct ecm_db_connection_instance *cin;
-
 		/*
 		 * The use of unlikely() is liberally used because under fast-hit scenarios the connection would always be at the start of a chain
 		 */
@@ -4865,53 +4849,16 @@ try_reverse:
 		goto connection_found;
 
 try_next:
-		spin_lock_bh(&ecm_db_lock);
-		cin = ci->hash_next;
-		if (cin) {
-			_ecm_db_connection_ref(cin);
-		}
-		spin_unlock_bh(&ecm_db_lock);
-		ecm_db_connection_deref(ci);
-		ci = cin;
+		ci = ci->hash_next;
 	}
+	spin_unlock_bh(&ecm_db_lock);
 	DEBUG_TRACE("Connection not found in hash chain\n");
 	return NULL;
 
 connection_found:
-	DEBUG_TRACE("Connection found %p\n", ci);
-
-	/*
-	 * Move this connection to the head of the hash chain.
-	 * This will win for us with heavy hit connections - we bubble MRU to the front of the list to
-	 * avoid too much chain walking.
-	 */
-	spin_lock_bh(&ecm_db_lock);
-	if (!ci->hash_prev) {
-		/*
-		 * No prev pointer - ci is at the head of the list already
-		 */
-		DEBUG_ASSERT(ecm_db_connection_table[hash_index] == ci, "%p: hash table bad\n", ci);
-		spin_unlock_bh(&ecm_db_lock);
-		return ci;
-	}
-
-	/*
-	 * Link out
-	 */
-	ci->hash_prev->hash_next = ci->hash_next;
-	if (ci->hash_next) {
-		ci->hash_next->hash_prev = ci->hash_prev;
-	}
-
-	/*
-	 * Re-insert at the head.
-	 * NOTE: We know that there is a head already that is different to ci.
-	 */
-	ci->hash_next = ecm_db_connection_table[hash_index];
-	ecm_db_connection_table[hash_index]->hash_prev = ci;
-	ecm_db_connection_table[hash_index] = ci;
-	ci->hash_prev = NULL;
+	_ecm_db_connection_ref(ci);
 	spin_unlock_bh(&ecm_db_lock);
+	DEBUG_TRACE("Connection found %p\n", ci);
 	return ci;
 }
 
@@ -4956,71 +4903,22 @@ struct ecm_db_connection_instance *ecm_db_connection_serial_find_and_ref(uint32_
 	 */
 	spin_lock_bh(&ecm_db_lock);
 	ci = ecm_db_connection_serial_table[serial_hash_index];
-	if (ci) {
-		_ecm_db_connection_ref(ci);
-	}
-	spin_unlock_bh(&ecm_db_lock);
 	while (ci) {
-		struct ecm_db_connection_instance *cin;
-
 		/*
 		 * The use of likely() is used because under fast-hit scenarios the connection would always be at the start of a chain
 		 */
 		if (likely(ci->serial == serial)) {
-			goto connection_found;
+			_ecm_db_connection_ref(ci);
+			spin_unlock_bh(&ecm_db_lock);
+			DEBUG_TRACE("Connection found %p\n", ci);
+			return ci;
 		}
 
-		/*
-		 * Try next
-		 */
-		spin_lock_bh(&ecm_db_lock);
-		cin = ci->serial_hash_next;
-		if (cin) {
-			_ecm_db_connection_ref(cin);
-		}
-		spin_unlock_bh(&ecm_db_lock);
-		ecm_db_connection_deref(ci);
-		ci = cin;
+		ci = ci->serial_hash_next;
 	}
+	spin_unlock_bh(&ecm_db_lock);
 	DEBUG_TRACE("Connection not found\n");
 	return NULL;
-
-connection_found:
-	DEBUG_TRACE("Connection found %p\n", ci);
-
-	/*
-	 * Move this connection to the head of the hash chain.
-	 * This will win for us with heavy hit connections - we bubble MRU to the front of the list to
-	 * avoid too much chain walking.
-	 */
-	spin_lock_bh(&ecm_db_lock);
-	if (!ci->serial_hash_prev) {
-		/*
-		 * No prev pointer - ci is at the head of the list already
-		 */
-		DEBUG_ASSERT(ecm_db_connection_serial_table[serial_hash_index] == ci, "%p: hash table bad\n", ci);
-		spin_unlock_bh(&ecm_db_lock);
-		return ci;
-	}
-
-	/*
-	 * Link out
-	 */
-	ci->serial_hash_prev->serial_hash_next = ci->serial_hash_next;
-	if (ci->serial_hash_next) {
-		ci->serial_hash_next->serial_hash_prev = ci->serial_hash_prev;
-	}
-
-	/*
-	 * Re-insert at the head.
-	 * NOTE: We know that there is a head already that is different to ci.
-	 */
-	ci->serial_hash_next = ecm_db_connection_serial_table[serial_hash_index];
-	ecm_db_connection_serial_table[serial_hash_index]->serial_hash_prev = ci;
-	ecm_db_connection_serial_table[serial_hash_index] = ci;
-	ci->serial_hash_prev = NULL;
-	spin_unlock_bh(&ecm_db_lock);
-	return ci;
 }
 EXPORT_SYMBOL(ecm_db_connection_serial_find_and_ref);
 
