@@ -11297,11 +11297,41 @@ static inline void ecm_db_connection_decelerate_and_defunct(struct ecm_db_connec
 }
 
 /*
+ * ecm_db_should_keep_connection()
+ *	check if any classifier believes this connection should
+ *	be kept
+ */
+static bool ecm_db_should_keep_connection(
+	struct ecm_db_connection_instance *ci, uint8_t *mac)
+{
+	bool should_keep_connection = false;
+	int assignment_count;
+	int aci_index;
+	struct ecm_classifier_instance *assignments[ECM_CLASSIFIER_TYPES];
+
+	assignment_count =
+		ecm_db_connection_classifier_assignments_get_and_ref(ci, assignments);
+	for (aci_index = 0; aci_index < assignment_count; ++aci_index) {
+		struct ecm_classifier_instance *aci;
+		aci = assignments[aci_index];
+		if (aci->should_keep_connection &&
+			aci->should_keep_connection(aci, mac)) {
+			should_keep_connection = true;
+			break;
+		}
+	}
+	ecm_db_connection_assignments_release(assignment_count, assignments);
+
+	return should_keep_connection;
+}
+
+/*
  * ecm_db_traverse_node_from_connection_list_and_decelerate()
  *	traverse from_list of a node and calls ecm_db_connection_decelerate_and_defunct()
  *	for each entry
  */
-void ecm_db_traverse_node_from_connection_list_and_decelerate(struct ecm_db_node_instance *node)
+void ecm_db_traverse_node_from_connection_list_and_decelerate(
+	struct ecm_db_node_instance *node)
 {
 	struct ecm_db_connection_instance *ci = NULL;
 
@@ -11312,8 +11342,12 @@ void ecm_db_traverse_node_from_connection_list_and_decelerate(struct ecm_db_node
 	while (ci) {
 		struct ecm_db_connection_instance *cin;
 
-		DEBUG_TRACE("%p: defunct\n", ci);
-		ecm_db_connection_decelerate_and_defunct(ci);
+		if (!ecm_db_should_keep_connection(ci, node->address)) {
+			DEBUG_TRACE("%p: defunct\n", ci);
+			ecm_db_connection_decelerate_and_defunct(ci);
+		} else {
+			DEBUG_TRACE("%p: keeping connection\n", ci);
+		}
 
 		cin = ecm_db_node_from_connection_get_and_ref_next(ci);
 		ecm_db_connection_deref(ci);
@@ -11327,7 +11361,8 @@ void ecm_db_traverse_node_from_connection_list_and_decelerate(struct ecm_db_node
  *	traverse to_list of a node and calls ecm_db_connection_decelerate_and_defunct()
  *	for each entry
  */
-void ecm_db_traverse_node_to_connection_list_and_decelerate(struct ecm_db_node_instance *node)
+void ecm_db_traverse_node_to_connection_list_and_decelerate(
+	struct ecm_db_node_instance *node)
 {
 	struct ecm_db_connection_instance *ci = NULL;
 
@@ -11338,8 +11373,12 @@ void ecm_db_traverse_node_to_connection_list_and_decelerate(struct ecm_db_node_i
 	while (ci) {
 		struct ecm_db_connection_instance *cin;
 
-		DEBUG_TRACE("%p: defunct\n", ci);
-		ecm_db_connection_decelerate_and_defunct(ci);
+		if (!ecm_db_should_keep_connection(ci, node->address)) {
+			DEBUG_TRACE("%p: defunct\n", ci);
+			ecm_db_connection_decelerate_and_defunct(ci);
+		} else {
+			DEBUG_TRACE("%p: keeping connection\n", ci);
+		}
 
 		cin = ecm_db_node_to_connection_get_and_ref_next(ci);
 		ecm_db_connection_deref(ci);
@@ -11353,7 +11392,8 @@ void ecm_db_traverse_node_to_connection_list_and_decelerate(struct ecm_db_node_i
  *	traverse from_nat_list of a node and calls ecm_db_connection_decelerate_and_defunct()
  *	for each entry
  */
-void ecm_db_traverse_node_from_nat_connection_list_and_decelerate(struct ecm_db_node_instance *node)
+void ecm_db_traverse_node_from_nat_connection_list_and_decelerate(
+	struct ecm_db_node_instance *node)
 {
 	struct ecm_db_connection_instance *ci = NULL;
 
@@ -11364,8 +11404,12 @@ void ecm_db_traverse_node_from_nat_connection_list_and_decelerate(struct ecm_db_
 	while (ci) {
 		struct ecm_db_connection_instance *cin;
 
-		DEBUG_TRACE("%p: defunct\n", ci);
-		ecm_db_connection_decelerate_and_defunct(ci);
+		if (!ecm_db_should_keep_connection(ci, node->address)) {
+			DEBUG_TRACE("%p: defunct\n", ci);
+			ecm_db_connection_decelerate_and_defunct(ci);
+		} else {
+			DEBUG_TRACE("%p: keeping connection\n", ci);
+		}
 
 		cin = ecm_db_node_from_nat_connection_get_and_ref_next(ci);
 		ecm_db_connection_deref(ci);
@@ -11379,7 +11423,8 @@ void ecm_db_traverse_node_from_nat_connection_list_and_decelerate(struct ecm_db_
  *	traverse to_nat_list of a node and calls ecm_db_connection_decelerate_and_defunct()
  *	for each entry
  */
-void ecm_db_traverse_node_to_nat_connection_list_and_decelerate(struct ecm_db_node_instance *node)
+void ecm_db_traverse_node_to_nat_connection_list_and_decelerate(
+	struct ecm_db_node_instance *node)
 {
 	struct ecm_db_connection_instance *ci = NULL;
 
@@ -11390,8 +11435,12 @@ void ecm_db_traverse_node_to_nat_connection_list_and_decelerate(struct ecm_db_no
 	while (ci) {
 		struct ecm_db_connection_instance *cin;
 
-		DEBUG_TRACE("%p: defunct\n", ci);
-		ecm_db_connection_decelerate_and_defunct(ci);
+		if (!ecm_db_should_keep_connection(ci, node->address)) {
+			DEBUG_TRACE("%p: defunct\n", ci);
+			ecm_db_connection_decelerate_and_defunct(ci);
+		} else {
+			DEBUG_TRACE("%p: keeping connection\n", ci);
+		}
 
 		cin = ecm_db_node_to_nat_connection_get_and_ref_next(ci);
 		ecm_db_connection_deref(ci);

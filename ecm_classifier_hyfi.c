@@ -69,7 +69,7 @@
 #include "ecm_tracker_tcp.h"
 #include "ecm_db.h"
 #include "ecm_classifier_hyfi.h"
-
+#include "ecm_front_end_ipv4.h"
 /*
  * Magic numbers
  */
@@ -220,6 +220,7 @@ static void ecm_classifier_hyfi_process(struct ecm_classifier_instance *aci, ecm
 	struct ecm_front_end_connection_instance *feci;
 	ecm_front_end_acceleration_mode_t accel_mode;
 	uint32_t became_relevant = 0;
+	uint32_t flag = 0;
 
 	chfi = (struct ecm_classifier_hyfi_instance *)aci;
 	DEBUG_CHECK_MAGIC(chfi, ECM_CLASSIFIER_HYFI_INSTANCE_MAGIC, "%p: magic failed\n", chfi);
@@ -287,14 +288,19 @@ hyfi_classifier_out:
 	/*
 	 * Compute the hashes in both forward and reverse directions
 	 */
-	if (unlikely(hyfi_hash_skbuf(skb, &chfi->flow.hash, &chfi->flow.flag, &chfi->flow.priority, &chfi->flow.seq))) {
+	if (unlikely(hyfi_hash_skbuf(skb, &chfi->flow.hash, &flag,
+		&chfi->flow.priority, &chfi->flow.seq)))
 		goto hyfi_classifier_done;
-	}
 
 	if (unlikely(hyfi_hash_skbuf_reverse(skb, &chfi->flow.reverse_hash)))
 		goto hyfi_classifier_done;
 
 	chfi->flow.ecm_serial = chfi->ci_serial;
+	if (flag & ECM_HYFI_IS_IPPROTO_UDP)
+		hyfi_ecm_set_flag(&chfi->flow, ECM_HYFI_IS_IPPROTO_UDP);
+	else
+		hyfi_ecm_clear_flag(&chfi->flow, ECM_HYFI_IS_IPPROTO_UDP);
+
 	memcpy(&chfi->flow.sa, eth_hdr(skb)->h_source, ETH_ALEN);
 	memcpy(&chfi->flow.da, eth_hdr(skb)->h_dest, ETH_ALEN);
 
@@ -327,6 +333,16 @@ static void ecm_classifier_hyfi_sync_to_v4(struct ecm_classifier_instance *aci, 
 	uint64_t to_packets_dropped = 0;
 	uint64_t to_bytes_dropped = 0;
 	int32_t ret_fwd, ret_rev;
+	u_int32_t time_now, time_elapsed_fwd, time_elapsed_rev;
+	uint8_t flow_dest_addr[ETH_ALEN];
+	uint64_t fwd_bytes, rev_bytes, fwd_packets, rev_packets;
+	bool should_keep_on_fdb_update_fwd, should_keep_on_fdb_update_rev;
+
+	if (sync->reason != ECM_FRONT_END_IPV4_RULE_SYNC_REASON_STATS) {
+		DEBUG_TRACE("%p: Update not due to stats: %d\n",
+			aci, sync->reason);
+		return;
+	}
 
 	chfi = (struct ecm_classifier_hyfi_instance *)aci;
 	DEBUG_CHECK_MAGIC(chfi, ECM_CLASSIFIER_HYFI_INSTANCE_MAGIC, "%p: magic failed", chfi);
@@ -345,6 +361,7 @@ static void ecm_classifier_hyfi_sync_to_v4(struct ecm_classifier_instance *aci, 
 	/*
 	 * Update the stats on Hy-Fi side
 	 */
+	ecm_db_connection_to_node_address_get(ci, &flow_dest_addr[0]);
 	ecm_db_connection_data_stats_get(ci, &from_bytes, &to_bytes,
 			&from_packets, &to_packets,
 			&from_bytes_dropped, &to_bytes_dropped,
@@ -355,14 +372,32 @@ static void ecm_classifier_hyfi_sync_to_v4(struct ecm_classifier_instance *aci, 
 			chfi->flow.ecm_serial, chfi->flow.priority, chfi->flow.flag,
 			chfi->flow.sa, chfi->flow.da);
 
+	time_now = jiffies;
+	/*
+	 * Make sure destination address still matches
+	 */
+	if (memcmp(&flow_dest_addr[0], &chfi->flow.da[0], ETH_ALEN)) {
+		DEBUG_INFO("UPDATE STATS: Direction of flow is "
+			"reverse of expectation\n");
+		fwd_bytes = (to_bytes - to_bytes_dropped);
+		fwd_packets = (to_packets - to_packets_dropped);
+		rev_bytes = (from_bytes - from_bytes_dropped);
+		rev_packets = (from_packets - from_packets_dropped);
+	} else {
+		fwd_bytes = (from_bytes - from_bytes_dropped);
+		fwd_packets = (from_packets - from_packets_dropped);
+		rev_bytes = (to_bytes - to_bytes_dropped);
+		rev_packets = (to_packets - to_packets_dropped);
+	}
+
 	/*
 	 * Update forward direction 'from' bytes
 	 */
 	ret_fwd = hyfi_ecm_update_stats(&chfi->flow, chfi->flow.hash,
 		&chfi->flow.da[0], &chfi->flow.sa[0],
-		(from_bytes - from_bytes_dropped),
-		(from_packets - from_packets_dropped));
-
+		fwd_bytes, fwd_packets, time_now,
+		&should_keep_on_fdb_update_fwd,
+		&time_elapsed_fwd);
 	DEBUG_INFO("ret_fwd %d Forward hash: 0x%02x, from_bytes = %lld, from_packets = %lld, "
 		"num_bytes_dropped = %lld, num_packets_dropped = %lld\n",
 		ret_fwd, chfi->flow.hash, from_bytes, from_packets,
@@ -373,13 +408,38 @@ static void ecm_classifier_hyfi_sync_to_v4(struct ecm_classifier_instance *aci, 
 	 */
 	ret_rev = hyfi_ecm_update_stats(&chfi->flow, chfi->flow.reverse_hash,
 		&chfi->flow.sa[0], &chfi->flow.da[0],
-		(to_bytes - to_bytes_dropped),
-		(to_packets - to_packets_dropped));
+		rev_bytes, rev_packets, time_now,
+		&should_keep_on_fdb_update_rev,
+		&time_elapsed_rev);
 
 	DEBUG_INFO("ret_rev %d Reverse hash: 0x%02x, to_bytes = %lld, to_packets = %lld, "
 		"num_bytes_dropped = %lld, num_packets_dropped = %lld\n",
 		ret_rev, chfi->flow.reverse_hash, to_bytes, to_packets,
 		to_bytes_dropped, to_packets_dropped);
+
+	chfi->flow.last_update = time_now;
+	chfi->flow.last_elapsed_time = time_elapsed_fwd >= time_elapsed_rev ?
+		time_elapsed_fwd : time_elapsed_rev;
+
+	if (!time_elapsed_fwd) {
+		if (should_keep_on_fdb_update_fwd) {
+			hyfi_ecm_set_flag(&chfi->flow,
+				ECM_HYFI_SHOULD_KEEP_ON_FDB_UPDATE_FWD);
+		} else {
+			hyfi_ecm_clear_flag(&chfi->flow,
+				ECM_HYFI_SHOULD_KEEP_ON_FDB_UPDATE_FWD);
+		}
+	}
+
+	if (!time_elapsed_rev) {
+		if (should_keep_on_fdb_update_rev) {
+			hyfi_ecm_set_flag(&chfi->flow,
+				ECM_HYFI_SHOULD_KEEP_ON_FDB_UPDATE_REV);
+		} else {
+			hyfi_ecm_clear_flag(&chfi->flow,
+				ECM_HYFI_SHOULD_KEEP_ON_FDB_UPDATE_REV);
+		}
+	}
 
 	if (ret_fwd < 0 || ret_rev < 0) {
 		DEBUG_ERROR("%p: Error updating stats", aci);
@@ -526,6 +586,24 @@ static int ecm_classifier_hyfi_state_get(struct ecm_classifier_instance *ci, str
 }
 #endif
 
+static bool ecm_classifier_hyfi_should_keep_connection(
+	struct ecm_classifier_instance *aci, uint8_t *mac)
+{
+	struct ecm_classifier_hyfi_instance *chfi;
+
+	chfi = (struct ecm_classifier_hyfi_instance *)aci;
+	DEBUG_CHECK_MAGIC(chfi, ECM_CLASSIFIER_HYFI_INSTANCE_MAGIC,
+		"%p: magic failed", chfi);
+
+	if (chfi->hyfi_state &
+			(ECM_CLASSIFIER_HYFI_STATE_IGNORE)) {
+		/* HyFi doesn't care if connection deleted */
+		return false;
+	}
+
+	return hyfi_ecm_should_keep(&chfi->flow, mac);
+}
+
 /*
  * ecm_classifier_hyfi_instance_alloc()
  *	Allocate an instance of the HyFi classifier
@@ -554,6 +632,8 @@ struct ecm_classifier_hyfi_instance *ecm_classifier_hyfi_instance_alloc(struct e
 	chfi->base.last_process_response_get = ecm_classifier_hyfi_last_process_response_get;
 	chfi->base.reclassify_allowed = ecm_classifier_hyfi_reclassify_allowed;
 	chfi->base.reclassify = ecm_classifier_hyfi_reclassify;
+	chfi->base.should_keep_connection =
+		ecm_classifier_hyfi_should_keep_connection;
 #ifdef ECM_STATE_OUTPUT_ENABLE
 	chfi->base.state_get = ecm_classifier_hyfi_state_get;
 #endif
@@ -611,7 +691,6 @@ static void ecm_classifier_hyfi_connection_added(void *arg, struct ecm_db_connec
 	uint32_t serial = ecm_db_connection_serial_get(ci);
 	DEBUG_INFO("%p: HYFI LISTENER: added conn with serial: %u\n", ci, serial);
 #endif
-//	Add your own code here
 }
 
 /*
@@ -620,11 +699,34 @@ static void ecm_classifier_hyfi_connection_added(void *arg, struct ecm_db_connec
  */
 static void ecm_classifier_hyfi_connection_removed(void *arg, struct ecm_db_connection_instance *ci)
 {
-#if (DEBUG_LEVEL > 2)
+	struct ecm_classifier_instance *aci;
+	struct ecm_classifier_hyfi_instance *chfi;
 	uint32_t serial = ecm_db_connection_serial_get(ci);
+
 	DEBUG_INFO("%p: HYFI LISTENER: removed conn with serial: %u\n", ci, serial);
-#endif
-//	Add your own code here
+
+	/*
+	 * Only handle events if there is an HyFi classifier attached
+	 */
+	aci = ecm_db_connection_assigned_classifier_find_and_ref(ci, ECM_CLASSIFIER_TYPE_HYFI);
+	if (!aci) {
+		DEBUG_TRACE("%p: Connection removed ignored"
+			" - no HyFi classifier\n", ci);
+		return;
+	}
+
+	chfi = (struct ecm_classifier_hyfi_instance *)aci;
+	DEBUG_INFO("%p: removed conn with serial: %u, "
+		"hash 0x%x, rev hash 0x%x\n",
+		aci, serial, chfi->flow.hash, chfi->flow.reverse_hash);
+
+	/*
+	 * Mark as decelerated
+	 */
+	hyfi_ecm_decelerate(chfi->flow.hash, serial);
+	hyfi_ecm_decelerate(chfi->flow.reverse_hash, serial);
+
+	aci->deref(aci);
 }
 
 /*
