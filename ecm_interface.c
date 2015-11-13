@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2014-2015 The Linux Foundation.  All rights reserved.
+ * Copyright (c) 2014-2016 The Linux Foundation.  All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -2853,6 +2853,82 @@ EXPORT_SYMBOL(ecm_interface_multicast_heirarchy_construct_bridged);
 #endif
 
 /*
+ * ecm_interface_get_next_node_mac_address()
+ *	Get the MAC address of the next node
+ */
+static bool ecm_interface_get_next_node_mac_address(
+	ip_addr_t dest_addr, struct net_device *dest_dev, int ip_version,
+	uint8_t *mac_addr)
+{
+	bool on_link;
+	ip_addr_t gw_addr = ECM_IP_ADDR_NULL;
+
+	if (!ecm_interface_mac_addr_get(dest_addr, mac_addr, &on_link, gw_addr)) {
+		if (ip_version == 4) {
+			DEBUG_WARN("Unable to obtain MAC address for " ECM_IP_ADDR_DOT_FMT "\n",
+				ECM_IP_ADDR_TO_DOT(dest_addr));
+			ecm_interface_send_arp_request(dest_dev, dest_addr, on_link, gw_addr);
+		}
+
+		if (ip_version == 6) {
+			DEBUG_WARN("Unable to obtain MAC address for " ECM_IP_ADDR_OCTAL_FMT "\n",
+				ECM_IP_ADDR_TO_OCTAL(dest_addr));
+			ecm_interface_send_neighbour_solicitation(dest_dev, dest_addr);
+		}
+
+		return false;
+	}
+
+	return true;
+}
+
+/*
+ * ecm_interface_should_update_egress_device_bridged()
+ *	Determine if the egress port should be re-evaluated in the bridged case
+ *
+ * This will be done if:
+ * - The egress port is the one provided from the front-end
+ * - The egress port is not a bridge, but is a slave of the bridge
+ * - Not routed
+ *
+ * If these conditions hold, this function will hold a reference to the bridge
+ * port and return it to the caller.  Otherwise no reference will be held and
+ * it will return NULL.
+ */
+static struct net_device *ecm_interface_should_update_egress_device_bridged(
+	struct net_device *given_dest_dev, struct net_device *dest_dev,
+	bool is_routed)
+{
+	struct net_device *bridge;
+
+	/*
+	 * Determine if we should attempt to fetch the bridge device
+	 */
+	if (!given_dest_dev || is_routed || (dest_dev != given_dest_dev) ||
+		ecm_front_end_is_bridge_device(given_dest_dev))
+		return NULL;
+
+	bridge = ecm_interface_get_and_hold_dev_master(given_dest_dev);
+
+	if (!bridge)
+		return NULL;
+
+
+	if (!ecm_front_end_is_bridge_device(bridge)) {
+		/*
+		 * Master is not a bridge - free the reference and return
+		 */
+		dev_put(bridge);
+		return NULL;
+	}
+
+	/*
+	 * Reference is held to bridge and must be freed by caller
+	 */
+	return bridge;
+}
+
+/*
  * ecm_interface_heirarchy_construct()
  *	Construct an interface heirarchy.
  *
@@ -2899,7 +2975,7 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 	int32_t current_interface_index;
 	bool from_local_addr;
 	bool next_dest_addr_valid;
-	bool next_dest_node_addr_valid;
+	bool next_dest_node_addr_valid = false;
 	ip_addr_t next_dest_addr;
 	uint8_t next_dest_node_addr[ETH_ALEN] = {0};
 
@@ -3104,10 +3180,42 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 			dev_put(dest_dev);
 			return ECM_DB_IFACE_HEIRARCHY_MAX;
 		}
+	} else {
+		struct net_device *bridge =
+			ecm_interface_should_update_egress_device_bridged(
+				given_dest_dev, dest_dev, is_routed);
+
+		if (bridge) {
+
+			struct net_device *new_dest_dev;
+
+			next_dest_node_addr_valid = ecm_interface_get_next_node_mac_address(
+				dest_addr, dest_dev, ip_version, next_dest_node_addr);
+			if (next_dest_node_addr_valid) {
+
+				new_dest_dev = br_port_dev_get(bridge,
+								next_dest_node_addr,
+								skb);
+
+				if (new_dest_dev) {
+					dev_put(dest_dev);
+					if (new_dest_dev != given_dest_dev) {
+						DEBUG_INFO("Adjusted port for %pM is %s (given was %s)\n",
+							next_dest_node_addr, new_dest_dev->name,
+							given_dest_dev->name);
+
+						dest_dev = new_dest_dev;
+						dest_dev_name = dest_dev->name;
+						dest_dev_type = dest_dev->type;
+					}
+				}
+			}
+
+			dev_put(bridge);
+		}
 	}
 
 	next_dest_addr_valid = true;
-	next_dest_node_addr_valid = false;
 	ECM_IP_ADDR_COPY(next_dest_addr, dest_addr);
 
 	/*
@@ -3192,8 +3300,6 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 					 * Bridge
 					 * Figure out which port device the skb will go to using the dest_addr.
 					 */
-					bool on_link;
-					ip_addr_t gw_addr = ECM_IP_ADDR_NULL;
 					uint8_t mac_addr[ETH_ALEN];
 
 					if (next_dest_node_addr_valid) {
@@ -3208,19 +3314,8 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 						ecm_db_connection_interfaces_deref(interfaces, current_interface_index);
 						return ECM_DB_IFACE_HEIRARCHY_MAX;
 					} else {
-						if (!ecm_interface_mac_addr_get(next_dest_addr, mac_addr, &on_link, gw_addr)) {
-							if (ip_version == 4) {
-								DEBUG_WARN("Unable to obtain MAC address for " ECM_IP_ADDR_DOT_FMT "\n",
-										ECM_IP_ADDR_TO_DOT(dest_addr));
-								ecm_interface_send_arp_request(dest_dev, dest_addr, on_link, gw_addr);
-							}
-#ifdef ECM_IPV6_ENABLE
-							if (ip_version == 6) {
-								DEBUG_WARN("Unable to obtain MAC address for " ECM_IP_ADDR_OCTAL_FMT "\n",
-										ECM_IP_ADDR_TO_OCTAL(dest_addr));
-								ecm_interface_send_neighbour_solicitation(dest_dev, dest_addr);
-							}
-#endif
+						if (!ecm_interface_get_next_node_mac_address(next_dest_addr, dest_dev, ip_version, mac_addr)) {
+
 							dev_put(src_dev);
 							dev_put(dest_dev);
 
@@ -3231,7 +3326,9 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 							return ECM_DB_IFACE_HEIRARCHY_MAX;
 						}
 					}
-					next_dev = br_port_dev_get(dest_dev, mac_addr);
+
+					next_dev = br_port_dev_get(dest_dev, mac_addr, skb);
+
 					if (!next_dev) {
 						DEBUG_WARN("Unable to obtain output port for: %pM\n", mac_addr);
 						dev_put(src_dev);

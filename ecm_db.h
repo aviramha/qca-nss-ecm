@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2014-2015, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2016, The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -69,6 +69,7 @@ ecm_db_iface_type_t ecm_db_connection_iface_type_get(struct ecm_db_iface_instanc
 int32_t ecm_db_iface_mtu_reset(struct ecm_db_iface_instance *ii, int32_t mtu);
 int32_t ecm_db_iface_ae_interface_identifier_get(struct ecm_db_iface_instance *ii);
 int32_t ecm_db_iface_interface_identifier_get(struct ecm_db_iface_instance *ii);
+void ecm_db_iface_interface_name_get(struct ecm_db_iface_instance *ii, char *name_buffer);
 void ecm_db_iface_identifier_hash_table_entry_check_and_update(struct ecm_db_iface_instance *ii, int32_t new_interface_identifier);
 
 struct ecm_front_end_connection_instance *ecm_db_connection_front_end_get_and_ref(struct ecm_db_connection_instance *ci);

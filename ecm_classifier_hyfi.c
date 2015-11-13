@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2014-2015, The Linux Foundation.  All rights reserved.
+ * Copyright (c) 2014-2016, The Linux Foundation.  All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -110,9 +110,9 @@ struct ecm_classifier_hyfi_instance {
 struct ecm_db_listener_instance *ecm_classifier_hyfi_li = NULL;
 
 /*
- * Operational control
+ * Operational control - defaults to false (disabled)
  */
-static bool ecm_classifier_hyfi_enabled = true;		/* Operational behaviour */
+static bool ecm_classifier_hyfi_enabled;		/* Operational behaviour */
 
 /*
  * Management thread control
@@ -258,7 +258,8 @@ static void ecm_classifier_hyfi_process(struct ecm_classifier_instance *aci, ecm
 		ecm_db_connection_deref(ci);
 	}
 
-	if (enabled && ECM_FRONT_END_ACCELERATION_POSSIBLE(accel_mode)) {
+	if (enabled && ECM_FRONT_END_ACCELERATION_POSSIBLE(accel_mode) &&
+		hyfi_ecm_bridge_attached()) {
 		relevance = ECM_CLASSIFIER_RELEVANCE_YES;
 		became_relevant = ecm_db_time_get();
 	}
@@ -317,6 +318,94 @@ hyfi_classifier_done:
 }
 
 /*
+ * ecm_classifier_hyfi_get_intf_id()
+ *	Get the interface ID from the level of the
+ *	connection hierarchy that matches the interface selected by HyFi.
+ *
+ * If the hierarchy contains a bridge, the correct interface will be in the level
+ * of the hierarchy after the bridge.
+ * If the hierarchy doesn't contain a bridge, look for an interface that has its
+ * master set to the HyFi bridge.
+ *
+ * If neither of these conditions hold, this hierarchy can't be relevant to HyFi,
+ * and return -1.
+ */
+static int32_t ecm_classifier_hyfi_get_intf_id(struct ecm_db_connection_instance *ci,
+	bool direction_to)
+{
+	int32_t intf_first;
+	int32_t system_index = -1;
+	struct ecm_db_iface_instance *interfaces[ECM_DB_IFACE_HEIRARCHY_MAX];
+	int32_t i;
+	char name[IFNAMSIZ];
+
+	if (direction_to) {
+		intf_first = ecm_db_connection_to_interfaces_get_and_ref(
+			ci, interfaces);
+	} else {
+		intf_first = ecm_db_connection_from_interfaces_get_and_ref(
+			ci, interfaces);
+	}
+
+	if (intf_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
+		DEBUG_WARN("%p: Error fetching interfaces\n", ci);
+		return -1;
+	}
+
+	/*
+	 * Search from innermost to outermost interface
+	 */
+	for (i = ECM_DB_IFACE_HEIRARCHY_MAX - 1; i >= intf_first; i--) {
+		int32_t index;
+		if (ecm_db_connection_iface_type_get(interfaces[i]) == ECM_DB_IFACE_TYPE_BRIDGE) {
+			/*
+			 * Found the bridge - next interface should be the one we want
+			 */
+			if (i <= intf_first) {
+				DEBUG_WARN("%p: Found bridge at position %d, but first interface "
+					"is %d, can't fetch HyFi relevant interface\n", ci,
+					i, intf_first);
+				break;
+			}
+
+			index = ecm_db_iface_interface_identifier_get(interfaces[i-1]);
+
+			if (!hyfi_ecm_is_port_on_hyfi_bridge(index)) {
+				DEBUG_TRACE("%p: Found non-Hy-Fi bridge, ignoring\n", ci);
+				break;
+			}
+
+			ecm_db_iface_interface_name_get(interfaces[i-1], &name[0]);
+			DEBUG_TRACE("%p: Found bridge: '%s' interface is %d (%s)\n", ci,
+				direction_to ? "to" : "from", index, name);
+			system_index = index;
+			break;
+		}
+
+		/*
+		 * Bridge not found yet - check if this interface belongs to the bridge
+		 */
+		index = ecm_db_iface_interface_identifier_get(interfaces[i]);
+		if (hyfi_ecm_is_port_on_hyfi_bridge(index)) {
+			ecm_db_iface_interface_name_get(interfaces[i], &name[0]);
+			DEBUG_TRACE("%p: Found bridge port: '%s' interface is %d (%s)\n", ci,
+				direction_to ? "to" : "from", index,
+				name);
+			system_index = index;
+			break;
+		}
+
+		/*
+		 * Match not found - keep searching
+		 */
+	}
+
+	ecm_db_connection_interfaces_deref(interfaces, intf_first);
+
+	return system_index;
+}
+
+/*
  * ecm_classifier_hyfi_sync_to_v4()
  *	Front end is pushing accel engine state to us
  */
@@ -337,6 +426,8 @@ static void ecm_classifier_hyfi_sync_to_v4(struct ecm_classifier_instance *aci, 
 	uint8_t flow_dest_addr[ETH_ALEN];
 	uint64_t fwd_bytes, rev_bytes, fwd_packets, rev_packets;
 	bool should_keep_on_fdb_update_fwd, should_keep_on_fdb_update_rev;
+	int32_t to_system_index;
+	int32_t from_system_index;
 
 	if (sync->reason != ECM_FRONT_END_IPV4_RULE_SYNC_REASON_STATS) {
 		DEBUG_TRACE("%p: Update not due to stats: %d\n",
@@ -361,6 +452,9 @@ static void ecm_classifier_hyfi_sync_to_v4(struct ecm_classifier_instance *aci, 
 	/*
 	 * Update the stats on Hy-Fi side
 	 */
+	to_system_index = ecm_classifier_hyfi_get_intf_id(ci, true);
+	from_system_index = ecm_classifier_hyfi_get_intf_id(ci, false);
+
 	ecm_db_connection_to_node_address_get(ci, &flow_dest_addr[0]);
 	ecm_db_connection_data_stats_get(ci, &from_bytes, &to_bytes,
 			&from_packets, &to_packets,
@@ -439,6 +533,15 @@ static void ecm_classifier_hyfi_sync_to_v4(struct ecm_classifier_instance *aci, 
 			hyfi_ecm_clear_flag(&chfi->flow,
 				ECM_HYFI_SHOULD_KEEP_ON_FDB_UPDATE_REV);
 		}
+	}
+
+	if (!hyfi_ecm_port_matches(&chfi->flow, to_system_index, from_system_index)) {
+		struct ecm_front_end_connection_instance *feci;
+		DEBUG_INFO("%p: Mismatch in egress port between HyFi and ECM, regenerate\n",
+			ci);
+		feci = ecm_db_connection_front_end_get_and_ref(ci);
+		feci->regenerate(feci, ci);
+		feci->deref(feci);
 	}
 
 	if (ret_fwd < 0 || ret_rev < 0) {
@@ -833,9 +936,9 @@ static ssize_t ecm_classifier_hyfi_set_command(struct file *file,
 		/*
 		 * Decelerate the connection
 		 */
-		DEBUG_TRACE("Force decel: %p\n", ci);
+		DEBUG_TRACE("%p: Force regeneration\n", ci);
 		feci = ecm_db_connection_front_end_get_and_ref(ci);
-		feci->decelerate(feci);
+		feci->regenerate(feci, ci);
 		feci->deref(feci);
 		break;
 	}
@@ -849,6 +952,8 @@ static ssize_t ecm_classifier_hyfi_set_command(struct file *file,
  */
 static struct file_operations ecm_classifier_hyfi_cmd_fops = {
 	.write = ecm_classifier_hyfi_set_command,
+	.llseek = generic_file_llseek,
+	.owner = THIS_MODULE
 };
 
 /*

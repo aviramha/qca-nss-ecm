@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2014-2015, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2016, The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -958,6 +958,20 @@ int32_t ecm_db_iface_interface_identifier_get(struct ecm_db_iface_instance *ii)
 	return ii->interface_identifier;
 }
 EXPORT_SYMBOL(ecm_db_iface_interface_identifier_get);
+
+/*
+ * ecm_db_iface_interface_name_get()
+ *	Return the interface name of this ecm interface
+ *
+ * name_buffer should be at least of size IFNAMSIZ
+ */
+void ecm_db_iface_interface_name_get(struct ecm_db_iface_instance *ii, char *name_buffer)
+{
+	DEBUG_CHECK_MAGIC(ii,
+		ECM_DB_IFACE_INSTANCE_MAGIC, "%p: magic failed", ii);
+	strlcpy(name_buffer, ii->name, IFNAMSIZ);
+}
+EXPORT_SYMBOL(ecm_db_iface_interface_name_get);
 
 /*
  * ecm_db_iface_mtu_reset()
@@ -11575,10 +11589,10 @@ void ecm_db_traverse_node_from_connection_list_and_decelerate(
 		struct ecm_db_connection_instance *cin;
 
 		if (!ecm_db_should_keep_connection(ci, node->address)) {
-			DEBUG_TRACE("%p: defunct\n", ci);
+			DEBUG_TRACE("%p: defunct %d\n", ci, ci->serial);
 			ecm_db_connection_decelerate_and_defunct(ci);
 		} else {
-			DEBUG_TRACE("%p: keeping connection\n", ci);
+			DEBUG_TRACE("%p: keeping connection %d\n", ci, ci->serial);
 		}
 
 		cin = ecm_db_node_from_connection_get_and_ref_next(ci);
@@ -11606,10 +11620,10 @@ void ecm_db_traverse_node_to_connection_list_and_decelerate(
 		struct ecm_db_connection_instance *cin;
 
 		if (!ecm_db_should_keep_connection(ci, node->address)) {
-			DEBUG_TRACE("%p: defunct\n", ci);
+			DEBUG_TRACE("%p: defunct %d\n", ci, ci->serial);
 			ecm_db_connection_decelerate_and_defunct(ci);
 		} else {
-			DEBUG_TRACE("%p: keeping connection\n", ci);
+			DEBUG_TRACE("%p: keeping connection %d\n", ci, ci->serial);
 		}
 
 		cin = ecm_db_node_to_connection_get_and_ref_next(ci);
@@ -11637,10 +11651,10 @@ void ecm_db_traverse_node_from_nat_connection_list_and_decelerate(
 		struct ecm_db_connection_instance *cin;
 
 		if (!ecm_db_should_keep_connection(ci, node->address)) {
-			DEBUG_TRACE("%p: defunct\n", ci);
+			DEBUG_TRACE("%p: defunct %d\n", ci, ci->serial);
 			ecm_db_connection_decelerate_and_defunct(ci);
 		} else {
-			DEBUG_TRACE("%p: keeping connection\n", ci);
+			DEBUG_TRACE("%p: keeping connection %d\n", ci, ci->serial);
 		}
 
 		cin = ecm_db_node_from_nat_connection_get_and_ref_next(ci);
@@ -11668,10 +11682,10 @@ void ecm_db_traverse_node_to_nat_connection_list_and_decelerate(
 		struct ecm_db_connection_instance *cin;
 
 		if (!ecm_db_should_keep_connection(ci, node->address)) {
-			DEBUG_TRACE("%p: defunct\n", ci);
+			DEBUG_TRACE("%p: defunct %d\n", ci, ci->serial);
 			ecm_db_connection_decelerate_and_defunct(ci);
 		} else {
-			DEBUG_TRACE("%p: keeping connection\n", ci);
+			DEBUG_TRACE("%p: keeping connection %d\n", ci, ci->serial);
 		}
 
 		cin = ecm_db_node_to_nat_connection_get_and_ref_next(ci);

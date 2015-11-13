@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2015 The Linux Foundation.  All rights reserved.
+ * Copyright (c) 2015-2016 The Linux Foundation.  All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -1482,7 +1482,7 @@ static unsigned int ecm_sfe_ipv4_bridge_post_routing_hook(const struct nf_hook_o
 	 * Case 3:
 	 *	If the packet was not local (case 1) or routed (case 2) then we process.
 	 */
-	in = br_port_dev_get(bridge, skb_eth_hdr->h_source);
+	in = br_port_dev_get(bridge, skb_eth_hdr->h_source, NULL);
 	if (!in) {
 		DEBUG_TRACE("skb: %p, no in device for bridge: %p (%s)\n", skb, bridge, bridge->name);
 		dev_put(bridge);
