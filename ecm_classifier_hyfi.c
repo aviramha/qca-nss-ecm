@@ -285,11 +285,14 @@ hyfi_classifier_out:
 	}
 
 	/*
-	 * Compute the hash
+	 * Compute the hashes in both forward and reverse directions
 	 */
 	if (unlikely(hyfi_hash_skbuf(skb, &chfi->flow.hash, &chfi->flow.flag, &chfi->flow.priority, &chfi->flow.seq))) {
 		goto hyfi_classifier_done;
 	}
+
+	if (unlikely(hyfi_hash_skbuf_reverse(skb, &chfi->flow.reverse_hash)))
+		goto hyfi_classifier_done;
 
 	chfi->flow.ecm_serial = chfi->ci_serial;
 	memcpy(&chfi->flow.sa, eth_hdr(skb)->h_source, ETH_ALEN);
@@ -315,9 +318,15 @@ static void ecm_classifier_hyfi_sync_to_v4(struct ecm_classifier_instance *aci, 
 {
 	struct ecm_classifier_hyfi_instance *chfi;
 	struct ecm_db_connection_instance *ci;
-	uint64_t num_packets = 0;
-	uint64_t num_bytes = 0;
-	int32_t ret;
+	uint64_t from_packets = 0;
+	uint64_t from_bytes = 0;
+	uint64_t to_packets = 0;
+	uint64_t to_bytes = 0;
+	uint64_t from_packets_dropped = 0;
+	uint64_t from_bytes_dropped = 0;
+	uint64_t to_packets_dropped = 0;
+	uint64_t to_bytes_dropped = 0;
+	int32_t ret_fwd, ret_rev;
 
 	chfi = (struct ecm_classifier_hyfi_instance *)aci;
 	DEBUG_CHECK_MAGIC(chfi, ECM_CLASSIFIER_HYFI_INSTANCE_MAGIC, "%p: magic failed", chfi);
@@ -336,39 +345,62 @@ static void ecm_classifier_hyfi_sync_to_v4(struct ecm_classifier_instance *aci, 
 	/*
 	 * Update the stats on Hy-Fi side
 	 */
-	ecm_db_connection_data_stats_get(ci, NULL, &num_bytes,
-			NULL, &num_packets,
-			NULL, NULL,
-			NULL, NULL );
+	ecm_db_connection_data_stats_get(ci, &from_bytes, &to_bytes,
+			&from_packets, &to_packets,
+			&from_bytes_dropped, &to_bytes_dropped,
+			&from_packets_dropped, &to_packets_dropped);
 	ecm_db_connection_deref(ci);
 
-	DEBUG_INFO("UPDATE STATS: Flow serial: %d\nFlow hash: 0x%02x, priority 0x%08x, flag: %d\nSA: %pM\nDA: %pM\n\n",
-			chfi->flow.ecm_serial, chfi->flow.hash, chfi->flow.priority, chfi->flow.flag,
+	DEBUG_INFO("UPDATE STATS: Flow serial: %d\npriority 0x%08x, flag: %d\nSA: %pM\nDA: %pM\n\n",
+			chfi->flow.ecm_serial, chfi->flow.priority, chfi->flow.flag,
 			chfi->flow.sa, chfi->flow.da);
 
-	DEBUG_INFO("num_bytes = %lld, num_packets = %lld\n", num_bytes, num_packets);
+	/*
+	 * Update forward direction 'from' bytes
+	 */
+	ret_fwd = hyfi_ecm_update_stats(&chfi->flow, chfi->flow.hash,
+		&chfi->flow.da[0], &chfi->flow.sa[0],
+		(from_bytes - from_bytes_dropped),
+		(from_packets - from_packets_dropped));
 
-	ret = hyfi_ecm_update_stats(&chfi->flow, num_bytes, num_packets);
+	DEBUG_INFO("ret_fwd %d Forward hash: 0x%02x, from_bytes = %lld, from_packets = %lld, "
+		"num_bytes_dropped = %lld, num_packets_dropped = %lld\n",
+		ret_fwd, chfi->flow.hash, from_bytes, from_packets,
+		from_bytes_dropped, from_packets_dropped);
 
-	if (ret < 0) {
-		printk("%s: Fatal error\n", __func__);
+	/*
+	 * Update reverse direction 'to' bytes
+	 */
+	ret_rev = hyfi_ecm_update_stats(&chfi->flow, chfi->flow.reverse_hash,
+		&chfi->flow.sa[0], &chfi->flow.da[0],
+		(to_bytes - to_bytes_dropped),
+		(to_packets - to_packets_dropped));
+
+	DEBUG_INFO("ret_rev %d Reverse hash: 0x%02x, to_bytes = %lld, to_packets = %lld, "
+		"num_bytes_dropped = %lld, num_packets_dropped = %lld\n",
+		ret_rev, chfi->flow.reverse_hash, to_bytes, to_packets,
+		to_bytes_dropped, to_packets_dropped);
+
+	if (ret_fwd < 0 || ret_rev < 0) {
+		DEBUG_ERROR("%p: Error updating stats", aci);
 		return;
 	}
 
-	switch(ret)
-	{
-	case 0: /* OK */
+	/*
+	 * Only need to be interested in forward or reverse direction
+	 */
+	if (ret_fwd == 0 || ret_rev == 0) {
 		chfi->hyfi_state = ECM_CLASSIFIER_HYFI_STATE_REGISTERED;
-		break;
-
-	case 1: /* Not interested */
-		chfi->hyfi_state = ECM_CLASSIFIER_HYFI_STATE_IGNORE;
-		break;
-
-	case 2: /* Not attached, may be interested in the future */
-	default:
+	} else if (ret_fwd == 2 || ret_rev == 2) {
+		/*
+		 * Not attached, may be interested in the future
+		 */
 		chfi->hyfi_state = ECM_CLASSIFIER_HYFI_STATE_INIT;
-		break;
+	} else {
+		/*
+		 * Not interested
+		 */
+		chfi->hyfi_state = ECM_CLASSIFIER_HYFI_STATE_IGNORE;
 	}
 }
 
@@ -390,57 +422,8 @@ static void ecm_classifier_hyfi_sync_from_v4(struct ecm_classifier_instance *aci
  */
 static void ecm_classifier_hyfi_sync_to_v6(struct ecm_classifier_instance *aci, struct ecm_classifier_rule_sync *sync)
 {
-	struct ecm_classifier_hyfi_instance *chfi;
-	struct ecm_db_connection_instance *ci;
-	uint64_t num_packets = 0;
-	uint64_t num_bytes = 0;
-	int32_t ret;
-
-	chfi = (struct ecm_classifier_hyfi_instance *)aci;
-	DEBUG_CHECK_MAGIC(chfi, ECM_CLASSIFIER_HYFI_INSTANCE_MAGIC, "%p: magic failed", chfi);
-
-	if (chfi->hyfi_state &
-			(ECM_CLASSIFIER_HYFI_STATE_IGNORE)) {
-		return;
-	}
-
-	ci = ecm_db_connection_serial_find_and_ref(chfi->ci_serial);
-	if (!ci) {
-		DEBUG_TRACE("%p: No ci found for %u\n", chfi, chfi->ci_serial);
-		return;
-	}
-
-	/*
-	 * Update the stats on Hy-Fi side
-	 */
-	ecm_db_connection_data_stats_get(ci, NULL, &num_bytes,
-			NULL, &num_packets,
-			NULL, NULL,
-			NULL, NULL );
-	ecm_db_connection_deref(ci);
-
-	ret = hyfi_ecm_update_stats(&chfi->flow, num_bytes, num_packets);
-
-	if (ret < 0) {
-		DEBUG_ERROR("%s: Fatal error\n", __func__);
-		return;
-	}
-
-	switch(ret)
-	{
-	case 0: /* OK */
-		chfi->hyfi_state = ECM_CLASSIFIER_HYFI_STATE_REGISTERED;
-		break;
-
-	case 1: /* Not interested */
-		chfi->hyfi_state = ECM_CLASSIFIER_HYFI_STATE_IGNORE;
-		break;
-
-	case 2: /* Not attached, may be interested in the future */
-	default:
-		chfi->hyfi_state = ECM_CLASSIFIER_HYFI_STATE_INIT;
-		break;
-	}
+	/* Same processing as v4 */
+	ecm_classifier_hyfi_sync_to_v4(aci, sync);
 }
 
 /*
