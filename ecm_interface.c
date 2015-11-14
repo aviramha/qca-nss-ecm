@@ -3836,10 +3836,10 @@ static int ecm_interface_node_br_fdb_notify_event(struct notifier_block *nb,
 	node = ecm_db_node_find_and_ref(mac);
 
 	if(unlikely(!node)) {
-		DEBUG_WARN("node address is null \n");
+		DEBUG_WARN("node address is null\n");
 		return NOTIFY_DONE;
 	}
-
+	DEBUG_INFO("FDB updated for node %pM\n", mac);
 	ecm_db_traverse_node_from_connection_list_and_decelerate(node);
 	ecm_db_traverse_node_to_connection_list_and_decelerate(node);
 	ecm_db_traverse_node_from_nat_connection_list_and_decelerate(node);

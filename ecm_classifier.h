@@ -152,6 +152,12 @@ typedef int (*ecm_classifier_state_get_callback_t)(struct ecm_classifier_instanc
 #endif
 
 /*
+ * Determines if a connection should be kept.
+ */
+typedef bool (*ecm_classifier_should_keep_connection_t)
+	(struct ecm_classifier_instance *ci, uint8_t *mac);
+
+/*
  * Base class for all types of classifiers
  */
 struct ecm_classifier_instance {
@@ -172,6 +178,8 @@ struct ecm_classifier_instance {
 							/* Reclassify */
 	ecm_classifier_last_process_response_get_callback_t last_process_response_get;
 							/* Return last process response */
+	ecm_classifier_should_keep_connection_t should_keep_connection;
+							/* Check if connection should be kept when FDB updates */
 #ifdef ECM_STATE_OUTPUT_ENABLE
 	ecm_classifier_state_get_callback_t state_get;
 							/* Return its state */
