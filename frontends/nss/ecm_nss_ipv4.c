@@ -848,7 +848,6 @@ void ecm_nss_ipv4_connection_regenerate(struct ecm_db_connection_instance *ci, e
 	}
 	DEBUG_INFO("%p: reclassify success\n", ci);
 
-
 ecm_ipv4_regen_done:
 
 	/*
@@ -1317,6 +1316,11 @@ static unsigned int ecm_nss_ipv4_post_routing_hook(const struct nf_hook_ops *ops
 	unsigned int result;
 
 	DEBUG_TRACE("%p: Routing: %s\n", out, out->name);
+
+	if (ecm_front_end_acceleration_rejected(skb)) {
+		DEBUG_TRACE("Acceleration rejected\n");
+		return NF_ACCEPT;
+	}
 
 	/*
 	 * If operations have stopped then do not process packets

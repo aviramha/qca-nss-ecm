@@ -1031,6 +1031,11 @@ static unsigned int ecm_nss_ipv6_post_routing_hook(const struct nf_hook_ops *ops
 
 	DEBUG_TRACE("%p: Routing: %s\n", out, out->name);
 
+	if (ecm_front_end_acceleration_rejected(skb)) {
+		DEBUG_TRACE("Acceleration rejected.\n");
+		return NF_ACCEPT;
+	}
+
 	/*
 	 * If operations have stopped then do not process packets
 	 */
