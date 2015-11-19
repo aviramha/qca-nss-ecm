@@ -136,8 +136,10 @@ struct ecm_db_listener_instance *ecm_classifier_nl_li = NULL;
 /*
  * Generic Netlink family and multicast group names
  */
-static struct genl_multicast_group ecm_cl_nl_genl_mcgrp = {
-	.name = ECM_CL_NL_GENL_MCGRP,
+static struct genl_multicast_group ecm_cl_nl_genl_mcgrp[] = {
+	{
+		.name = ECM_CL_NL_GENL_MCGRP,
+	},
 };
 
 static struct genl_family ecm_cl_nl_genl_family = {
@@ -196,7 +198,15 @@ ecm_classifier_nl_send_genl_msg(enum ECM_CL_NL_GENL_CMD cmd,
 	}
 
 	/* genlmsg_multicast frees the skb in both success and error cases */
-	ret = genlmsg_multicast(skb, 0, ecm_cl_nl_genl_mcgrp.id, GFP_ATOMIC);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 13, 0)
+	ret = genlmsg_multicast(&ecm_cl_nl_genl_family,
+				skb,
+				0,
+				0,
+				GFP_ATOMIC);
+#else
+	ret = genlmsg_multicast(skb, 0, ecm_cl_nl_genl_mcgrp[0].id, GFP_ATOMIC);
+#endif
 	if (ret != 0) {
 		DEBUG_WARN("genl multicast failed: %d\n", ret);
 		return ret;
@@ -370,6 +380,15 @@ static void ecm_classifier_nl_genl_msg_closed(struct ecm_db_connection_instance 
 	}
 
 	ecm_classifier_nl_send_genl_msg(ECM_CL_NL_GENL_CMD_CONNECTION_CLOSED, &tuple);
+}
+
+/*
+ * ignore ecm_classifier_messages ACCEL_OK and CLOSED
+ */
+static int ecm_classifier_nl_genl_msg_DUMP(struct sk_buff *skb,
+					   struct netlink_callback *cb)
+{
+	return 0;
 }
 
 /*
@@ -1351,14 +1370,14 @@ static struct genl_ops ecm_cl_nl_genl_ops[] = {
 		.flags = 0,
 		.policy = ecm_cl_nl_genl_policy,
 		.doit = NULL,
-		.dumpit = NULL,
+		.dumpit = ecm_classifier_nl_genl_msg_DUMP,
 	},
 	{
 		.cmd = ECM_CL_NL_GENL_CMD_CONNECTION_CLOSED,
 		.flags = 0,
 		.policy = ecm_cl_nl_genl_policy,
 		.doit = NULL,
-		.dumpit = NULL,
+		.dumpit = ecm_classifier_nl_genl_msg_DUMP,
 	},
 };
 
@@ -1366,6 +1385,15 @@ static int ecm_classifier_nl_register_genl(void)
 {
 	int result;
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 13, 0)
+	result = genl_register_family_with_ops_groups(&ecm_cl_nl_genl_family,
+						      ecm_cl_nl_genl_ops,
+						      ecm_cl_nl_genl_mcgrp);
+	if (result != 0) {
+		DEBUG_ERROR("failed to register genl ops: %d\n", result);
+		return result;
+	}
+#else
 	result = genl_register_family(&ecm_cl_nl_genl_family);
 	if (result != 0) {
 		DEBUG_ERROR("failed to register genl family: %d\n", result);
@@ -1380,7 +1408,7 @@ static int ecm_classifier_nl_register_genl(void)
 	}
 
 	result = genl_register_mc_group(&ecm_cl_nl_genl_family,
-					&ecm_cl_nl_genl_mcgrp);
+					ecm_cl_nl_genl_mcgrp);
 	if (result != 0) {
 		DEBUG_ERROR("failed to register genl multicast group: %d\n",
 			    result);
@@ -1394,12 +1422,15 @@ err3:
 err2:
 	genl_unregister_family(&ecm_cl_nl_genl_family);
 err1:
+#endif
 	return result;
 }
 
 static void ecm_classifier_nl_unregister_genl(void)
 {
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 13, 0)
 	genl_unregister_ops(&ecm_cl_nl_genl_family, ecm_cl_nl_genl_ops);
+#endif
 	genl_unregister_family(&ecm_cl_nl_genl_family);
 }
 

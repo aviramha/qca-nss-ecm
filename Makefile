@@ -154,9 +154,7 @@ ccflags-$(ECM_IPV6_ENABLE) += -DECM_IPV6_ENABLE
 # #############################################################################
 # Define ECM_CLASSIFIER_NL_ENABLE=y in order to enable NL classifier.
 # #############################################################################
-ifneq ($(findstring 3.4, $(KERNELVERSION)),)
 ECM_CLASSIFIER_NL_ENABLE=y
-endif
 ecm-$(ECM_CLASSIFIER_NL_ENABLE) += ecm_classifier_nl.o
 ccflags-$(ECM_CLASSIFIER_NL_ENABLE) += -DECM_CLASSIFIER_NL_ENABLE
 
