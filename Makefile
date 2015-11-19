@@ -83,9 +83,7 @@ ccflags-$(ECM_INTERFACE_L2TPV2_ENABLE) += -DECM_INTERFACE_L2TPV2_ENABLE
 # Define ECM_INTERFACE_PPTP_ENABLE=y in order
 # to enable support for pptp acceleration.
 # #############################################################################
-ifneq ($(findstring 3.4, $(KERNELVERSION)),)
 ECM_INTERFACE_PPTP_ENABLE=y
-endif
 ccflags-$(ECM_INTERFACE_PPTP_ENABLE) += -DECM_INTERFACE_PPTP_ENABLE
 
 # #############################################################################
