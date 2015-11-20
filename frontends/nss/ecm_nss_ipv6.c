@@ -1778,59 +1778,6 @@ static struct nf_hook_ops ecm_nss_ipv6_netfilter_hooks[] __read_mostly = {
 };
 
 /*
- * ecm_nss_ipv6_connection_from_ct_get_and_ref()
- *	Return, if any, a connection given a ct
- */
-static struct ecm_db_connection_instance *ecm_nss_ipv6_connection_from_ct_get_and_ref(struct nf_conn *ct)
-{
-	struct nf_conntrack_tuple orig_tuple;
-	struct nf_conntrack_tuple reply_tuple;
-	ip_addr_t host1_addr;
-	ip_addr_t host2_addr;
-	int host1_port;
-	int host2_port;
-	int protocol;
-
-	/*
-	 * Look up the associated connection for this conntrack connection
-	 */
-	orig_tuple = ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple;
-	reply_tuple = ct->tuplehash[IP_CT_DIR_REPLY].tuple;
-	ECM_NIN6_ADDR_TO_IP_ADDR(host1_addr, orig_tuple.src.u3.in6);
-	ECM_NIN6_ADDR_TO_IP_ADDR(host2_addr, reply_tuple.src.u3.in6);
-	protocol = orig_tuple.dst.protonum;
-	if (protocol == IPPROTO_TCP) {
-		host1_port = ntohs(orig_tuple.src.u.tcp.port);
-		host2_port = ntohs(reply_tuple.src.u.tcp.port);
-	} else if (protocol == IPPROTO_UDP) {
-		host1_port = ntohs(orig_tuple.src.u.udp.port);
-		host2_port = ntohs(reply_tuple.src.u.udp.port);
-	} else if ((protocol == IPPROTO_IPIP)) {
-		host1_port = 0;
-		host2_port = 0;
-	} else {
-		host1_port = -protocol;
-		host2_port = -protocol;
-	}
-
-	DEBUG_TRACE("%p: lookup src: " ECM_IP_ADDR_OCTAL_FMT ":%d, "
-		    "dest: " ECM_IP_ADDR_OCTAL_FMT ":%d, "
-		    "protocol %d\n",
-		    ct,
-		    ECM_IP_ADDR_TO_OCTAL(host1_addr),
-		    host1_port,
-		    ECM_IP_ADDR_TO_OCTAL(host2_addr),
-		    host2_port,
-		    protocol);
-
-	return ecm_db_connection_find_and_ref(host1_addr,
-					      host2_addr,
-					      protocol,
-					      host1_port,
-					      host2_port);
-}
-
-/*
  * ecm_nss_ipv6_conntrack_event_destroy()
  *	Handles conntrack destroy events
  */
@@ -1841,7 +1788,7 @@ static void ecm_nss_ipv6_conntrack_event_destroy(struct nf_conn *ct)
 
 	DEBUG_INFO("Destroy event for ct: %p\n", ct);
 
-	ci = ecm_nss_ipv6_connection_from_ct_get_and_ref(ct);
+	ci = ecm_db_connection_ipv6_from_ct_get_and_ref(ct);
 	if (!ci) {
 		DEBUG_TRACE("%p: not found\n", ct);
 		return;
@@ -1880,7 +1827,7 @@ static void ecm_nss_ipv6_conntrack_event_mark(struct nf_conn *ct)
 		return;
 	}
 
-	ci = ecm_nss_ipv6_connection_from_ct_get_and_ref(ct);
+	ci = ecm_db_connection_ipv6_from_ct_get_and_ref(ct);
 	if (!ci) {
 		DEBUG_TRACE("%p: not found\n", ct);
 		return;

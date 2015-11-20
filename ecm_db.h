@@ -20,6 +20,10 @@
 #ifndef ECM_DB_H_
 #define ECM_DB_H_
 
+#include <net/netfilter/nf_conntrack.h>
+
+struct ecm_db_connection_instance *ecm_db_connection_ipv4_from_ct_get_and_ref(struct nf_conn *ct);
+struct ecm_db_connection_instance *ecm_db_connection_ipv6_from_ct_get_and_ref(struct nf_conn *ct);
 uint32_t ecm_db_time_get(void);
 void ecm_db_connection_defunct_all(void);
 #ifdef ECM_DB_XREF_ENABLE
