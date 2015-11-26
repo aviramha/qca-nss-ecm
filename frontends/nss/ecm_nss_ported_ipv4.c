@@ -2353,7 +2353,19 @@ unsigned int ecm_nss_ported_ipv4_process(struct net_device *out_dev, struct net_
 	}
 
 	/*
-	 * In DMZ scenarios SNAT rule is getting applied on the packet after packet
+	 * Identify which side of the connection is sending.
+	 * NOTE: This may be different than what sender is at the moment
+	 * given the connection we have located.
+	 */
+	ecm_db_connection_from_address_get(ci, match_addr);
+	if (ECM_IP_ADDR_MATCH(ip_src_addr, match_addr)) {
+		sender = ECM_TRACKER_SENDER_TYPE_SRC;
+	} else {
+		sender = ECM_TRACKER_SENDER_TYPE_DEST;
+	}
+
+	/*
+	 * In nat reflection scenarios SNAT rule is getting applied on the packet after packet
 	 * passed through bridge post routing hook
 	 *
 	 * Example
@@ -2373,7 +2385,7 @@ unsigned int ecm_nss_ported_ipv4_process(struct net_device *out_dev, struct net_
 	 * subsequent packets
 	 */
 	ecm_db_connection_from_address_nat_get(ci, match_addr);
-	if (!ECM_IP_ADDR_MATCH(ip_src_addr_nat, match_addr) && ct) {
+	if (!ECM_IP_ADDR_MATCH(ip_src_addr_nat, match_addr) && ct && (sender == ECM_TRACKER_SENDER_TYPE_SRC)) {
 		/*
 		 * Force destruction of the connection my making it defunct
 		 */
@@ -2389,19 +2401,6 @@ unsigned int ecm_nss_ported_ipv4_process(struct net_device *out_dev, struct net_
 		ecm_db_connection_deref(ci);
 		return NF_ACCEPT;
 	}
-
-	/*
-	 * Identify which side of the connection is sending.
-	 * NOTE: This may be different than what sender is at the moment
-	 * given the connection we have located.
-	 */
-	ecm_db_connection_from_address_get(ci, match_addr);
-	if (ECM_IP_ADDR_MATCH(ip_src_addr, match_addr)) {
-		sender = ECM_TRACKER_SENDER_TYPE_SRC;
-	} else {
-		sender = ECM_TRACKER_SENDER_TYPE_DEST;
-	}
-
 
 	/*
 	 * Do we need to action generation change?
