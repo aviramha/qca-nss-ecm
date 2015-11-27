@@ -189,6 +189,9 @@ static void ecm_nss_multicast_ipv6_connection_update_callback(void *app_data, st
 	nmci = (struct ecm_nss_multicast_ipv6_connection_instance *)feci;
 	DEBUG_CHECK_MAGIC(nmci, ECM_NSS_MULTICAST_IPV6_CONNECTION_INSTANCE_MAGIC, "%p: magic failed", nmci);
 
+	ECM_NSS_IPV6_ADDR_TO_IP_ADDR(flow_ip, nircm->tuple.flow_ip);
+	ECM_NSS_IPV6_ADDR_TO_IP_ADDR(return_ip, nircm->tuple.return_ip);
+
 	/*
 	 * Dump some useful trace information.
 	 */

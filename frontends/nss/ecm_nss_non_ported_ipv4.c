@@ -435,6 +435,7 @@ static void ecm_nss_non_ported_ipv4_connection_accelerate(struct ecm_front_end_c
 	nim = (struct nss_ipv4_msg *)kzalloc(sizeof(struct nss_ipv4_msg), GFP_ATOMIC | __GFP_NOWARN);
 	if (!nim) {
 		DEBUG_WARN("%p: no memory for nss ipv4 message structure instance: %p\n", feci, feci->ci);
+		ecm_nss_ipv4_accel_pending_clear(feci, ECM_FRONT_END_ACCELERATION_MODE_DECEL);
 		return;
 	}
 

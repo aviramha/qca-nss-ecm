@@ -1389,7 +1389,7 @@ static unsigned int ecm_nss_ipv4_post_routing_hook(const struct nf_hook_ops *ops
 	 * skip l2tp v2 and v3, because we don't accelerate them
 	 */
 	if (ecm_interface_skip_l2tp_packet_by_version(skb, out, 2) ||
-		ecm_interface_l2tp_version_check(skb, out, 3)) {
+		ecm_interface_skip_l2tp_packet_by_version(skb, out, 3)) {
 		return NF_ACCEPT;
 	}
 #else
