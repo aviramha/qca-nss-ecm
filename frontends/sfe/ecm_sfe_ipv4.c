@@ -198,8 +198,6 @@ struct ecm_db_node_instance *ecm_sfe_ipv4_node_establish_and_ref(struct ecm_fron
 	}
 	for (i = ECM_DB_IFACE_HEIRARCHY_MAX - 1; (!done) && (i >= interface_list_first); i--) {
 		ecm_db_iface_type_t type;
-		ip_addr_t gw_addr = ECM_IP_ADDR_NULL;
-		bool on_link = false;
 #ifdef ECM_INTERFACE_PPPOE_ENABLE
 		struct ecm_db_interface_info_pppoe pppoe_info;
 #endif
@@ -240,16 +238,34 @@ struct ecm_db_node_instance *ecm_sfe_ipv4_node_establish_and_ref(struct ecm_fron
 		case ECM_DB_IFACE_TYPE_LAG:
 		case ECM_DB_IFACE_TYPE_BRIDGE:
 		case ECM_DB_IFACE_TYPE_IPSEC_TUNNEL:
-			if (!ecm_interface_mac_addr_get(addr, node_addr, &on_link, gw_addr)) {
-				DEBUG_TRACE("failed to obtain node address for host " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(addr));
-				ecm_interface_send_arp_request(dev, addr, on_link, gw_addr);
+			if (!ecm_interface_mac_addr_get_no_route(dev, addr, node_addr)) {
+				ip_addr_t gw_addr = ECM_IP_ADDR_NULL;
+
+				/*
+				 * Try one more time with gateway ip address if it exists.
+				 */
+				if (ecm_interface_find_gateway(addr, gw_addr)) {
+					DEBUG_WARN("Node establish failed, there is no gateway address for 2nd mac lookup try\n");
+					return NULL;
+				}
+
+				DEBUG_TRACE("Have a gw address " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(gw_addr));
+
+				if (ecm_interface_mac_addr_get_no_route(dev, gw_addr, node_addr)) {
+					DEBUG_TRACE("Found the mac address for gateway\n");
+					goto done;
+				}
+
+				ecm_interface_send_arp_request(dev, addr, false, gw_addr);
+
+				DEBUG_TRACE("failed to obtain any node address for host " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(addr));
 
 				/*
 				 * Unable to get node address at this time.
 				 */
 				return NULL;
 			}
-
+done:
 			if (is_multicast_ether_addr(node_addr)) {
 				DEBUG_TRACE("multicast node address for host " ECM_IP_ADDR_DOT_FMT ", node_addr: %pM\n", ECM_IP_ADDR_TO_DOT(addr), node_addr);
 				return NULL;
@@ -642,7 +658,7 @@ bool ecm_sfe_ipv4_reclassify(struct ecm_db_connection_instance *ci, int assignme
  * It also involves the possible triggering of classifier re-evaluation but only if all currently assigned
  * classifiers permit this operation.
  */
-void ecm_sfe_ipv4_connection_regenerate(struct ecm_db_connection_instance *ci, ecm_tracker_sender_type_t sender,
+void ecm_sfe_ipv4_connection_regenerate(struct ecm_db_connection_instance *ci, ecm_tracker_sender_type_t sender, ecm_db_direction_t ecm_dir,
 							struct net_device *out_dev, struct net_device *out_dev_nat,
 							struct net_device *in_dev, struct net_device *in_dev_nat,
 							__be16 *layer4hdr, struct sk_buff *skb)
@@ -670,6 +686,7 @@ void ecm_sfe_ipv4_connection_regenerate(struct ecm_db_connection_instance *ci, e
 	int assignment_count;
 	struct ecm_classifier_instance *assignments[ECM_CLASSIFIER_TYPES];
 	struct ecm_front_end_connection_instance *feci;
+	struct ecm_front_end_interface_construct_instance efeici;
 
 	DEBUG_INFO("%p: re-gen needed\n", ci);
 
@@ -719,9 +736,21 @@ void ecm_sfe_ipv4_connection_regenerate(struct ecm_db_connection_instance *ci, e
 
 	feci = ecm_db_connection_front_end_get_and_ref(ci);
 
+	if (!ecm_front_end_ipv4_interface_construct_set(skb, sender, ecm_dir, is_routed,
+							in_dev, out_dev,
+							ip_src_addr, ip_src_addr_nat,
+							ip_dest_addr, ip_dest_addr_nat,
+							&efeici)) {
+
+		DEBUG_WARN("ECM front end ipv4 interface construct set failed for regeneration\n");
+		goto ecm_ipv4_retry_regen;
+	}
+	ecm_front_end_ipv4_interface_construct_netdev_hold(&efeici);
+
 	DEBUG_TRACE("%p: Update the 'from' interface heirarchy list\n", ci);
-	from_list_first = ecm_interface_heirarchy_construct(feci, from_list, ip_dest_addr, ip_src_addr, 4, protocol, in_dev, is_routed, in_dev, src_node_addr, dest_node_addr, layer4hdr, skb);
+	from_list_first = ecm_interface_heirarchy_construct(feci, from_list, efeici.from_dev, efeici.from_other_dev, ip_dest_addr, efeici.from_mac_lookup_ip_addr, 4, protocol, in_dev, is_routed, in_dev, src_node_addr, dest_node_addr, layer4hdr, skb);
 	if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
+		ecm_front_end_ipv4_interface_construct_netdev_put(&efeici);
 		goto ecm_ipv4_retry_regen;
 	}
 
@@ -729,8 +758,9 @@ void ecm_sfe_ipv4_connection_regenerate(struct ecm_db_connection_instance *ci, e
 	ecm_db_connection_interfaces_deref(from_list, from_list_first);
 
 	DEBUG_TRACE("%p: Update the 'from NAT' interface heirarchy list\n", ci);
-	from_nat_list_first = ecm_interface_heirarchy_construct(feci, from_nat_list, ip_dest_addr, ip_src_addr_nat, 4, protocol, in_dev_nat, is_routed, in_dev_nat, src_node_addr_nat, dest_node_addr_nat, layer4hdr, skb);
+	from_nat_list_first = ecm_interface_heirarchy_construct(feci, from_nat_list, efeici.from_nat_dev, efeici.from_nat_other_dev, ip_dest_addr, efeici.from_nat_mac_lookup_ip_addr, 4, protocol, in_dev_nat, is_routed, in_dev_nat, src_node_addr_nat, dest_node_addr_nat, layer4hdr, skb);
 	if (from_nat_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
+		ecm_front_end_ipv4_interface_construct_netdev_put(&efeici);
 		goto ecm_ipv4_retry_regen;
 	}
 
@@ -738,8 +768,9 @@ void ecm_sfe_ipv4_connection_regenerate(struct ecm_db_connection_instance *ci, e
 	ecm_db_connection_interfaces_deref(from_nat_list, from_nat_list_first);
 
 	DEBUG_TRACE("%p: Update the 'to' interface heirarchy list\n", ci);
-	to_list_first = ecm_interface_heirarchy_construct(feci, to_list, ip_src_addr, ip_dest_addr, 4, protocol, out_dev, is_routed, in_dev, dest_node_addr, src_node_addr, layer4hdr, skb);
+	to_list_first = ecm_interface_heirarchy_construct(feci, to_list, efeici.to_dev, efeici.to_other_dev, ip_src_addr, efeici.to_mac_lookup_ip_addr, 4, protocol, out_dev, is_routed, in_dev, dest_node_addr, src_node_addr, layer4hdr, skb);
 	if (to_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
+		ecm_front_end_ipv4_interface_construct_netdev_put(&efeici);
 		goto ecm_ipv4_retry_regen;
 	}
 
@@ -747,10 +778,13 @@ void ecm_sfe_ipv4_connection_regenerate(struct ecm_db_connection_instance *ci, e
 	ecm_db_connection_interfaces_deref(to_list, to_list_first);
 
 	DEBUG_TRACE("%p: Update the 'to NAT' interface heirarchy list\n", ci);
-	to_nat_list_first = ecm_interface_heirarchy_construct(feci, to_nat_list, ip_src_addr, ip_dest_addr_nat, 4, protocol, out_dev_nat, is_routed, in_dev, dest_node_addr_nat, src_node_addr_nat, layer4hdr, skb);
+	to_nat_list_first = ecm_interface_heirarchy_construct(feci, to_nat_list, efeici.to_nat_dev, efeici.to_nat_other_dev, ip_src_addr, efeici.to_nat_mac_lookup_ip_addr, 4, protocol, out_dev_nat, is_routed, in_dev, dest_node_addr_nat, src_node_addr_nat, layer4hdr, skb);
 	if (to_nat_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
+		ecm_front_end_ipv4_interface_construct_netdev_put(&efeici);
 		goto ecm_ipv4_retry_regen;
 	}
+
+	ecm_front_end_ipv4_interface_construct_netdev_put(&efeici);
 
 	feci->deref(feci);
 	ecm_db_connection_to_nat_interfaces_reset(ci, to_nat_list, to_nat_list_first);

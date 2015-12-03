@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2015 The Linux Foundation.  All rights reserved.
+ * Copyright (c) 2015-2016 The Linux Foundation.  All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -168,7 +168,7 @@ extern void ecm_sfe_ipv4_accel_done_time_update(struct ecm_front_end_connection_
 extern void ecm_sfe_ipv4_decel_done_time_update(struct ecm_front_end_connection_instance *feci);
 extern struct ecm_classifier_instance *ecm_sfe_ipv4_assign_classifier(struct ecm_db_connection_instance *ci, ecm_classifier_type_t type);
 extern bool ecm_sfe_ipv4_reclassify(struct ecm_db_connection_instance *ci, int assignment_count, struct ecm_classifier_instance *assignments[]);
-extern void ecm_sfe_ipv4_connection_regenerate(struct ecm_db_connection_instance *ci, ecm_tracker_sender_type_t sender,
+extern void ecm_sfe_ipv4_connection_regenerate(struct ecm_db_connection_instance *ci, ecm_tracker_sender_type_t sender, ecm_db_direction_t ecm_dir,
 							struct net_device *out_dev, struct net_device *out_dev_nat,
 							struct net_device *in_dev, struct net_device *in_dev_nat, __be16 *layer4hdr, struct sk_buff *skb);
 extern struct ecm_db_node_instance *ecm_sfe_ipv4_node_establish_and_ref(struct ecm_front_end_connection_instance *feci,

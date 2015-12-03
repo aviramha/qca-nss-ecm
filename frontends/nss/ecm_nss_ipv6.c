@@ -278,8 +278,24 @@ struct ecm_db_node_instance *ecm_nss_ipv6_node_establish_and_ref(struct ecm_fron
 		case ECM_DB_IFACE_TYPE_ETHERNET:
 		case ECM_DB_IFACE_TYPE_LAG:
 		case ECM_DB_IFACE_TYPE_BRIDGE:
-			if (!ecm_interface_mac_addr_get(addr, node_addr, &on_link, gw_addr)) {
-				DEBUG_TRACE("Failed to obtain mac for host " ECM_IP_ADDR_OCTAL_FMT "\n", ECM_IP_ADDR_TO_OCTAL(addr));
+			if (!ecm_interface_mac_addr_get_no_route(dev, addr, node_addr)) {
+				ip_addr_t gw_addr = ECM_IP_ADDR_NULL;
+
+				/*
+				 * Try one more time with gateway ip address if it exists.
+				 */
+				if (!ecm_interface_find_gateway(addr, gw_addr)) {
+					DEBUG_WARN("Node establish failed, there is no gateway address for 2nd mac lookup try\n");
+					return NULL;
+				}
+
+				DEBUG_TRACE("Have a gw address " ECM_IP_ADDR_OCTAL_FMT "\n", ECM_IP_ADDR_TO_OCTAL(gw_addr));
+
+				if (ecm_interface_mac_addr_get_no_route(dev, gw_addr, node_addr)) {
+					DEBUG_TRACE("Found the mac address for gateway\n");
+					goto done;
+				}
+
 				if (ecm_front_end_is_bridge_port(dev)) {
 					struct net_device *master;
 					master = ecm_interface_get_and_hold_dev_master(dev);
@@ -289,8 +305,11 @@ struct ecm_db_node_instance *ecm_nss_ipv6_node_establish_and_ref(struct ecm_fron
 				} else {
 					ecm_interface_send_neighbour_solicitation(dev, addr);
 				}
+
+				DEBUG_TRACE("Failed to obtain mac for host " ECM_IP_ADDR_OCTAL_FMT "\n", ECM_IP_ADDR_TO_OCTAL(addr));
 				return NULL;
 			}
+done:
 			if (is_multicast_ether_addr(node_addr)) {
 				DEBUG_TRACE("multicast node address for host " ECM_IP_ADDR_OCTAL_FMT ", node_addr: %pM\n", ECM_IP_ADDR_TO_OCTAL(addr), node_addr);
 				return NULL;
@@ -679,7 +698,7 @@ bool ecm_nss_ipv6_reclassify(struct ecm_db_connection_instance *ci, int assignme
  * It also involves the possible triggering of classifier re-evaluation but only if all currently assigned
  * classifiers permit this operation.
  */
-void ecm_nss_ipv6_connection_regenerate(struct ecm_db_connection_instance *ci, ecm_tracker_sender_type_t sender,
+void ecm_nss_ipv6_connection_regenerate(struct ecm_db_connection_instance *ci, ecm_tracker_sender_type_t sender, ecm_db_direction_t ecm_dir,
 							struct net_device *out_dev, struct net_device *in_dev, __be16 *layer4hdr,
 							struct sk_buff *skb)
 {
@@ -698,6 +717,7 @@ void ecm_nss_ipv6_connection_regenerate(struct ecm_db_connection_instance *ci, e
 	int assignment_count;
 	struct ecm_classifier_instance *assignments[ECM_CLASSIFIER_TYPES];
 	struct ecm_front_end_connection_instance *feci;
+	struct ecm_front_end_interface_construct_instance efeici;
 
 	DEBUG_INFO("%p: re-gen needed\n", ci);
 
@@ -739,9 +759,20 @@ void ecm_nss_ipv6_connection_regenerate(struct ecm_db_connection_instance *ci, e
 
 	feci = ecm_db_connection_front_end_get_and_ref(ci);
 
+	if (!ecm_front_end_ipv6_interface_construct_set(skb, sender, ecm_dir, is_routed,
+							in_dev, out_dev,
+							ip_src_addr, ip_dest_addr,
+							&efeici)) {
+
+		DEBUG_WARN("ECM front end ipv6 interface construct set failed for regeneration\n");
+		goto ecm_ipv6_retry_regen;
+	}
+	ecm_front_end_ipv6_interface_construct_netdev_hold(&efeici);
+
 	DEBUG_TRACE("%p: Update the 'from' interface heirarchy list\n", ci);
-	from_list_first = ecm_interface_heirarchy_construct(feci, from_list, ip_dest_addr, ip_src_addr, 6, protocol, in_dev, is_routed, in_dev, src_node_addr, dest_node_addr, layer4hdr, skb);
+	from_list_first = ecm_interface_heirarchy_construct(feci, from_list, efeici.from_dev, efeici.from_other_dev, ip_dest_addr, efeici.from_mac_lookup_ip_addr, 6, protocol, in_dev, is_routed, in_dev, src_node_addr, dest_node_addr, layer4hdr, skb);
 	if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
+		ecm_front_end_ipv6_interface_construct_netdev_put(&efeici);
 		goto ecm_ipv6_retry_regen;
 	}
 
@@ -749,10 +780,13 @@ void ecm_nss_ipv6_connection_regenerate(struct ecm_db_connection_instance *ci, e
 	ecm_db_connection_interfaces_deref(from_list, from_list_first);
 
 	DEBUG_TRACE("%p: Update the 'to' interface heirarchy list\n", ci);
-	to_list_first = ecm_interface_heirarchy_construct(feci, to_list, ip_src_addr, ip_dest_addr, 6, protocol, out_dev, is_routed, in_dev, dest_node_addr, src_node_addr, layer4hdr, skb);
+	to_list_first = ecm_interface_heirarchy_construct(feci, to_list, efeici.to_dev, efeici.to_other_dev, ip_src_addr, efeici.to_mac_lookup_ip_addr, 6, protocol, out_dev, is_routed, in_dev, dest_node_addr, src_node_addr, layer4hdr, skb);
 	if (to_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
+		ecm_front_end_ipv6_interface_construct_netdev_put(&efeici);
 		goto ecm_ipv6_retry_regen;
 	}
+
+	ecm_front_end_ipv6_interface_construct_netdev_put(&efeici);
 
 	feci->deref(feci);
 	ecm_db_connection_to_interfaces_reset(ci, to_list, to_list_first);

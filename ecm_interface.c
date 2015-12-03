@@ -342,7 +342,91 @@ static bool ecm_interface_mac_addr_get_ipv6(ip_addr_t addr, uint8_t *mac_addr, b
 	DEBUG_TRACE(ECM_IP_ADDR_OCTAL_FMT " maps to %pM\n", ECM_IP_ADDR_TO_OCTAL(addr), mac_addr);
 	return true;
 }
+
+/*
+ * ecm_interface_find_gateway_ipv6()
+ *	Finds the ipv6 gateway ip address of a given ipv6 address.
+ */
+static bool ecm_interface_find_gateway_ipv6(ip_addr_t addr, ip_addr_t gw_addr)
+{
+	struct ecm_interface_route ecm_rt;
+	struct rt6_info *rt;
+
+	/*
+	 * Find the ipv6 route of the given ip address to look up
+	 * whether we have a gateway to reach to that ip address or not.
+	 */
+	if (!ecm_interface_find_route_by_addr(addr, &ecm_rt)) {
+		return false;
+	}
+	DEBUG_ASSERT(!ecm_rt.v4_route, "Did not locate a v6 route!\n");
+	DEBUG_TRACE("Found route\n");
+
+	/*
+	 * Is this destination reachable via a gateway?
+	 */
+	rt = ecm_rt.rt.rtv6;
+	if (ECM_IP_ADDR_MATCH(rt->rt6i_dst.addr.in6_u.u6_addr32, rt->rt6i_gateway.in6_u.u6_addr32) && !(rt->rt6i_flags & RTF_GATEWAY)) {
+		return false;
+	}
+
+	ECM_NIN6_ADDR_TO_IP_ADDR(gw_addr, rt->rt6i_gateway)
+	return true;
+}
 #endif
+
+/*
+ * ecm_interface_find_gateway_ipv4()
+ *	Finds the ipv4 gateway address of a given ipv4 address.
+ */
+static bool ecm_interface_find_gateway_ipv4(ip_addr_t addr, ip_addr_t gw_addr)
+{
+	struct ecm_interface_route ecm_rt;
+	struct rtable *rt;
+
+	/*
+	 * Find the ipv4 route of the given ip address to look up
+	 * whether we have a gateway to reach to that ip address or not.
+	 */
+	if (!ecm_interface_find_route_by_addr(addr, &ecm_rt)) {
+		return false;
+	}
+	DEBUG_ASSERT(ecm_rt.v4_route, "Did not locate a v4 route!\n");
+	DEBUG_TRACE("Found route\n");
+
+	/*
+	 * Is this destination reachable via a gateway?
+	 */
+	rt = ecm_rt.rt.rtv4;
+#if (LINUX_VERSION_CODE <= KERNEL_VERSION(3, 6, 0))
+	if (!(rt->rt_dst != rt->rt_gateway) && !(rt->rt_flags & RTF_GATEWAY)) {
+#else
+	if (!rt->rt_uses_gateway && !(rt->rt_flags & RTF_GATEWAY)) {
+#endif
+		return false;
+	}
+
+	ECM_NIN4_ADDR_TO_IP_ADDR(gw_addr, rt->rt_gateway)
+	return true;
+}
+
+/*
+ * ecm_interface_find_gateway()
+ *	Finds the gateway ip address of a given ECM ip address type.
+ */
+bool ecm_interface_find_gateway(ip_addr_t addr, ip_addr_t gw_addr)
+{
+	if (ECM_IP_ADDR_IS_V4(addr)) {
+		return ecm_interface_find_gateway_ipv4(addr, gw_addr);
+	}
+
+#ifdef ECM_IPV6_ENABLE
+	return ecm_interface_find_gateway_ipv6(addr, gw_addr);
+#else
+	return false;
+#endif
+}
+EXPORT_SYMBOL(ecm_interface_find_gateway);
 
 /*
  * ecm_interface_mac_addr_get_ipv4()
@@ -467,10 +551,6 @@ static bool ecm_interface_mac_addr_get_ipv4(ip_addr_t addr, uint8_t *mac_addr, b
 /*
  * ecm_interface_mac_addr_get()
  *	Return the mac address for the given IP address.  Returns false on failure.
- *
- * dev is the device on which the addr was sent/received.  If addr is a local address then mac shall be the given dev mac.
- *
- * GGG TODO Make this function work for IPv6!!!!!!!!!!!!!!
  */
 bool ecm_interface_mac_addr_get(ip_addr_t addr, uint8_t *mac_addr, bool *on_link, ip_addr_t gw_addr)
 {
@@ -485,6 +565,145 @@ bool ecm_interface_mac_addr_get(ip_addr_t addr, uint8_t *mac_addr, bool *on_link
 #endif
 }
 EXPORT_SYMBOL(ecm_interface_mac_addr_get);
+
+#ifdef ECM_IPV6_ENABLE
+/*
+ * ecm_interface_mac_addr_get_ipv6_no_route()
+ *	Finds the mac address of a node from its ip address reachable via
+ * the given device. It looks up the mac address in the neighbour entries.
+ * It doesn't do any route lookup to find the dst entry.
+ */
+static bool ecm_interface_mac_addr_get_ipv6_no_route(struct net_device *dev, ip_addr_t addr, uint8_t *mac_addr)
+{
+	struct in6_addr daddr;
+	struct neighbour *neigh;
+	struct net_device *local_dev;
+
+	memset(mac_addr, 0, ETH_ALEN);
+
+	/*
+	 * Get the MAC address that corresponds to IP address given.
+	 */
+	ECM_IP_ADDR_TO_NIN6_ADDR(daddr, addr);
+	local_dev = ipv6_dev_find(&init_net, &daddr, 1);
+	if (local_dev) {
+		DEBUG_TRACE("%pi6 is a local address\n", &daddr);
+		memcpy(mac_addr, dev->dev_addr, ETH_ALEN);
+		dev_put(local_dev);
+		return true;
+	}
+
+	rcu_read_lock();
+	neigh = neigh_lookup(&nd_tbl, &daddr, dev);
+	if (!neigh) {
+		rcu_read_unlock();
+		DEBUG_WARN("No neigh reference\n");
+		return false;
+	}
+	if (!(neigh->nud_state & NUD_VALID)) {
+		neigh_release(neigh);
+		rcu_read_unlock();
+		DEBUG_WARN("NUD invalid\n");
+		return false;
+	}
+	if (!neigh->dev) {
+		neigh_release(neigh);
+		rcu_read_unlock();
+		DEBUG_WARN("Neigh dev invalid\n");
+		return false;
+	}
+
+	if (neigh->dev->flags & IFF_NOARP) {
+		neigh_release(neigh);
+		rcu_read_unlock();
+		DEBUG_TRACE("dest MAC is zero: %pM\n", mac_addr);
+		return true;
+	}
+
+	memcpy(mac_addr, neigh->ha, (size_t)neigh->dev->addr_len);
+	neigh_release(neigh);
+	rcu_read_unlock();
+	DEBUG_TRACE(ECM_IP_ADDR_OCTAL_FMT " maps to %pM\n", ECM_IP_ADDR_TO_OCTAL(addr), mac_addr);
+	return true;
+}
+#endif
+
+/*
+ * ecm_interface_mac_addr_get_ipv4_no_route()
+ *	Finds the mac address of a node from its ip address reachable via
+ * the given device. It looks up the mac address in the neighbour entries.
+ * It doesn't do any route lookup to find the dst entry.
+ */
+static bool ecm_interface_mac_addr_get_ipv4_no_route(struct net_device *dev, ip_addr_t ip_addr, uint8_t *mac_addr)
+{
+	struct neighbour *neigh;
+	__be32 be_addr;
+	struct net_device *local_dev;
+
+	memset(mac_addr, 0, ETH_ALEN);
+
+	ECM_IP_ADDR_TO_NIN4_ADDR(be_addr, ip_addr);
+	local_dev = ip_dev_find(&init_net, be_addr);
+	if (local_dev) {
+		DEBUG_TRACE("%pI4n is a local address\n", &be_addr);
+		memcpy(mac_addr, dev->dev_addr, ETH_ALEN);
+		dev_put(local_dev);
+		return true;
+	}
+
+	rcu_read_lock();
+	neigh = neigh_lookup(&arp_tbl, &be_addr, dev);
+	if (!neigh) {
+		rcu_read_unlock();
+		DEBUG_WARN("no neigh\n");
+		return false;
+	}
+	if (!(neigh->nud_state & NUD_VALID)) {
+		neigh_release(neigh);
+		rcu_read_unlock();
+		DEBUG_WARN("neigh nud state is not valid\n");
+		return false;
+	}
+	if (!neigh->dev) {
+		neigh_release(neigh);
+		rcu_read_unlock();
+		DEBUG_WARN("neigh has no device\n");
+		return false;
+	}
+
+	if (neigh->dev->flags & IFF_NOARP) {
+		neigh_release(neigh);
+		rcu_read_unlock();
+		DEBUG_TRACE("dest MAC is zero: %pM\n", mac_addr);
+		return true;
+	}
+
+	memcpy(mac_addr, neigh->ha, (size_t)neigh->dev->addr_len);
+	neigh_release(neigh);
+	rcu_read_unlock();
+	DEBUG_TRACE("dest MAC: %pM\n", mac_addr);
+	return true;
+
+}
+
+/*
+ * ecm_interface_mac_addr_get_no_route()
+ *	Return the mac address for the given IP address reacahble via the given device.
+ * Return false on failure, true on success.
+ */
+bool ecm_interface_mac_addr_get_no_route(struct net_device *dev, ip_addr_t addr, uint8_t *mac_addr)
+{
+	if (ECM_IP_ADDR_IS_V4(addr)) {
+		return ecm_interface_mac_addr_get_ipv4_no_route(dev, addr, mac_addr);
+	}
+
+#ifdef ECM_IPV6_ENABLE
+	return ecm_interface_mac_addr_get_ipv6_no_route(dev, addr, mac_addr);
+#else
+	return false;
+#endif
+}
+EXPORT_SYMBOL(ecm_interface_mac_addr_get_no_route);
 
 #ifdef ECM_MULTICAST_ENABLE
 /*
@@ -2853,10 +3072,14 @@ EXPORT_SYMBOL(ecm_interface_multicast_heirarchy_construct_bridged);
 #endif
 
 /*
- * ecm_interface_get_next_node_mac_address()
- *	Get the MAC address of the next node
+ * ecm_interface_multicast_get_next_node_mac_address()
+ *	Get the MAC address of the next node for multicast flows
+ *
+ * TODO: This function will be removed when the multicast flow code
+ * is fixed to use the new interface hierarchy construction model.
+ *
  */
-static bool ecm_interface_get_next_node_mac_address(
+static bool ecm_interface_multicast_get_next_node_mac_address(
 	ip_addr_t dest_addr, struct net_device *dest_dev, int ip_version,
 	uint8_t *mac_addr)
 {
@@ -2869,13 +3092,38 @@ static bool ecm_interface_get_next_node_mac_address(
 				ECM_IP_ADDR_TO_DOT(dest_addr));
 			ecm_interface_send_arp_request(dest_dev, dest_addr, on_link, gw_addr);
 		}
-
+#ifdef ECM_IPV6_ENABLE
 		if (ip_version == 6) {
 			DEBUG_WARN("Unable to obtain MAC address for " ECM_IP_ADDR_OCTAL_FMT "\n",
 				ECM_IP_ADDR_TO_OCTAL(dest_addr));
 			ecm_interface_send_neighbour_solicitation(dest_dev, dest_addr);
 		}
+#endif
+		return false;
+	}
 
+	return true;
+}
+
+/*
+ * ecm_interface_get_next_node_mac_address()
+ *	Get the MAC address of the next node
+ */
+static bool ecm_interface_get_next_node_mac_address(
+	ip_addr_t dest_addr, struct net_device *dest_dev, int ip_version,
+	uint8_t *mac_addr)
+{
+	if (!ecm_interface_mac_addr_get_no_route(dest_dev, dest_addr, mac_addr)) {
+		if (ip_version == 4) {
+			DEBUG_WARN("Unable to obtain MAC address for " ECM_IP_ADDR_DOT_FMT "\n",
+				ECM_IP_ADDR_TO_DOT(dest_addr));
+		}
+#ifdef ECM_IPV6_ENABLE
+		if (ip_version == 6) {
+			DEBUG_WARN("Unable to obtain MAC address for " ECM_IP_ADDR_OCTAL_FMT "\n",
+				ECM_IP_ADDR_TO_OCTAL(dest_addr));
+		}
+#endif
 		return false;
 	}
 
@@ -2936,7 +3184,8 @@ static struct net_device *ecm_interface_should_update_egress_device_bridged(
  * This is the heirarchy of interfaces a packet would transit to emit from the device.
  *
  * We will use the given src/dest devices when is_routed is false.
- * When is_routed is true we will try routing tables first, failing back to any given.
+ * When is_routed is true we will use the construct and the other devices (which is the src device of the
+ * construct device) whcih were obtained from the skb's route field and passed to this function..
  *
  * For example, with this network arrangement:
  *
@@ -2954,6 +3203,730 @@ static struct net_device *ecm_interface_should_update_egress_device_bridged(
  * they will be created and added automatically to the database.
  */
 int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instance *feci,
+						struct ecm_db_iface_instance *interfaces[],
+						struct net_device *const_if, struct net_device *other_if,
+						ip_addr_t packet_src_addr,
+						ip_addr_t packet_dest_addr,
+						int ip_version, int packet_protocol,
+						struct net_device *given_dest_dev,
+						bool is_routed, struct net_device *given_src_dev,
+						uint8_t *dest_node_addr, uint8_t *src_node_addr,
+						__be16 *layer4hdr, struct sk_buff *skb)
+{
+	int protocol;
+	ip_addr_t src_addr;
+	ip_addr_t dest_addr;
+	struct net_device *dest_dev;
+	char *dest_dev_name;
+	int32_t dest_dev_type;
+	struct net_device *src_dev;
+	char *src_dev_name;
+	int32_t src_dev_type;
+	int32_t current_interface_index;
+	bool from_local_addr;
+	bool next_dest_addr_valid;
+	bool next_dest_node_addr_valid = false;
+	ip_addr_t next_dest_addr;
+	uint8_t next_dest_node_addr[ETH_ALEN] = {0};
+
+	/*
+	 * Get a big endian of the IPv4 address we have been given as our starting point.
+	 */
+	protocol = packet_protocol;
+	ECM_IP_ADDR_COPY(src_addr, packet_src_addr);
+	ECM_IP_ADDR_COPY(dest_addr, packet_dest_addr);
+
+	if (ip_version == 4) {
+		DEBUG_TRACE("Construct interface heirarchy for from src_addr: " ECM_IP_ADDR_DOT_FMT " to dest_addr: " ECM_IP_ADDR_DOT_FMT ", protocol: %d\n",
+				ECM_IP_ADDR_TO_DOT(src_addr), ECM_IP_ADDR_TO_DOT(dest_addr), protocol);
+#ifdef ECM_IPV6_ENABLE
+	} else if (ip_version == 6) {
+		DEBUG_TRACE("Construct interface heirarchy for from src_addr: " ECM_IP_ADDR_OCTAL_FMT " to dest_addr: " ECM_IP_ADDR_OCTAL_FMT ", protocol: %d\n",
+				ECM_IP_ADDR_TO_OCTAL(src_addr), ECM_IP_ADDR_TO_OCTAL(dest_addr), protocol);
+#endif
+	} else {
+		DEBUG_WARN("Wrong IP protocol: %d\n", ip_version);
+		return ECM_DB_IFACE_HEIRARCHY_MAX;
+	}
+
+	/*
+	 * Get device to reach the given destination address.
+	 * If the heirarchy is for a routed connection we must use the devices obtained from the skb's route information..
+	 * If the heirarchy is NOT for a routed connection we try the given_dest_dev.
+	 */
+	from_local_addr = false;
+	if (!is_routed) {
+		dest_dev = given_dest_dev;
+		dev_hold(dest_dev);
+	} else {
+		dest_dev = ecm_interface_dev_find_by_local_addr(dest_addr);
+		if (dest_dev) {
+			from_local_addr = true;
+		} else {
+			dest_dev = const_if;
+			dev_hold(dest_dev);
+		}
+	}
+
+	/*
+	 * If the address is a local address and protocol is an IP tunnel
+	 * then this connection is a tunnel endpoint made to this device.
+	 * In which case we circumvent all proper procedure and just hack the devices to make stuff work.
+	 *
+	 * TODO THIS MUST BE FIXED - WE MUST USE THE INTERFACE HIERARCHY FOR ITS INTENDED PURPOSE TO
+	 * PARSE THE DEVICES AND WORK OUT THE PROPER INTERFACES INVOLVED.
+	 * E.G. IF WE TRIED TO RUN A TUNNEL OVER A VLAN OR QINQ THIS WILL BREAK AS WE DON'T DISCOVER THAT HIERARCHY
+	 */
+	if (dest_dev && from_local_addr) {
+		if (((ip_version == 4) && (protocol == IPPROTO_IPV6)) ||
+				((ip_version == 6) && (protocol == IPPROTO_IPIP))) {
+			dev_put(dest_dev);
+			dest_dev = given_dest_dev;
+			if (dest_dev) {
+				dev_hold(dest_dev);
+				if (ip_version == 4) {
+					DEBUG_TRACE("HACK: %s tunnel packet with dest_addr: " ECM_IP_ADDR_DOT_FMT " uses dev: %p(%s)\n", "IPV6", ECM_IP_ADDR_TO_DOT(dest_addr), dest_dev, dest_dev->name);
+				} else {
+					DEBUG_TRACE("HACK: %s tunnel packet with dest_addr: " ECM_IP_ADDR_OCTAL_FMT " uses dev: %p(%s)\n", "IPIP", ECM_IP_ADDR_TO_OCTAL(dest_addr), dest_dev, dest_dev->name);
+				}
+			}
+		}
+	}
+
+#ifdef ECM_INTERFACE_L2TPV2_ENABLE
+	/*
+	 * if the address is a local address and indev=l2tp.
+	 */
+	if (skb && skb->sk && (skb->sk->sk_protocol == IPPROTO_UDP) && (udp_sk(skb->sk)->encap_type == UDP_ENCAP_L2TPINUDP)) {
+		dev_put(dest_dev);
+		dest_dev = given_dest_dev;
+		if (dest_dev) {
+			dev_hold(dest_dev);
+			DEBUG_TRACE("l2tp packet tunnel packet with dest_addr: " ECM_IP_ADDR_OCTAL_FMT " uses dev: %p(%s)\n", ECM_IP_ADDR_TO_OCTAL(dest_addr), dest_dev, dest_dev->name);
+		}
+	}
+#endif
+
+#ifdef ECM_INTERFACE_PPTP_ENABLE
+	/*
+	 * if the address is a local address and indev=PPTP.
+	 */
+	if (protocol == IPPROTO_GRE && given_dest_dev && given_dest_dev->type == ARPHRD_PPP) {
+		dev_put(dest_dev);
+		dest_dev = given_dest_dev;
+		if (dest_dev) {
+			dev_hold(dest_dev);
+			DEBUG_TRACE("PPTP packet tunnel packet with dest_addr: " ECM_IP_ADDR_OCTAL_FMT " uses dev: %p(%s)\n", ECM_IP_ADDR_TO_OCTAL(dest_addr), dest_dev, dest_dev->name);
+		}
+	}
+#endif
+
+	if (!dest_dev) {
+		DEBUG_WARN("dest_addr: " ECM_IP_ADDR_OCTAL_FMT " - cannot locate device\n", ECM_IP_ADDR_TO_OCTAL(dest_addr));
+		return ECM_DB_IFACE_HEIRARCHY_MAX;
+	}
+	dest_dev_name = dest_dev->name;
+	dest_dev_type = dest_dev->type;
+
+	/*
+	 * Get device to reach the given source address.
+	 * If the heirarchy is for a routed connection we must use the devices obtained from the skb's route information..
+	 * If the heirarchy is NOT for a routed connection we try the given_src_dev.
+	 */
+	from_local_addr = false;
+	if (!is_routed) {
+		src_dev = given_src_dev;
+		dev_hold(src_dev);
+	} else {
+		src_dev = ecm_interface_dev_find_by_local_addr(src_addr);
+		if (src_dev) {
+			from_local_addr = true;
+		} else {
+			src_dev = other_if;
+			dev_hold(src_dev);
+		}
+	}
+
+	/*
+	 * If the address is a local address and protocol is an IP tunnel
+	 * then this connection is a tunnel endpoint made to this device.
+	 * In which case we circumvent all proper procedure and just hack the devices to make stuff work.
+	 *
+	 * TODO THIS MUST BE FIXED - WE MUST USE THE INTERFACE HIERARCHY FOR ITS INTENDED PURPOSE TO
+	 * PARSE THE DEVICES AND WORK OUT THE PROPER INTERFACES INVOLVED.
+	 * E.G. IF WE TRIED TO RUN A TUNNEL OVER A VLAN OR QINQ THIS WILL BREAK AS WE DON'T DISCOVER THAT HIERARCHY
+	 */
+	if (src_dev && from_local_addr) {
+		if (((ip_version == 4) && (protocol == IPPROTO_IPV6)) ||
+				((ip_version == 6) && (protocol == IPPROTO_IPIP))) {
+			dev_put(src_dev);
+			src_dev = given_src_dev;
+			if (src_dev) {
+				dev_hold(src_dev);
+				if (ip_version == 4) {
+					DEBUG_TRACE("HACK: %s tunnel packet with src_addr: " ECM_IP_ADDR_DOT_FMT " uses dev: %p(%s)\n", "IPV6", ECM_IP_ADDR_TO_DOT(src_addr), src_dev, src_dev->name);
+				} else {
+					DEBUG_TRACE("HACK: %s tunnel packet with src_addr: " ECM_IP_ADDR_OCTAL_FMT " uses dev: %p(%s)\n", "IPIP", ECM_IP_ADDR_TO_OCTAL(src_addr), src_dev, src_dev->name);
+				}
+			}
+		}
+	}
+
+	if (!src_dev) {
+		DEBUG_WARN("src_addr: " ECM_IP_ADDR_OCTAL_FMT " - cannot locate device\n", ECM_IP_ADDR_TO_OCTAL(src_addr));
+		dev_put(dest_dev);
+		return ECM_DB_IFACE_HEIRARCHY_MAX;
+	}
+	src_dev_name = src_dev->name;
+	src_dev_type = src_dev->type;
+
+	/*
+	 * Check if source and dest dev are same.
+	 * For the forwarded flows which involve tunnels this will happen when called from input hook.
+	 */
+	if (src_dev == dest_dev) {
+		DEBUG_TRACE("Protocol is :%d source dev and dest dev are same\n", protocol);
+		if (((ip_version == 4) && ((protocol == IPPROTO_IPV6) || (protocol == IPPROTO_ESP)))
+				|| ((ip_version == 6) && (protocol == IPPROTO_IPIP))) {
+			/*
+			 * This happens from the input hook
+			 * We do not want to create a connection entry for this
+			 * TODO YES WE DO.
+			 * TODO THIS CONCERNS ME AS THIS SHOULD BE CAUGHT MUCH
+			 * EARLIER IN THE FRONT END IF POSSIBLE TO AVOID PERFORMANCE PENALTIES.
+			 * WE HAVE DONE A TREMENDOUS AMOUT OF WORK TO GET TO THIS POINT.
+			 * WE WILL ABORT HERE AND THIS WILL BE REPEATED FOR EVERY PACKET.
+			 * IN KEEPING WITH THE ECM DESIGN IT IS BETTER TO CREATE A CONNECTION AND RECORD IN THE HIERARCHY
+			 * ENOUGH INFORMATION TO ENSURE THAT ACCELERATION IS NOT BROKEN / DOES NOT OCCUR AT ALL.
+			 * THAT WAY WE DO A HEAVYWEIGHT ESTABLISHING OF A CONNECTION ONCE AND NEVER AGAIN...
+			 */
+			dev_put(src_dev);
+			dev_put(dest_dev);
+			return ECM_DB_IFACE_HEIRARCHY_MAX;
+		}
+	} else {
+		struct net_device *bridge =
+			ecm_interface_should_update_egress_device_bridged(
+				given_dest_dev, dest_dev, is_routed);
+
+		if (bridge) {
+
+			struct net_device *new_dest_dev;
+
+			next_dest_node_addr_valid = ecm_interface_get_next_node_mac_address(
+				dest_addr, dest_dev, ip_version, next_dest_node_addr);
+			if (next_dest_node_addr_valid) {
+
+				new_dest_dev = br_port_dev_get(bridge,
+								next_dest_node_addr,
+								skb);
+
+				if (new_dest_dev) {
+					dev_put(dest_dev);
+					if (new_dest_dev != given_dest_dev) {
+						DEBUG_INFO("Adjusted port for %pM is %s (given was %s)\n",
+							next_dest_node_addr, new_dest_dev->name,
+							given_dest_dev->name);
+
+						dest_dev = new_dest_dev;
+						dest_dev_name = dest_dev->name;
+						dest_dev_type = dest_dev->type;
+					}
+				}
+			}
+
+			dev_put(bridge);
+		}
+	}
+
+	next_dest_addr_valid = true;
+	ECM_IP_ADDR_COPY(next_dest_addr, dest_addr);
+
+	/*
+	 * Iterate until we are done or get to the max number of interfaces we can record.
+	 * NOTE: current_interface_index tracks the position of the first interface position in interfaces[]
+	 * because we add from the end first_interface grows downwards.
+	 */
+	current_interface_index = ECM_DB_IFACE_HEIRARCHY_MAX;
+	while (current_interface_index > 0) {
+		struct ecm_db_iface_instance *ii;
+		struct net_device *next_dev;
+		/*
+		 * Get the ecm db interface instance for the device at hand
+		 */
+		ii = ecm_interface_establish_and_ref(feci, dest_dev, skb);
+
+		/*
+		 * If the interface could not be established then we abort
+		 */
+		if (!ii) {
+			DEBUG_WARN("Failed to establish interface: %p, name: %s\n", dest_dev, dest_dev_name);
+			dev_put(src_dev);
+			dev_put(dest_dev);
+
+			/*
+			 * Release the interfaces heirarchy we constructed to this point.
+			 */
+			ecm_db_connection_interfaces_deref(interfaces, current_interface_index);
+			return ECM_DB_IFACE_HEIRARCHY_MAX;
+		}
+
+		/*
+		 * Record the interface instance into the interfaces[]
+		 */
+		current_interface_index--;
+		interfaces[current_interface_index] = ii;
+
+		/*
+		 * Now we have to figure out what the next device will be (in the transmission path) the skb
+		 * will use to emit to the destination address.
+		 */
+		do {
+#ifdef ECM_INTERFACE_PPP_ENABLE
+			int channel_count;
+			struct ppp_channel *ppp_chan[1];
+			int channel_protocol;
+#ifdef ECM_INTERFACE_PPPOE_ENABLE
+			struct pppoe_opt addressing;
+#endif
+#endif
+
+			DEBUG_TRACE("Net device: %p is type: %d, name: %s\n", dest_dev, dest_dev_type, dest_dev_name);
+			next_dev = NULL;
+
+			if (dest_dev_type == ARPHRD_ETHER) {
+				/*
+				 * Ethernet - but what sub type?
+				 */
+
+#ifdef ECM_INTERFACE_VLAN_ENABLE
+				/*
+				 * VLAN?
+				 */
+				if (is_vlan_dev(dest_dev)) {
+					/*
+					 * VLAN master
+					 * No locking needed here, ASSUMPTION is that real_dev is held for as long as we have dev.
+					 */
+					next_dev = vlan_dev_real_dev(dest_dev);
+					dev_hold(next_dev);
+					DEBUG_TRACE("Net device: %p is VLAN, slave dev: %p (%s)\n",
+							dest_dev, next_dev, next_dev->name);
+					break;
+				}
+#endif
+
+				/*
+				 * BRIDGE?
+				 */
+				if (ecm_front_end_is_bridge_device(dest_dev)) {
+					/*
+					 * Bridge
+					 * Figure out which port device the skb will go to using the dest_addr.
+					 */
+					uint8_t mac_addr[ETH_ALEN];
+
+					if (next_dest_node_addr_valid) {
+						memcpy(mac_addr, next_dest_node_addr, ETH_ALEN);
+					} else if (!next_dest_addr_valid) {
+						dev_put(src_dev);
+						dev_put(dest_dev);
+
+						/*
+						 * Release the interfaces heirarchy we constructed to this point.
+						 */
+						ecm_db_connection_interfaces_deref(interfaces, current_interface_index);
+						return ECM_DB_IFACE_HEIRARCHY_MAX;
+					} else {
+						if (!ecm_interface_get_next_node_mac_address(dest_addr, dest_dev, ip_version, mac_addr)) {
+							dev_put(src_dev);
+							dev_put(dest_dev);
+
+							/*
+							 * Release the interfaces heirarchy we constructed to this point.
+							 */
+							ecm_db_connection_interfaces_deref(interfaces, current_interface_index);
+							return ECM_DB_IFACE_HEIRARCHY_MAX;
+						}
+					}
+
+					next_dev = br_port_dev_get(dest_dev, mac_addr, skb);
+
+					if (!next_dev) {
+						DEBUG_WARN("Unable to obtain output port for: %pM\n", mac_addr);
+						dev_put(src_dev);
+						dev_put(dest_dev);
+
+						/*
+						 * Release the interfaces heirarchy we constructed to this point.
+						 */
+						ecm_db_connection_interfaces_deref(interfaces, current_interface_index);
+						return ECM_DB_IFACE_HEIRARCHY_MAX;
+					}
+					DEBUG_TRACE("Net device: %p is BRIDGE, next_dev: %p (%s)\n", dest_dev, next_dev, next_dev->name);
+					break;
+				}
+
+#ifdef ECM_INTERFACE_BOND_ENABLE
+				/*
+				 * LAG?
+				 */
+				if (ecm_front_end_is_lag_master(dest_dev)) {
+					/*
+					 * Link aggregation
+					 * Figure out whiich slave device of the link aggregation will be used to reach the destination.
+					 */
+					uint32_t src_addr_32 = 0;
+					uint32_t dest_addr_32 = 0;
+					struct in6_addr src_addr6;
+					struct in6_addr dest_addr6;
+					uint8_t src_mac_addr[ETH_ALEN];
+					uint8_t dest_mac_addr[ETH_ALEN];
+
+					memset(src_mac_addr, 0, ETH_ALEN);
+					memset(dest_mac_addr, 0, ETH_ALEN);
+
+					if (ip_version == 4) {
+						ECM_IP_ADDR_TO_NIN4_ADDR(src_addr_32, src_addr);
+						ECM_IP_ADDR_TO_NIN4_ADDR(dest_addr_32, dest_addr);
+					}
+
+					if (!is_routed) {
+						memcpy(src_mac_addr, src_node_addr, ETH_ALEN);
+						memcpy(dest_mac_addr, dest_node_addr, ETH_ALEN);
+					} else {
+						struct net_device *dest_dev_master;
+
+						/*
+						 * Use appropriate source MAC address for routed packets
+						 */
+						dest_dev_master = ecm_interface_get_and_hold_dev_master(dest_dev);
+						if (dest_dev_master) {
+							memcpy(src_mac_addr, dest_dev_master->dev_addr, ETH_ALEN);
+							dev_put(dest_dev_master);
+						} else {
+							memcpy(src_mac_addr, dest_dev->dev_addr, ETH_ALEN);
+						}
+
+						/*
+						 * Determine destination MAC address for this routed packet
+						 */
+						if (next_dest_node_addr_valid) {
+							memcpy(dest_mac_addr, next_dest_node_addr, ETH_ALEN);
+						} else if (!next_dest_addr_valid) {
+							dev_put(src_dev);
+							dev_put(dest_dev);
+
+							ecm_db_connection_interfaces_deref(interfaces, current_interface_index);
+							return ECM_DB_IFACE_HEIRARCHY_MAX;
+						} else {
+
+							if (!ecm_interface_mac_addr_get_no_route(dest_dev, dest_addr, dest_mac_addr)) {
+								ip_addr_t gw_addr = ECM_IP_ADDR_NULL;
+								/*
+								 * Try one more time with gateway ip address if it exists.
+								 */
+								if (!ecm_interface_find_gateway(dest_addr, gw_addr)) {
+									goto lag_fail;
+								}
+
+								if (ip_version == 4) {
+									DEBUG_TRACE("Have a gw address " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(gw_addr));
+								}
+#ifdef ECM_IPV6_ENABLE
+
+								if (ip_version == 6) {
+									DEBUG_TRACE("Have a gw address " ECM_IP_ADDR_OCTAL_FMT "\n", ECM_IP_ADDR_TO_OCTAL(gw_addr));
+								}
+#endif
+								if (ecm_interface_mac_addr_get_no_route(dest_dev, gw_addr, dest_mac_addr)) {
+									DEBUG_TRACE("Found the mac address for gateway\n");
+									goto lag_success;
+								}
+
+								if (ip_version == 4) {
+									ecm_interface_send_arp_request(dest_dev, dest_addr, false, gw_addr);
+
+									DEBUG_WARN("Unable to obtain any MAC address for " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(dest_addr));
+								}
+#ifdef ECM_IPV6_ENABLE
+								if (ip_version == 6) {
+									ecm_interface_send_neighbour_solicitation(dest_dev, dest_addr);
+
+									DEBUG_WARN("Unable to obtain any MAC address for " ECM_IP_ADDR_OCTAL_FMT "\n", ECM_IP_ADDR_TO_OCTAL(dest_addr));
+								}
+#endif
+lag_fail:
+								dev_put(src_dev);
+								dev_put(dest_dev);
+
+								ecm_db_connection_interfaces_deref(interfaces, current_interface_index);
+								return ECM_DB_IFACE_HEIRARCHY_MAX;
+							}
+						}
+					}
+lag_success:
+					if (ip_version == 4) {
+						next_dev = bond_get_tx_dev(NULL, src_mac_addr, dest_mac_addr,
+										&src_addr_32, &dest_addr_32,
+										htons((uint16_t)ETH_P_IP), dest_dev, layer4hdr);
+					} else if (ip_version == 6) {
+						ECM_IP_ADDR_TO_NIN6_ADDR(src_addr6, src_addr);
+						ECM_IP_ADDR_TO_NIN6_ADDR(dest_addr6, dest_addr);
+						next_dev = bond_get_tx_dev(NULL, src_mac_addr, dest_mac_addr,
+									   src_addr6.s6_addr, dest_addr6.s6_addr,
+									   htons((uint16_t)ETH_P_IPV6), dest_dev, NULL);
+					}
+
+					if (next_dev && netif_carrier_ok(next_dev)) {
+						dev_hold(next_dev);
+					} else {
+						DEBUG_WARN("Unable to obtain LAG output slave device\n");
+						dev_put(src_dev);
+						dev_put(dest_dev);
+
+						/*
+						 * Release the interfaces heirarchy we constructed to this point.
+						 */
+						ecm_db_connection_interfaces_deref(interfaces, current_interface_index);
+						return ECM_DB_IFACE_HEIRARCHY_MAX;
+					}
+
+					DEBUG_TRACE("Net device: %p is LAG, slave dev: %p (%s)\n", dest_dev, next_dev, next_dev->name);
+					break;
+				}
+#endif
+
+				/*
+				 * ETHERNET!
+				 * Just plain ethernet it seems.
+				 */
+				DEBUG_TRACE("Net device: %p is ETHERNET\n", dest_dev);
+				break;
+			}
+
+			/*
+			 * LOOPBACK?
+			 */
+			if (dest_dev_type == ARPHRD_LOOPBACK) {
+				DEBUG_TRACE("Net device: %p is LOOPBACK type: %d\n", dest_dev, dest_dev_type);
+				break;
+			}
+
+			/*
+			 * IPSEC?
+			 */
+			if (dest_dev_type == ECM_ARPHRD_IPSEC_TUNNEL_TYPE) {
+				DEBUG_TRACE("Net device: %p is IPSec tunnel type: %d\n", dest_dev, dest_dev_type);
+				/* TODO Figure out the next device the tunnel is using... */
+				break;
+			}
+
+			/*
+			 * SIT (6-in-4)?
+			 */
+			if (dest_dev_type == ARPHRD_SIT) {
+				DEBUG_TRACE("Net device: %p is SIT (6-in-4) type: %d\n", dest_dev, dest_dev_type);
+				/* TODO Figure out the next device the tunnel is using... */
+				break;
+			}
+
+			/*
+			 * IPIP6 Tunnel?
+			 */
+			if (dest_dev_type == ARPHRD_TUNNEL6) {
+				DEBUG_TRACE("Net device: %p is TUNIPIP6 type: %d\n", dest_dev, dest_dev_type);
+				/* TODO Figure out the next device the tunnel is using... */
+				break;
+			}
+
+			/*
+			 * If this is NOT PPP then it is unknown to the ecm and we cannot figure out it's next device.
+			 */
+			if (dest_dev_type != ARPHRD_PPP) {
+				DEBUG_TRACE("Net device: %p is UNKNOWN type: %d\n", dest_dev, dest_dev_type);
+				break;
+			}
+
+#ifndef ECM_INTERFACE_PPP_ENABLE
+			DEBUG_TRACE("Net device: %p is UNKNOWN (PPP Unsupported) type: %d\n", dest_dev, dest_dev_type);
+#else
+			DEBUG_TRACE("Net device: %p is PPP\n", dest_dev);
+
+#ifdef ECM_INTERFACE_L2TPV2_ENABLE
+			if (skb && skb->sk && (skb->sk->sk_protocol == IPPROTO_UDP) && (udp_sk(skb->sk)->encap_type == UDP_ENCAP_L2TPINUDP)) {
+				if (skb->skb_iif == dest_dev->ifindex) {
+					DEBUG_TRACE("Net device: %p PPP channel is PPPoL2TPV2\n", dest_dev);
+					break;
+				}
+			}
+#endif
+
+#ifdef ECM_INTERFACE_PPTP_ENABLE
+			if (protocol == IPPROTO_GRE && dest_dev && dest_dev->type == ARPHRD_PPP) {
+				DEBUG_TRACE("Net device: %p PPP channel is PPTP\n", dest_dev);
+				break;
+			}
+#endif
+			/*
+			 * PPP - but what is the channel type?
+			 * First: If this is multi-link then we do not support it
+			 */
+			if (ppp_is_multilink(dest_dev) > 0) {
+				DEBUG_TRACE("Net device: %p is MULTILINK PPP - Unknown to the ECM\n", dest_dev);
+				break;
+			}
+
+			/*
+			 * Get the PPP channel and then enquire what kind of channel it is
+			 * NOTE: Not multilink so only one channel to get.
+			 */
+			channel_count = ppp_hold_channels(dest_dev, ppp_chan, 1);
+			if (channel_count != 1) {
+				DEBUG_TRACE("Net device: %p PPP has %d channels - Unknown to the ECM\n",
+						dest_dev, channel_count);
+				break;
+			}
+
+			/*
+			 * Get channel protocol type
+			 * NOTE: Not all PPP channels support channel specific methods.
+			 */
+			channel_protocol = ppp_channel_get_protocol(ppp_chan[0]);
+
+#ifdef ECM_INTERFACE_L2TPV2_ENABLE
+			if (channel_protocol == PX_PROTO_OL2TP) {
+
+				/*
+				 * PPPoL2TPV2 channel
+				 */
+				ppp_release_channels(ppp_chan, 1);
+				DEBUG_TRACE("Net device: %p PPP channel is PPPoL2TPV2\n", dest_dev);
+
+				/*
+				 * Release the channel.  Note that next_dev not held.
+				 */
+				break;
+			}
+#endif
+#ifdef ECM_INTERFACE_PPPOE_ENABLE
+			if (channel_protocol == PX_PROTO_OE) {
+				/*
+				 * PPPoE channel
+				 */
+				DEBUG_TRACE("Net device: %p PPP channel is PPPoE\n", dest_dev);
+
+				/*
+				 * Get PPPoE session information and the underlying device it is using.
+				 */
+				pppoe_channel_addressing_get(ppp_chan[0], &addressing);
+
+				/*
+				 * Copy the dev hold into this, we will release the hold later
+				 */
+				next_dev = addressing.dev;
+				next_dest_addr_valid = false;
+				next_dest_node_addr_valid = true;
+				memcpy(next_dest_node_addr, addressing.pa.remote, ETH_ALEN);
+
+				/*
+				 * Release the channel.  Note that next_dev is still (correctly) held.
+				 */
+				ppp_release_channels(ppp_chan, 1);
+				break;
+			}
+#endif
+
+			DEBUG_TRACE("Net device: %p PPP channel protocol: %d - Unknown to the ECM\n",
+				    dest_dev, channel_protocol);
+
+			/*
+			 * Release the channel
+			 */
+			ppp_release_channels(ppp_chan, 1);
+
+#endif
+		} while (false);
+
+		/*
+		 * No longer need dest_dev as it may become next_dev
+		 */
+		dev_put(dest_dev);
+
+		/*
+		 * Check out the next_dev, if any
+		 */
+		if (!next_dev) {
+			int32_t i __attribute__((unused));
+			DEBUG_INFO("Completed interface heirarchy construct with first interface @: %d\n", current_interface_index);
+#if DEBUG_LEVEL > 1
+			for (i = current_interface_index; i < ECM_DB_IFACE_HEIRARCHY_MAX; ++i) {
+				DEBUG_TRACE("\tInterface @ %d: %p, type: %d, name: %s\n",
+						i, interfaces[i], ecm_db_connection_iface_type_get(interfaces[i]), ecm_db_interface_type_to_string(ecm_db_connection_iface_type_get(interfaces[i])));
+
+			}
+#endif
+
+			/*
+			 * Release src_dev now
+			 */
+			dev_put(src_dev);
+			return current_interface_index;
+		}
+
+		/*
+		 * dest_dev becomes next_dev
+		 */
+		dest_dev = next_dev;
+		dest_dev_name = dest_dev->name;
+		dest_dev_type = dest_dev->type;
+	}
+
+	DEBUG_WARN("Too many interfaces: %d\n", current_interface_index);
+	DEBUG_ASSERT(current_interface_index == 0, "Bad logic handling current_interface_index: %d\n", current_interface_index);
+	dev_put(src_dev);
+	dev_put(dest_dev);
+
+	/*
+	 * Release the interfaces heirarchy we constructed to this point.
+	 */
+	ecm_db_connection_interfaces_deref(interfaces, current_interface_index);
+	return ECM_DB_IFACE_HEIRARCHY_MAX;
+}
+EXPORT_SYMBOL(ecm_interface_heirarchy_construct);
+
+#ifdef ECM_MULTICAST_ENABLE
+/*
+ * ecm_interface_multicast_from_heirarchy_construct()
+ *	Construct an interface heirarchy.
+ *
+ * TODO: This function will be removed later and ecm_interface_heirarchy_construct() function
+ *	 will be used when the multicast code is fixed to use the new interface hierarchy
+ *	 construction model which uses the skb's route information instead of doing
+ *	 the route lookup based on the IP addresses.
+ *
+ * Using the given addressing, locate the interface heirarchy used to emit packets to that destination.
+ * This is the heirarchy of interfaces a packet would transit to emit from the device.
+ *
+ * We will use the given src/dest devices when is_routed is false.
+ * When is_routed is true we will try routing tables first, failing back to any given.
+ *
+ * For example, with this network arrangement:
+ *
+ * PPPoE--VLAN--BRIDGE--BRIDGE_PORT(LAG_MASTER)--LAG_SLAVE_0--10.22.33.11
+ *
+ * Given the packet_dest_addr IP address 10.22.33.11 this will create an interface heirarchy (in interracfes[]) of:
+ * LAG_SLAVE_0 @ [ECM_DB_IFACE_HEIRARCHY_MAX - 5]
+ * LAG_MASTER @ [ECM_DB_IFACE_HEIRARCHY_MAX - 4]
+ * BRIDGE @ [ECM_DB_IFACE_HEIRARCHY_MAX - 3]
+ * VLAN @ [ECM_DB_IFACE_HEIRARCHY_MAX - 2]
+ * PPPOE @ [ECM_DB_IFACE_HEIRARCHY_MAX - 1]
+ * The value returned is (ECM_DB_IFACE_HEIRARCHY_MAX - 5)
+ *
+ * IMPORTANT: This function will return any known interfaces in the database, when interfaces do not exist in the database
+ * they will be created and added automatically to the database.
+ */
+int32_t ecm_interface_multicast_from_heirarchy_construct(struct ecm_front_end_connection_instance *feci,
 						struct ecm_db_iface_instance *interfaces[],
 						ip_addr_t packet_src_addr,
 						ip_addr_t packet_dest_addr,
@@ -3189,7 +4162,7 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 
 			struct net_device *new_dest_dev;
 
-			next_dest_node_addr_valid = ecm_interface_get_next_node_mac_address(
+			next_dest_node_addr_valid = ecm_interface_multicast_get_next_node_mac_address(
 				dest_addr, dest_dev, ip_version, next_dest_node_addr);
 			if (next_dest_node_addr_valid) {
 
@@ -3216,6 +4189,7 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 	}
 
 	next_dest_addr_valid = true;
+	next_dest_node_addr_valid = false;
 	ECM_IP_ADDR_COPY(next_dest_addr, dest_addr);
 
 	/*
@@ -3314,8 +4288,7 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 						ecm_db_connection_interfaces_deref(interfaces, current_interface_index);
 						return ECM_DB_IFACE_HEIRARCHY_MAX;
 					} else {
-						if (!ecm_interface_get_next_node_mac_address(next_dest_addr, dest_dev, ip_version, mac_addr)) {
-
+						if (!ecm_interface_multicast_get_next_node_mac_address(next_dest_addr, dest_dev, ip_version, mac_addr)) {
 							dev_put(src_dev);
 							dev_put(dest_dev);
 
@@ -3326,9 +4299,7 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 							return ECM_DB_IFACE_HEIRARCHY_MAX;
 						}
 					}
-
 					next_dev = br_port_dev_get(dest_dev, mac_addr, skb);
-
 					if (!next_dev) {
 						DEBUG_WARN("Unable to obtain output port for: %pM\n", mac_addr);
 						dev_put(src_dev);
@@ -3427,7 +4398,7 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 								}
 #ifdef ECM_IPV6_ENABLE
 								if (ip_version == 6) {
-									DEBUG_WARN("Unable to obtain MAC address for " ECM_IP_ADDR_OCTAL_FMT "\n",ECM_IP_ADDR_TO_OCTAL(dest_addr));
+									DEBUG_WARN("Unable to obtain MAC address for " ECM_IP_ADDR_OCTAL_FMT "\n", ECM_IP_ADDR_TO_OCTAL(dest_addr));
 									ecm_interface_send_neighbour_solicitation(master_dev, dest_addr);
 								}
 #endif
@@ -3496,7 +4467,7 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 			 */
 			if (dest_dev_type == ECM_ARPHRD_IPSEC_TUNNEL_TYPE) {
 				DEBUG_TRACE("Net device: %p is IPSec tunnel type: %d\n", dest_dev, dest_dev_type);
-				// GGG TODO Figure out the next device the tunnel is using...
+				/* TODO Figure out the next device the tunnel is using... */
 				break;
 			}
 
@@ -3505,7 +4476,7 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 			 */
 			if (dest_dev_type == ARPHRD_SIT) {
 				DEBUG_TRACE("Net device: %p is SIT (6-in-4) type: %d\n", dest_dev, dest_dev_type);
-				// GGG TODO Figure out the next device the tunnel is using...
+				/* TODO Figure out the next device the tunnel is using... */
 				break;
 			}
 
@@ -3514,7 +4485,7 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 			 */
 			if (dest_dev_type == ARPHRD_TUNNEL6) {
 				DEBUG_TRACE("Net device: %p is TUNIPIP6 type: %d\n", dest_dev, dest_dev_type);
-				// GGG TODO Figure out the next device the tunnel is using...
+				/* TODO Figure out the next device the tunnel is using... */
 				break;
 			}
 
@@ -3671,7 +4642,8 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 	ecm_db_connection_interfaces_deref(interfaces, current_interface_index);
 	return ECM_DB_IFACE_HEIRARCHY_MAX;
 }
-EXPORT_SYMBOL(ecm_interface_heirarchy_construct);
+EXPORT_SYMBOL(ecm_interface_multicast_from_heirarchy_construct);
+#endif
 
 /*
  * ecm_interface_list_stats_update()

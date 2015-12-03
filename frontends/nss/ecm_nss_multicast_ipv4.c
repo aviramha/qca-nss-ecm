@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2014,2015 The Linux Foundation.  All rights reserved.
+ * Copyright (c) 2014-2016 The Linux Foundation.  All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -1938,7 +1938,7 @@ static void ecm_nss_multicast_ipv4_connection_regenerate(struct ecm_db_connectio
 	layer4hdr[1] = htons(port);
 
 	DEBUG_TRACE("%p: Update the 'from' interface heirarchy list\n", ci);
-	from_list_first = ecm_interface_heirarchy_construct(feci, from_list, ip_dest_addr, ip_src_addr, 4, protocol, in_dev, is_routed, in_dev, src_node_addr, dest_node_addr, layer4hdr, NULL);
+	from_list_first = ecm_interface_multicast_from_heirarchy_construct(feci, from_list, ip_dest_addr, ip_src_addr, 4, protocol, in_dev, is_routed, in_dev, src_node_addr, dest_node_addr, layer4hdr, NULL);
 	if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 		goto ecm_multicast_ipv4_retry_regen;
 	}
@@ -1947,7 +1947,7 @@ static void ecm_nss_multicast_ipv4_connection_regenerate(struct ecm_db_connectio
 	ecm_db_connection_interfaces_deref(from_list, from_list_first);
 
 	DEBUG_TRACE("%p: Update the 'from NAT' interface heirarchy list\n", ci);
-	from_nat_list_first = ecm_interface_heirarchy_construct(feci, from_nat_list, ip_dest_addr, ip_src_addr_nat, 4, protocol, in_dev_nat, is_routed, in_dev_nat, src_node_addr_nat, dest_node_addr, layer4hdr, NULL);
+	from_nat_list_first = ecm_interface_multicast_from_heirarchy_construct(feci, from_nat_list, ip_dest_addr, ip_src_addr_nat, 4, protocol, in_dev_nat, is_routed, in_dev_nat, src_node_addr_nat, dest_node_addr, layer4hdr, NULL);
 	if (from_nat_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 		goto ecm_multicast_ipv4_retry_regen;
 	}
@@ -2143,6 +2143,240 @@ static struct ecm_nss_multicast_ipv4_connection_instance *ecm_nss_multicast_ipv4
 	feci->regenerate = ecm_nss_common_connection_regenerate;
 
 	return nmci;
+}
+
+/*
+ * ecm_nss_multicast_ipv4_node_establish_and_ref()
+ *	Returns a reference to a node, possibly creating one if necessary.
+ *
+ * The given_node_addr will be used if provided.
+ *
+ * Returns NULL on failure.
+ *
+ * TODO: This function will be removed later and the one in the ecm_nss_ipv4.c file will be used
+ *	instead of this one when the multicast code is fixed to use the new interface hierarchy
+ *	construction model.
+ */
+static struct ecm_db_node_instance *ecm_nss_multicast_ipv4_node_establish_and_ref(struct ecm_front_end_connection_instance *feci,
+							struct net_device *dev, ip_addr_t addr,
+							struct ecm_db_iface_instance *interface_list[], int32_t interface_list_first,
+							uint8_t *given_node_addr, struct sk_buff *skb)
+{
+	struct ecm_db_node_instance *ni;
+	struct ecm_db_node_instance *nni;
+	struct ecm_db_iface_instance *ii;
+	int i;
+	bool done;
+	uint8_t node_addr[ETH_ALEN];
+#if defined(ECM_INTERFACE_L2TPV2_ENABLE) || defined(ECM_INTERFACE_PPTP_ENABLE)
+	ip_addr_t local_ip, remote_ip;
+#endif
+
+	DEBUG_INFO("Establish node for " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(addr));
+
+	/*
+	 * The node is the datalink address, typically a MAC address.
+	 * However the node address to use is not always obvious and depends on the interfaces involved.
+	 * For example if the interface is PPPoE then we use the MAC of the PPPoE server as we cannot use normal ARP resolution.
+	 * Not all hosts have a node address, where there is none, a suitable alternative should be located and is typically based on 'addr'
+	 * or some other datalink session information.
+	 * It should be, at a minimum, something that ties the host with the interface.
+	 *
+	 * Iterate from 'inner' to 'outer' interfaces - discover what the node is.
+	 */
+	memset(node_addr, 0, ETH_ALEN);
+	done = false;
+	if (given_node_addr) {
+		memcpy(node_addr, given_node_addr, ETH_ALEN);
+		done = true;
+		DEBUG_TRACE("Using given node address: %pM\n", node_addr);
+	}
+
+	for (i = ECM_DB_IFACE_HEIRARCHY_MAX - 1; (!done) && (i >= interface_list_first); i--) {
+		ecm_db_iface_type_t type;
+		ip_addr_t gw_addr = ECM_IP_ADDR_NULL;
+		bool on_link = false;
+#ifdef ECM_INTERFACE_PPPOE_ENABLE
+		struct ecm_db_interface_info_pppoe pppoe_info;
+#endif
+#ifdef ECM_INTERFACE_L2TPV2_ENABLE
+		struct ecm_db_interface_info_pppol2tpv2 pppol2tpv2_info;
+#endif
+#ifdef ECM_INTERFACE_PPTP_ENABLE
+		struct ecm_db_interface_info_pptp pptp_info;
+#endif
+		type = ecm_db_connection_iface_type_get(interface_list[i]);
+		DEBUG_INFO("Lookup node address, interface @ %d is type: %d\n", i, type);
+
+		switch (type) {
+
+		case ECM_DB_IFACE_TYPE_PPPOE:
+#ifdef ECM_INTERFACE_PPPOE_ENABLE
+			/*
+			 * Node address is the address of the remote PPPoE server
+			 */
+			ecm_db_iface_pppoe_session_info_get(interface_list[i], &pppoe_info);
+			memcpy(node_addr, pppoe_info.remote_mac, ETH_ALEN);
+			done = true;
+			break;
+#else
+			DEBUG_TRACE("PPPoE interface unsupported\n");
+			return NULL;
+#endif
+
+		case ECM_DB_IFACE_TYPE_SIT:
+		case ECM_DB_IFACE_TYPE_TUNIPIP6:
+			done = true;
+			break;
+
+		case ECM_DB_IFACE_TYPE_PPPOL2TPV2:
+#ifdef ECM_INTERFACE_L2TPV2_ENABLE
+			ecm_db_iface_pppol2tpv2_session_info_get(interface_list[i], &pppol2tpv2_info);
+			ECM_HIN4_ADDR_TO_IP_ADDR(local_ip, pppol2tpv2_info.ip.saddr);
+			ECM_HIN4_ADDR_TO_IP_ADDR(remote_ip, pppol2tpv2_info.ip.daddr);
+			if (ECM_IP_ADDR_MATCH(local_ip, addr)) {
+				if (unlikely(!ecm_interface_mac_addr_get(local_ip, node_addr, &on_link, gw_addr))) {
+					DEBUG_TRACE("failed to obtain node address for " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(local_ip));
+					return NULL;
+				}
+
+			} else {
+				if (unlikely(!ecm_interface_mac_addr_get(remote_ip, node_addr, &on_link, gw_addr))) {
+					DEBUG_TRACE("failed to obtain node address for host " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(remote_ip));
+					return NULL;
+				}
+			}
+
+			done = true;
+			break;
+#else
+			DEBUG_TRACE("PPPoL2TPV2 interface unsupported\n");
+			return NULL;
+#endif
+
+		case ECM_DB_IFACE_TYPE_PPTP:
+#ifdef ECM_INTERFACE_PPTP_ENABLE
+			ecm_db_iface_pptp_session_info_get(interface_list[i], &pptp_info);
+			ECM_HIN4_ADDR_TO_IP_ADDR(local_ip, pptp_info.src_ip);
+			ECM_HIN4_ADDR_TO_IP_ADDR(remote_ip, pptp_info.dst_ip);
+			if (ECM_IP_ADDR_MATCH(local_ip, addr)) {
+				if (unlikely(!ecm_interface_mac_addr_get(local_ip, node_addr, &on_link, gw_addr))) {
+					DEBUG_TRACE("failed to obtain node address for " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(local_ip));
+					return NULL;
+				}
+
+			} else {
+				if (unlikely(!ecm_interface_mac_addr_get(remote_ip, node_addr, &on_link, gw_addr))) {
+					DEBUG_TRACE("failed to obtain node address for host " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(remote_ip));
+					return NULL;
+				}
+			}
+
+			done = true;
+			break;
+#else
+			DEBUG_TRACE("PPTP interface unsupported\n");
+			return NULL;
+#endif
+		case ECM_DB_IFACE_TYPE_VLAN:
+#ifdef ECM_INTERFACE_VLAN_ENABLE
+			/*
+			 * VLAN handled same along with ethernet, lag, bridge etc.
+			 */
+#else
+			DEBUG_TRACE("VLAN interface unsupported\n");
+			return NULL;
+#endif
+		case ECM_DB_IFACE_TYPE_ETHERNET:
+		case ECM_DB_IFACE_TYPE_LAG:
+		case ECM_DB_IFACE_TYPE_BRIDGE:
+		case ECM_DB_IFACE_TYPE_IPSEC_TUNNEL:
+			if (!ecm_interface_mac_addr_get(addr, node_addr, &on_link, gw_addr)) {
+				DEBUG_TRACE("failed to obtain node address for host " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(addr));
+				ecm_interface_send_arp_request(dev, addr, on_link, gw_addr);
+
+				/*
+				 * Unable to get node address at this time.
+				 */
+				return NULL;
+			}
+
+			if (is_multicast_ether_addr(node_addr)) {
+				DEBUG_TRACE("multicast node address for host " ECM_IP_ADDR_DOT_FMT ", node_addr: %pM\n", ECM_IP_ADDR_TO_DOT(addr), node_addr);
+				return NULL;
+			}
+
+			/*
+			 * Because we are iterating from inner to outer interface, this interface is the
+			 * innermost one that has a node address - take this one.
+			 */
+			done = true;
+			break;
+		default:
+			/*
+			 * Don't know how to handle these.
+			 * Just copy some part of the address for now, but keep iterating the interface list
+			 * in the hope something recognisable will be seen!
+			 * GGG TODO We really need to roll out support for all interface types we can deal with ASAP :-(
+			 */
+			memcpy(node_addr, (uint8_t *)addr, ETH_ALEN);
+		}
+	}
+	if (!done) {
+		DEBUG_INFO("Failed to establish node for " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(addr));
+		return NULL;
+	}
+
+	/*
+	 * Locate the node
+	 */
+	ni = ecm_db_node_find_and_ref(node_addr);
+	if (ni) {
+		DEBUG_TRACE("%p: node established\n", ni);
+		return ni;
+	}
+
+	/*
+	 * No node - establish iface
+	 */
+	ii = ecm_interface_establish_and_ref(feci, dev, skb);
+	if (!ii) {
+		DEBUG_WARN("Failed to establish iface\n");
+		return NULL;
+	}
+
+	/*
+	 * No node - create one
+	 */
+	nni = ecm_db_node_alloc();
+	if (!nni) {
+		DEBUG_WARN("Failed to establish node\n");
+		ecm_db_iface_deref(ii);
+		return NULL;
+	}
+
+	/*
+	 * Add node into the database, atomically to avoid races creating the same thing
+	 */
+	spin_lock_bh(&ecm_nss_ipv4_lock);
+	ni = ecm_db_node_find_and_ref(node_addr);
+	if (ni) {
+		spin_unlock_bh(&ecm_nss_ipv4_lock);
+		ecm_db_node_deref(nni);
+		ecm_db_iface_deref(ii);
+		return ni;
+	}
+
+	ecm_db_node_add(nni, ii, node_addr, NULL, nni);
+	spin_unlock_bh(&ecm_nss_ipv4_lock);
+
+	/*
+	 * Don't need iface instance now
+	 */
+	ecm_db_iface_deref(ii);
+
+	DEBUG_TRACE("%p: node established\n", nni);
+	return nni;
 }
 
 /*
@@ -2433,7 +2667,7 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 		 * For this we also need the interface lists which we also set upon the new connection while we are at it.
 		 */
 		DEBUG_TRACE("%p: Create the 'from' interface heirarchy list\n", nci);
-		from_list_first = ecm_interface_heirarchy_construct(feci, from_list, ip_dest_addr, ip_src_addr, 4, protocol, in_dev, is_routed, in_dev, src_node_addr, dest_node_addr, layer4hdr, skb);
+		from_list_first = ecm_interface_multicast_from_heirarchy_construct(feci, from_list, ip_dest_addr, ip_src_addr, 4, protocol, in_dev, is_routed, in_dev, src_node_addr, dest_node_addr, layer4hdr, skb);
 		if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			feci->deref(feci);
 			ecm_db_connection_deref(nci);
@@ -2444,7 +2678,7 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 		ecm_db_connection_from_interfaces_reset(nci, from_list, from_list_first);
 
 		DEBUG_TRACE("%p: Establish source node\n", nci);
-		src_ni = ecm_nss_ipv4_node_establish_and_ref(feci, in_dev, ip_src_addr, from_list, from_list_first, src_node_addr, skb);
+		src_ni = ecm_nss_multicast_ipv4_node_establish_and_ref(feci, in_dev, ip_src_addr, from_list, from_list_first, src_node_addr, skb);
 		ecm_db_connection_interfaces_deref(from_list, from_list_first);
 		if (!src_ni) {
 			DEBUG_WARN("%p: Failed to establish source node\n", nci);
@@ -2534,7 +2768,7 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 
 		DEBUG_TRACE("%p: Create destination node\n", nci);
 		ecm_db_multicast_copy_if_heirarchy(to_list_temp, to_list);
-		dest_ni = ecm_nss_ipv4_node_establish_and_ref(feci, out_dev, ip_dest_addr, to_list_temp, *to_list_first, dest_mac_addr, skb);
+		dest_ni = ecm_nss_multicast_ipv4_node_establish_and_ref(feci, out_dev, ip_dest_addr, to_list_temp, *to_list_first, dest_mac_addr, skb);
 
 		/*
 		 * De-ref the Multicast destination interface list
@@ -2581,7 +2815,7 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 		}
 
 		DEBUG_TRACE("%p: Create the 'from NAT' interface heirarchy list\n", nci);
-		from_nat_list_first = ecm_interface_heirarchy_construct(feci, from_nat_list, ip_dest_addr, ip_src_addr_nat, 4, protocol, in_dev_nat, is_routed, in_dev_nat, src_node_addr, dest_node_addr, (__be16 *)&udp_hdr, skb);
+		from_nat_list_first = ecm_interface_multicast_from_heirarchy_construct(feci, from_nat_list, ip_dest_addr, ip_src_addr_nat, 4, protocol, in_dev_nat, is_routed, in_dev_nat, src_node_addr, dest_node_addr, (__be16 *)&udp_hdr, skb);
 		if (from_nat_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			for (vif = 0; vif < ECM_DB_MULTICAST_IF_MAX; vif++) {
 				to_list_single = ecm_db_multicast_if_heirarchy_get(to_list, vif);
@@ -2604,7 +2838,7 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 		}
 		ecm_db_connection_from_nat_interfaces_reset(nci, from_nat_list, from_nat_list_first);
 
-		src_nat_ni = ecm_nss_ipv4_node_establish_and_ref(feci, in_dev_nat, ip_src_addr_nat, from_nat_list, from_nat_list_first, src_node_addr, skb);
+		src_nat_ni = ecm_nss_multicast_ipv4_node_establish_and_ref(feci, in_dev_nat, ip_src_addr_nat, from_nat_list, from_nat_list_first, src_node_addr, skb);
 		ecm_db_connection_interfaces_deref(from_nat_list, from_nat_list_first);
 		if (!src_nat_ni) {
 			for (vif = 0; vif < ECM_DB_MULTICAST_IF_MAX; vif++) {

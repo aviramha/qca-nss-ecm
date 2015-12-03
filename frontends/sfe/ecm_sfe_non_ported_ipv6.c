@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2015 The Linux Foundation.  All rights reserved.
+ * Copyright (c) 2015-2016 The Linux Foundation.  All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -1683,6 +1683,7 @@ unsigned int ecm_sfe_non_ported_ipv6_process(struct net_device *out_dev,
 		struct ecm_db_iface_instance *to_list[ECM_DB_IFACE_HEIRARCHY_MAX];
 		int32_t from_list_first;
 		struct ecm_db_iface_instance *from_list[ECM_DB_IFACE_HEIRARCHY_MAX];
+		struct ecm_front_end_interface_construct_instance efeici;
 
 		DEBUG_INFO("New connection from " ECM_IP_ADDR_OCTAL_FMT " to " ECM_IP_ADDR_OCTAL_FMT "\n", ECM_IP_ADDR_TO_OCTAL(ip_src_addr), ECM_IP_ADDR_TO_OCTAL(ip_dest_addr));
 
@@ -1700,6 +1701,15 @@ unsigned int ecm_sfe_non_ported_ipv6_process(struct net_device *out_dev,
 			return NF_ACCEPT;
 		}
 		spin_unlock_bh(&ecm_sfe_ipv6_lock);
+
+		if (!ecm_front_end_ipv6_interface_construct_set(skb, sender, ecm_dir, is_routed,
+							in_dev, out_dev,
+							ip_src_addr, ip_dest_addr,
+							&efeici)) {
+			DEBUG_WARN("ECM front end ipv6 interface construct set failed\n");
+			return NF_ACCEPT;
+		}
+		ecm_front_end_ipv6_interface_construct_netdev_hold(&efeici);
 
 		/*
 		 * Does this connection have a conntrack entry?
@@ -1719,6 +1729,7 @@ unsigned int ecm_sfe_non_ported_ipv6_process(struct net_device *out_dev,
 			 */
 			conn_count = (unsigned int)ecm_db_connection_count_get();
 			if (conn_count >= nf_conntrack_max) {
+				ecm_front_end_ipv6_interface_construct_netdev_put(&efeici);
 				DEBUG_WARN("ECM Connection count limit reached: db: %u, ct: %u\n", conn_count, nf_conntrack_max);
 				return NF_ACCEPT;
 			}
@@ -1729,6 +1740,7 @@ unsigned int ecm_sfe_non_ported_ipv6_process(struct net_device *out_dev,
 		 */
 		nci = ecm_db_connection_alloc();
 		if (!nci) {
+			ecm_front_end_ipv6_interface_construct_netdev_put(&efeici);
 			DEBUG_WARN("Failed to allocate connection\n");
 			return NF_ACCEPT;
 		}
@@ -1739,6 +1751,7 @@ unsigned int ecm_sfe_non_ported_ipv6_process(struct net_device *out_dev,
 		feci = (struct ecm_front_end_connection_instance *)ecm_sfe_non_ported_ipv6_connection_instance_alloc(nci, can_accel);
 		if (!feci) {
 			ecm_db_connection_deref(nci);
+			ecm_front_end_ipv6_interface_construct_netdev_put(&efeici);
 			DEBUG_WARN("Failed to allocate front end\n");
 			return NF_ACCEPT;
 		}
@@ -1760,21 +1773,23 @@ unsigned int ecm_sfe_non_ported_ipv6_process(struct net_device *out_dev,
 		 * GGG TODO The empty list checks should not be needed, mapping_establish_and_ref() should fail out if there is no list anyway.
 		 */
 		DEBUG_TRACE("%p: Create the 'from' interface heirarchy list\n", nci);
-		from_list_first = ecm_interface_heirarchy_construct(feci, from_list, ip_dest_addr, ip_src_addr, 6, protocol, in_dev, is_routed, in_dev, src_node_addr, dest_node_addr, NULL, skb);
+		from_list_first = ecm_interface_heirarchy_construct(feci, from_list, efeici.from_dev, efeici.from_other_dev, ip_dest_addr, efeici.from_mac_lookup_ip_addr, 6, protocol, in_dev, is_routed, in_dev, src_node_addr, dest_node_addr, NULL, skb);
 		if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			feci->deref(feci);
 			ecm_db_connection_deref(nci);
+			ecm_front_end_ipv6_interface_construct_netdev_put(&efeici);
 			DEBUG_WARN("Failed to obtain 'from' heirarchy list\n");
 			return NF_ACCEPT;
 		}
 		ecm_db_connection_from_interfaces_reset(nci, from_list, from_list_first);
 
 		DEBUG_TRACE("%p: Create source node\n", nci);
-		src_ni = ecm_sfe_ipv6_node_establish_and_ref(feci, in_dev, ip_src_addr, from_list, from_list_first, src_node_addr, skb);
+		src_ni = ecm_sfe_ipv6_node_establish_and_ref(feci, efeici.from_dev, efeici.from_mac_lookup_ip_addr, from_list, from_list_first, src_node_addr, skb);
 		ecm_db_connection_interfaces_deref(from_list, from_list_first);
 		if (!src_ni) {
 			feci->deref(feci);
 			ecm_db_connection_deref(nci);
+			ecm_front_end_ipv6_interface_construct_netdev_put(&efeici);
 			DEBUG_WARN("Failed to establish source node\n");
 			return NF_ACCEPT;
 		}
@@ -1785,33 +1800,38 @@ unsigned int ecm_sfe_non_ported_ipv6_process(struct net_device *out_dev,
 			ecm_db_node_deref(src_ni);
 			feci->deref(feci);
 			ecm_db_connection_deref(nci);
+			ecm_front_end_ipv6_interface_construct_netdev_put(&efeici);
 			DEBUG_WARN("Failed to establish src mapping\n");
 			return NF_ACCEPT;
 		}
 
 		DEBUG_TRACE("%p: Create the 'to' interface heirarchy list\n", nci);
-		to_list_first = ecm_interface_heirarchy_construct(feci, to_list, ip_src_addr, ip_dest_addr, 6, protocol, out_dev, is_routed, in_dev, dest_node_addr, src_node_addr, NULL, skb);
+		to_list_first = ecm_interface_heirarchy_construct(feci, to_list, efeici.to_dev, efeici.to_other_dev, ip_src_addr, efeici.to_mac_lookup_ip_addr, 6, protocol, out_dev, is_routed, in_dev, dest_node_addr, src_node_addr, NULL, skb);
 		if (to_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_mapping_deref(src_mi);
 			ecm_db_node_deref(src_ni);
 			feci->deref(feci);
 			ecm_db_connection_deref(nci);
+			ecm_front_end_ipv6_interface_construct_netdev_put(&efeici);
 			DEBUG_WARN("Failed to obtain 'to' heirarchy list\n");
 			return NF_ACCEPT;
 		}
 		ecm_db_connection_to_interfaces_reset(nci, to_list, to_list_first);
 
 		DEBUG_TRACE("%p: Create dest node\n", nci);
-		dest_ni = ecm_sfe_ipv6_node_establish_and_ref(feci, out_dev, ip_dest_addr, to_list, to_list_first, dest_node_addr, skb);
+		dest_ni = ecm_sfe_ipv6_node_establish_and_ref(feci, efeici.to_dev, efeici.to_mac_lookup_ip_addr, to_list, to_list_first, dest_node_addr, skb);
 		ecm_db_connection_interfaces_deref(to_list, to_list_first);
 		if (!dest_ni) {
 			ecm_db_mapping_deref(src_mi);
 			ecm_db_node_deref(src_ni);
 			feci->deref(feci);
 			ecm_db_connection_deref(nci);
+			ecm_front_end_ipv6_interface_construct_netdev_put(&efeici);
 			DEBUG_WARN("Failed to establish dest node\n");
 			return NF_ACCEPT;
 		}
+
+		ecm_front_end_ipv6_interface_construct_netdev_put(&efeici);
 
 		DEBUG_TRACE("%p: Create dest mapping\n", nci);
 		dest_mi = ecm_sfe_ipv6_mapping_establish_and_ref(ip_dest_addr, dest_port);
@@ -1943,7 +1963,7 @@ unsigned int ecm_sfe_non_ported_ipv6_process(struct net_device *out_dev,
 	 * Do we need to action generation change?
 	 */
 	if (unlikely(ecm_db_connection_regeneration_required_check(ci))) {
-		ecm_sfe_ipv6_connection_regenerate(ci, sender, out_dev, in_dev, NULL, skb);
+		ecm_sfe_ipv6_connection_regenerate(ci, sender, ecm_dir, out_dev, in_dev, NULL, skb);
 	}
 
 	/*

@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2015 The Linux Foundation.  All rights reserved.
+ * Copyright (c) 2015-2016 The Linux Foundation.  All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -1912,8 +1912,9 @@ unsigned int ecm_sfe_ported_ipv4_process(struct net_device *out_dev, struct net_
 				DEBUG_ASSERT(false, "Unhandled ecm_dir: %d\n", ecm_dir);
 			}
 		}
-		DEBUG_TRACE("UDP src: " ECM_IP_ADDR_DOT_FMT ":%d, dest: " ECM_IP_ADDR_DOT_FMT ":%d, dir %d\n",
-				ECM_IP_ADDR_TO_DOT(ip_src_addr), src_port, ECM_IP_ADDR_TO_DOT(ip_dest_addr), dest_port, ecm_dir);
+		DEBUG_TRACE("UDP src: " ECM_IP_ADDR_DOT_FMT "(" ECM_IP_ADDR_DOT_FMT "):%d(%d), dest: " ECM_IP_ADDR_DOT_FMT "(" ECM_IP_ADDR_DOT_FMT "):%d(%d), dir %d\n",
+				ECM_IP_ADDR_TO_DOT(ip_src_addr), ECM_IP_ADDR_TO_DOT(ip_src_addr_nat), src_port, src_port_nat, ECM_IP_ADDR_TO_DOT(ip_dest_addr),
+				ECM_IP_ADDR_TO_DOT(ip_dest_addr_nat), dest_port, dest_port_nat, ecm_dir);
 	} else {
 		DEBUG_WARN("Wrong protocol: %d\n", protocol);
 		return NF_ACCEPT;
@@ -1948,6 +1949,7 @@ unsigned int ecm_sfe_ported_ipv4_process(struct net_device *out_dev, struct net_
 		struct ecm_db_iface_instance *from_list[ECM_DB_IFACE_HEIRARCHY_MAX];
 		int32_t from_nat_list_first;
 		struct ecm_db_iface_instance *from_nat_list[ECM_DB_IFACE_HEIRARCHY_MAX];
+		struct ecm_front_end_interface_construct_instance efeici;
 
 		DEBUG_INFO("New ported connection from " ECM_IP_ADDR_DOT_FMT ":%u to " ECM_IP_ADDR_DOT_FMT ":%u protocol: %d\n",
 				ECM_IP_ADDR_TO_DOT(ip_src_addr), src_port, ECM_IP_ADDR_TO_DOT(ip_dest_addr), dest_port, protocol);
@@ -1966,6 +1968,17 @@ unsigned int ecm_sfe_ported_ipv4_process(struct net_device *out_dev, struct net_
 			return NF_ACCEPT;
 		}
 		spin_unlock_bh(&ecm_sfe_ipv4_lock);
+
+		if (!ecm_front_end_ipv4_interface_construct_set(skb, sender, ecm_dir, is_routed,
+							in_dev, out_dev,
+							ip_src_addr, ip_src_addr_nat,
+							ip_dest_addr, ip_dest_addr_nat,
+							&efeici)) {
+
+			DEBUG_WARN("ECM front end ipv4 interface construct set failed for routed traffic\n");
+			return NF_ACCEPT;
+		}
+		ecm_front_end_ipv4_interface_construct_netdev_hold(&efeici);
 
 		/*
 		 * Does this connection have a conntrack entry?
@@ -1986,6 +1999,7 @@ unsigned int ecm_sfe_ported_ipv4_process(struct net_device *out_dev, struct net_
 			conn_count = (unsigned int)ecm_db_connection_count_get();
 			if (conn_count >= nf_conntrack_max) {
 				DEBUG_WARN("ECM Connection count limit reached: db: %u, ct: %u\n", conn_count, nf_conntrack_max);
+				ecm_front_end_ipv4_interface_construct_netdev_put(&efeici);
 				return NF_ACCEPT;
 			}
 
@@ -1997,6 +2011,7 @@ unsigned int ecm_sfe_ported_ipv4_process(struct net_device *out_dev, struct net_
 				if (ct->proto.tcp.state >= TCP_CONNTRACK_FIN_WAIT && ct->proto.tcp.state <= TCP_CONNTRACK_CLOSE) {
 					spin_unlock_bh(&ct->lock);
 					DEBUG_TRACE("%p: Connection in termination state %#X\n", ct, ct->proto.tcp.state);
+					ecm_front_end_ipv4_interface_construct_netdev_put(&efeici);
 					return NF_ACCEPT;
 				}
 				spin_unlock_bh(&ct->lock);
@@ -2008,6 +2023,7 @@ unsigned int ecm_sfe_ported_ipv4_process(struct net_device *out_dev, struct net_
 		 */
 		nci = ecm_db_connection_alloc();
 		if (!nci) {
+			ecm_front_end_ipv4_interface_construct_netdev_put(&efeici);
 			DEBUG_WARN("Failed to allocate connection\n");
 			return NF_ACCEPT;
 		}
@@ -2018,6 +2034,7 @@ unsigned int ecm_sfe_ported_ipv4_process(struct net_device *out_dev, struct net_
 		feci = (struct ecm_front_end_connection_instance *)ecm_sfe_ported_ipv4_connection_instance_alloc(nci, protocol, can_accel);
 		if (!feci) {
 			ecm_db_connection_deref(nci);
+			ecm_front_end_ipv4_interface_construct_netdev_put(&efeici);
 			DEBUG_WARN("Failed to allocate front end\n");
 			return NF_ACCEPT;
 		}
@@ -2039,21 +2056,23 @@ unsigned int ecm_sfe_ported_ipv4_process(struct net_device *out_dev, struct net_
 		 * GGG TODO The empty list checks should not be needed, mapping_establish_and_ref() should fail out if there is no list anyway.
 		 */
 		DEBUG_TRACE("%p: Create the 'from' interface heirarchy list\n", nci);
-		from_list_first = ecm_interface_heirarchy_construct(feci, from_list, ip_dest_addr, ip_src_addr, 4, protocol, in_dev, is_routed, in_dev, src_node_addr, dest_node_addr, layer4hdr, skb);
+		from_list_first = ecm_interface_heirarchy_construct(feci, from_list, efeici.from_dev, efeici.from_other_dev, ip_dest_addr, efeici.from_mac_lookup_ip_addr, 4, protocol, in_dev, is_routed, in_dev, src_node_addr, dest_node_addr, layer4hdr, skb);
 		if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			feci->deref(feci);
 			ecm_db_connection_deref(nci);
+			ecm_front_end_ipv4_interface_construct_netdev_put(&efeici);
 			DEBUG_WARN("Failed to obtain 'from' heirarchy list\n");
 			return NF_ACCEPT;
 		}
 		ecm_db_connection_from_interfaces_reset(nci, from_list, from_list_first);
 
 		DEBUG_TRACE("%p: Create source node\n", nci);
-		src_ni = ecm_sfe_ipv4_node_establish_and_ref(feci, in_dev, ip_src_addr, from_list, from_list_first, src_node_addr, skb);
+		src_ni = ecm_sfe_ipv4_node_establish_and_ref(feci, efeici.from_dev, efeici.from_mac_lookup_ip_addr, from_list, from_list_first, src_node_addr, skb);
 		ecm_db_connection_interfaces_deref(from_list, from_list_first);
 		if (!src_ni) {
 			feci->deref(feci);
 			ecm_db_connection_deref(nci);
+			ecm_front_end_ipv4_interface_construct_netdev_put(&efeici);
 			DEBUG_WARN("Failed to establish source node\n");
 			return NF_ACCEPT;
 		}
@@ -2064,30 +2083,33 @@ unsigned int ecm_sfe_ported_ipv4_process(struct net_device *out_dev, struct net_
 			ecm_db_node_deref(src_ni);
 			feci->deref(feci);
 			ecm_db_connection_deref(nci);
+			ecm_front_end_ipv4_interface_construct_netdev_put(&efeici);
 			DEBUG_WARN("Failed to establish src mapping\n");
 			return NF_ACCEPT;
 		}
 
 		DEBUG_TRACE("%p: Create the 'to' interface heirarchy list\n", nci);
-		to_list_first = ecm_interface_heirarchy_construct(feci, to_list, ip_src_addr, ip_dest_addr, 4, protocol, out_dev, is_routed, in_dev, dest_node_addr, src_node_addr, layer4hdr, skb);
+		to_list_first = ecm_interface_heirarchy_construct(feci, to_list, efeici.to_dev, efeici.to_other_dev, ip_src_addr, efeici.to_mac_lookup_ip_addr, 4, protocol, out_dev, is_routed, in_dev, dest_node_addr, src_node_addr, layer4hdr, skb);
 		if (to_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_mapping_deref(src_mi);
 			ecm_db_node_deref(src_ni);
 			feci->deref(feci);
 			ecm_db_connection_deref(nci);
+			ecm_front_end_ipv4_interface_construct_netdev_put(&efeici);
 			DEBUG_WARN("Failed to obtain 'to' heirarchy list\n");
 			return NF_ACCEPT;
 		}
 		ecm_db_connection_to_interfaces_reset(nci, to_list, to_list_first);
 
 		DEBUG_TRACE("%p: Create dest node\n", nci);
-		dest_ni = ecm_sfe_ipv4_node_establish_and_ref(feci, out_dev, ip_dest_addr, to_list, to_list_first, dest_node_addr, skb);
+		dest_ni = ecm_sfe_ipv4_node_establish_and_ref(feci, efeici.to_dev, efeici.to_mac_lookup_ip_addr, to_list, to_list_first, dest_node_addr, skb);
 		ecm_db_connection_interfaces_deref(to_list, to_list_first);
 		if (!dest_ni) {
 			ecm_db_mapping_deref(src_mi);
 			ecm_db_node_deref(src_ni);
 			feci->deref(feci);
 			ecm_db_connection_deref(nci);
+			ecm_front_end_ipv4_interface_construct_netdev_put(&efeici);
 			DEBUG_WARN("Failed to establish dest node\n");
 			return NF_ACCEPT;
 		}
@@ -2100,6 +2122,7 @@ unsigned int ecm_sfe_ported_ipv4_process(struct net_device *out_dev, struct net_
 			ecm_db_node_deref(src_ni);
 			feci->deref(feci);
 			ecm_db_connection_deref(nci);
+			ecm_front_end_ipv4_interface_construct_netdev_put(&efeici);
 			DEBUG_WARN("Failed to establish dest mapping\n");
 			return NF_ACCEPT;
 		}
@@ -2111,7 +2134,7 @@ unsigned int ecm_sfe_ported_ipv4_process(struct net_device *out_dev, struct net_
 		 * GGG TODO The empty list checks should not be needed, mapping_establish_and_ref() should fail out if there is no list anyway.
 		 */
 		DEBUG_TRACE("%p: Create the 'from NAT' interface heirarchy list\n", nci);
-		from_nat_list_first = ecm_interface_heirarchy_construct(feci, from_nat_list, ip_dest_addr, ip_src_addr_nat, 4, protocol, in_dev_nat, is_routed, in_dev_nat, src_node_addr_nat, dest_node_addr_nat, layer4hdr, skb);
+		from_nat_list_first = ecm_interface_heirarchy_construct(feci, from_nat_list, efeici.from_nat_dev, efeici.from_nat_other_dev, ip_dest_addr, efeici.from_nat_mac_lookup_ip_addr, 4, protocol, in_dev_nat, is_routed, in_dev_nat, src_node_addr_nat, dest_node_addr_nat, layer4hdr, skb);
 		if (from_nat_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_mapping_deref(dest_mi);
 			ecm_db_node_deref(dest_ni);
@@ -2119,13 +2142,14 @@ unsigned int ecm_sfe_ported_ipv4_process(struct net_device *out_dev, struct net_
 			ecm_db_node_deref(src_ni);
 			feci->deref(feci);
 			ecm_db_connection_deref(nci);
+			ecm_front_end_ipv4_interface_construct_netdev_put(&efeici);
 			DEBUG_WARN("Failed to obtain 'from NAT' heirarchy list\n");
 			return NF_ACCEPT;
 		}
 		ecm_db_connection_from_nat_interfaces_reset(nci, from_nat_list, from_nat_list_first);
 
 		DEBUG_TRACE("%p: Create source nat node\n", nci);
-		src_nat_ni = ecm_sfe_ipv4_node_establish_and_ref(feci, in_dev_nat, ip_src_addr_nat, from_nat_list, from_nat_list_first, src_node_addr_nat, skb);
+		src_nat_ni = ecm_sfe_ipv4_node_establish_and_ref(feci, efeici.from_nat_dev, efeici.from_nat_mac_lookup_ip_addr, from_nat_list, from_nat_list_first, src_node_addr_nat, skb);
 		ecm_db_connection_interfaces_deref(from_nat_list, from_nat_list_first);
 		if (!src_nat_ni) {
 			ecm_db_mapping_deref(dest_mi);
@@ -2134,6 +2158,7 @@ unsigned int ecm_sfe_ported_ipv4_process(struct net_device *out_dev, struct net_
 			ecm_db_node_deref(src_ni);
 			feci->deref(feci);
 			ecm_db_connection_deref(nci);
+			ecm_front_end_ipv4_interface_construct_netdev_put(&efeici);
 			DEBUG_WARN("Failed to establish source nat node\n");
 			return NF_ACCEPT;
 		}
@@ -2147,12 +2172,13 @@ unsigned int ecm_sfe_ported_ipv4_process(struct net_device *out_dev, struct net_
 			ecm_db_node_deref(src_ni);
 			feci->deref(feci);
 			ecm_db_connection_deref(nci);
+			ecm_front_end_ipv4_interface_construct_netdev_put(&efeici);
 			DEBUG_WARN("Failed to establish src nat mapping\n");
 			return NF_ACCEPT;
 		}
 
 		DEBUG_TRACE("%p: Create the 'to NAT' interface heirarchy list\n", nci);
-		to_nat_list_first = ecm_interface_heirarchy_construct(feci, to_nat_list, ip_src_addr, ip_dest_addr_nat, 4, protocol, out_dev_nat, is_routed, in_dev, dest_node_addr_nat, src_node_addr_nat, layer4hdr, skb);
+		to_nat_list_first = ecm_interface_heirarchy_construct(feci, to_nat_list, efeici.to_nat_dev, efeici.to_nat_other_dev, ip_src_addr, efeici.to_nat_mac_lookup_ip_addr, 4, protocol, out_dev_nat, is_routed, in_dev, dest_node_addr_nat, src_node_addr_nat, layer4hdr, skb);
 		if (to_nat_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ecm_db_mapping_deref(src_nat_mi);
 			ecm_db_node_deref(src_nat_ni);
@@ -2162,13 +2188,15 @@ unsigned int ecm_sfe_ported_ipv4_process(struct net_device *out_dev, struct net_
 			ecm_db_node_deref(src_ni);
 			feci->deref(feci);
 			ecm_db_connection_deref(nci);
+			ecm_front_end_ipv4_interface_construct_netdev_put(&efeici);
 			DEBUG_WARN("Failed to obtain 'to NAT' heirarchy list\n");
 			return NF_ACCEPT;
 		}
 		ecm_db_connection_to_nat_interfaces_reset(nci, to_nat_list, to_nat_list_first);
 
 		DEBUG_TRACE("%p: Create dest nat node\n", nci);
-		dest_nat_ni = ecm_sfe_ipv4_node_establish_and_ref(feci, out_dev_nat, ip_dest_addr_nat, to_nat_list, to_nat_list_first, dest_node_addr_nat, skb);
+		dest_nat_ni = ecm_sfe_ipv4_node_establish_and_ref(feci, efeici.to_nat_dev, efeici.to_nat_mac_lookup_ip_addr, to_nat_list, to_nat_list_first, dest_node_addr_nat, skb);
+
 		ecm_db_connection_interfaces_deref(to_nat_list, to_nat_list_first);
 		if (!dest_nat_ni) {
 			ecm_db_mapping_deref(src_nat_mi);
@@ -2179,9 +2207,12 @@ unsigned int ecm_sfe_ported_ipv4_process(struct net_device *out_dev, struct net_
 			ecm_db_node_deref(src_ni);
 			feci->deref(feci);
 			ecm_db_connection_deref(nci);
+			ecm_front_end_ipv4_interface_construct_netdev_put(&efeici);
 			DEBUG_WARN("Failed to establish dest nat node\n");
 			return NF_ACCEPT;
 		}
+
+		ecm_front_end_ipv4_interface_construct_netdev_put(&efeici);
 
 		dest_nat_mi = ecm_sfe_ipv4_mapping_establish_and_ref(ip_dest_addr_nat, dest_port_nat);
 		if (!dest_nat_mi) {
@@ -2328,7 +2359,7 @@ unsigned int ecm_sfe_ported_ipv4_process(struct net_device *out_dev, struct net_
 	 * Do we need to action generation change?
 	 */
 	if (unlikely(ecm_db_connection_regeneration_required_check(ci))) {
-		ecm_sfe_ipv4_connection_regenerate(ci, sender, out_dev, out_dev_nat, in_dev, in_dev_nat, layer4hdr, skb);
+		ecm_sfe_ipv4_connection_regenerate(ci, sender, ecm_dir, out_dev, out_dev_nat, in_dev, in_dev_nat, layer4hdr, skb);
 	}
 
 	/*

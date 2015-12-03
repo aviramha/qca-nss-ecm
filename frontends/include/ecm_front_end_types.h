@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2014-2015 The Linux Foundation.  All rights reserved.
+ * Copyright (c) 2014-2016 The Linux Foundation.  All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -138,4 +138,38 @@ struct ecm_front_end_connection_instance {
 	int refs;						/* Integer to trap we never go negative */
 
 };
+
+/*
+ * Front end's interface construction structure.
+ */
+struct ecm_front_end_interface_construct_instance {
+	struct net_device *from_dev;
+	struct net_device *from_other_dev;
+	struct net_device *to_dev;
+	struct net_device *to_other_dev;
+	struct net_device *from_nat_dev;
+	struct net_device *from_nat_other_dev;
+	struct net_device *to_nat_dev;
+	struct net_device *to_nat_other_dev;
+
+	ip_addr_t from_mac_lookup_ip_addr;
+	ip_addr_t to_mac_lookup_ip_addr;
+	ip_addr_t from_nat_mac_lookup_ip_addr;
+	ip_addr_t to_nat_mac_lookup_ip_addr;
+};
+
+extern void ecm_front_end_ipv6_interface_construct_netdev_put(struct ecm_front_end_interface_construct_instance *efeici);
+extern void ecm_front_end_ipv6_interface_construct_netdev_hold(struct ecm_front_end_interface_construct_instance *efeici);
+extern bool ecm_front_end_ipv6_interface_construct_set(struct sk_buff *skb, ecm_tracker_sender_type_t sender, ecm_db_direction_t ecm_dir, bool is_routed,
+							struct net_device *in_dev, struct net_device *out_dev,
+							ip_addr_t ip_src_addr, ip_addr_t ip_dest_addr,
+							struct ecm_front_end_interface_construct_instance *efeici);
+
+extern void ecm_front_end_ipv4_interface_construct_netdev_put(struct ecm_front_end_interface_construct_instance *efeici);
+extern void ecm_front_end_ipv4_interface_construct_netdev_hold(struct ecm_front_end_interface_construct_instance *efeici);
+extern bool ecm_front_end_ipv4_interface_construct_set(struct sk_buff *skb, ecm_tracker_sender_type_t sender, ecm_db_direction_t ecm_dir, bool is_routed,
+							struct net_device *in_dev, struct net_device *out_dev,
+							ip_addr_t ip_src_addr, ip_addr_t ip_src_addr_nat,
+							ip_addr_t ip_dest_addr, ip_addr_t ip_dest_addr_nat,
+							struct ecm_front_end_interface_construct_instance *efeici);
 
