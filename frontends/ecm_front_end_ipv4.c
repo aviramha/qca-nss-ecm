@@ -59,7 +59,8 @@ void ecm_front_end_ipv4_stop(int num)
 	/*
 	 * Check the other platforms and use the correct APIs for those platforms.
 	 */
-	if (!of_machine_is_compatible("qcom,ipq8064")) {
+	if (!of_machine_is_compatible("qcom,ipq8064") &&
+		!of_machine_is_compatible("qcom,ipq8062")) {
 		ecm_sfe_ipv4_stop(num);
 	} else {
 		ecm_nss_ipv4_stop(num);
@@ -83,7 +84,8 @@ int ecm_front_end_ipv4_init(struct dentry *dentry)
 	/*
 	 * Check the other platforms and use the correct APIs for those platforms.
 	 */
-	if (!of_machine_is_compatible("qcom,ipq8064")) {
+	if (!of_machine_is_compatible("qcom,ipq8064") &&
+		!of_machine_is_compatible("qcom,ipq8062")) {
 		return ecm_sfe_ipv4_init(dentry);
 	} else {
 		return ecm_nss_ipv4_init(dentry);
@@ -106,7 +108,8 @@ void ecm_front_end_ipv4_exit(void)
 	/*
 	 * Check the other platforms and use the correct APIs for those platforms.
 	 */
-	if (!of_machine_is_compatible("qcom,ipq8064")) {
+	if (!of_machine_is_compatible("qcom,ipq8064") &&
+		!of_machine_is_compatible("qcom,ipq8062")) {
 		ecm_sfe_ipv4_exit();
 	} else {
 		ecm_nss_ipv4_exit();

@@ -60,7 +60,8 @@ void ecm_front_end_conntrack_notifier_stop(int num)
 	/*
 	 * Check the other platforms and use the correct APIs for those platforms.
 	 */
-	if (!of_machine_is_compatible("qcom,ipq8064")) {
+	if (!of_machine_is_compatible("qcom,ipq8064") &&
+		!of_machine_is_compatible("qcom,ipq8062")) {
 		ecm_sfe_conntrack_notifier_stop(num);
 	} else {
 		ecm_nss_conntrack_notifier_stop(num);
@@ -84,7 +85,8 @@ int ecm_front_end_conntrack_notifier_init(struct dentry *dentry)
 	/*
 	 * Check the other platforms and use the correct APIs for those platforms.
 	 */
-	if (!of_machine_is_compatible("qcom,ipq8064")) {
+	if (!of_machine_is_compatible("qcom,ipq8064") &&
+		!of_machine_is_compatible("qcom,ipq8062")) {
 		return ecm_sfe_conntrack_notifier_init(dentry);
 	} else {
 		return ecm_nss_conntrack_notifier_init(dentry);
@@ -108,7 +110,8 @@ void ecm_front_end_conntrack_notifier_exit(void)
 	/*
 	 * Check the other platforms and use the correct APIs for those platforms.
 	 */
-	if (!of_machine_is_compatible("qcom,ipq8064")) {
+	if (!of_machine_is_compatible("qcom,ipq8064") &&
+		!of_machine_is_compatible("qcom,ipq8062")) {
 		ecm_sfe_conntrack_notifier_exit();
 	} else {
 		ecm_nss_conntrack_notifier_exit();
@@ -134,9 +137,9 @@ void ecm_front_end_bond_notifier_stop(int num)
 	/*
 	 * Check the other platforms and use the correct APIs for those platforms.
 	 */
-	if (!of_machine_is_compatible("qcom,ipq8064")) {
+	if (!of_machine_is_compatible("qcom,ipq8064") &&
+		!of_machine_is_compatible("qcom,ipq8062"))
 		return;
-	}
 #endif
 	ecm_nss_bond_notifier_stop(num);
 }
@@ -155,9 +158,9 @@ int ecm_front_end_bond_notifier_init(struct dentry *dentry)
 	/*
 	 * Check the other platforms and use the correct APIs for those platforms.
 	 */
-	if (!of_machine_is_compatible("qcom,ipq8064")) {
+	if (!of_machine_is_compatible("qcom,ipq8064") &&
+		!of_machine_is_compatible("qcom,ipq8062"))
 		return 0;
-	}
 #endif
 	return ecm_nss_bond_notifier_init(dentry);
 }
@@ -176,9 +179,9 @@ void ecm_front_end_bond_notifier_exit(void)
 	/*
 	 * Check the other platforms and use the correct APIs for those platforms.
 	 */
-	if (!of_machine_is_compatible("qcom,ipq8064")) {
+	if (!of_machine_is_compatible("qcom,ipq8064") &&
+		!of_machine_is_compatible("qcom,ipq8062"))
 		return;
-	}
 #endif
 	ecm_nss_bond_notifier_exit();
 }
