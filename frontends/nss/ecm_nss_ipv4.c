@@ -1706,6 +1706,8 @@ static inline void ecm_nss_ipv4_process_one_conn_sync_msg(struct nss_ipv4_conn_s
 	struct ecm_classifier_instance *assignments[ECM_CLASSIFIER_TYPES];
 	int aci_index;
 	int assignment_count;
+	int flow_ident;
+	int return_ident_xlate;
 	struct ecm_classifier_rule_sync class_sync;
 
 	/*
@@ -1725,18 +1727,28 @@ static inline void ecm_nss_ipv4_process_one_conn_sync_msg(struct nss_ipv4_conn_s
 	ECM_HIN4_ADDR_TO_IP_ADDR(flow_ip, sync->flow_ip);
 	ECM_HIN4_ADDR_TO_IP_ADDR(return_ip_xlate, sync->return_ip_xlate);
 	ECM_HIN4_ADDR_TO_IP_ADDR(return_ip, sync->return_ip);
+	flow_ident = (int)sync->flow_ident;
+	return_ident_xlate = (int)sync->return_ident_xlate;
 
+	/*
+	 * GRE connections such as PPTP-GRE are stored into the db using a 3 tuple based hash.
+	 * So we ignore the port information here when trying to lookup the connection
+	 */
+	if (sync->protocol == IPPROTO_GRE) {
+		flow_ident = 0;
+		return_ident_xlate = 0;
+	}
 #ifdef ECM_MULTICAST_ENABLE
 	/*
 	 * Check for multicast flow
 	 */
 	if (ecm_ip_addr_is_multicast(return_ip)) {
-		ci = ecm_db_connection_find_and_ref(flow_ip, return_ip, sync->protocol, (int)sync->flow_ident, (int)sync->return_ident);
+		ci = ecm_db_connection_find_and_ref(flow_ip, return_ip, sync->protocol, flow_ident, (int)sync->return_ident);
 	} else {
-		ci = ecm_db_connection_find_and_ref(flow_ip, return_ip_xlate, sync->protocol, (int)sync->flow_ident, (int)sync->return_ident_xlate);
+		ci = ecm_db_connection_find_and_ref(flow_ip, return_ip_xlate, sync->protocol, flow_ident, return_ident_xlate);
 	}
 #else
-	ci = ecm_db_connection_find_and_ref(flow_ip, return_ip_xlate, sync->protocol, (int)sync->flow_ident, (int)sync->return_ident_xlate);
+	ci = ecm_db_connection_find_and_ref(flow_ip, return_ip_xlate, sync->protocol, flow_ident, return_ident_xlate);
 #endif
 	if (!ci) {
 		DEBUG_TRACE("%p: NSS Sync: no connection\n", sync);

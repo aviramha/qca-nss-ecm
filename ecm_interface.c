@@ -2202,6 +2202,13 @@ identifier_update:
 			 * Establish this type of interface
 			 */
 			ii = ecm_interface_pptp_interface_establish(&type_info.pptp, dev_name, dev_interface_num, ae_interface_num, dev_mtu);
+			if (ii) {
+				/*
+				 * The ifindex of a virtual netdevice like a PPTP session can change if it is destroyed
+				 * and comes up again. Detect if the ifindex has changed and update it if required
+				 */
+				ecm_db_iface_identifier_hash_table_entry_check_and_update(ii, dev_interface_num);
+			}
 			return ii;
 		}
 
@@ -2341,6 +2348,13 @@ identifier_update:
 		 * Establish this type of interface
 		 */
 		ii = ecm_interface_pptp_interface_establish(&type_info.pptp, dev_name, dev_interface_num, ae_interface_num, dev_mtu);
+		if (ii) {
+			/*
+			 * The ifindex of a virtual netdevice like a PPTP session can change if it is destroyed
+			 * and comes up again. Detect if the ifindex has changed and update it if required
+			 */
+			ecm_db_iface_identifier_hash_table_entry_check_and_update(ii, dev_interface_num);
+		}
 		return ii;
 	}
 #endif

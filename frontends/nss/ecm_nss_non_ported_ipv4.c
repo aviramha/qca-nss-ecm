@@ -402,6 +402,10 @@ static void ecm_nss_non_ported_ipv4_connection_accelerate(struct ecm_front_end_c
 	uint8_t dest_mac_xlate[ETH_ALEN];
 	ecm_db_direction_t ecm_dir;
 	ecm_front_end_acceleration_mode_t result_mode;
+#ifdef ECM_INTERFACE_PPTP_ENABLE
+	struct ecm_db_interface_info_pptp pptp_info;
+	bool is_from_ii_type_pptp = false;
+#endif
 
 	DEBUG_CHECK_MAGIC(nnpci, ECM_NSS_NON_PORTED_IPV4_CONNECTION_INSTANCE_MAGIC, "%p: magic failed", nnpci);
 
@@ -665,24 +669,8 @@ static void ecm_nss_non_ported_ipv4_connection_accelerate(struct ecm_front_end_c
 			break;
 		case ECM_DB_IFACE_TYPE_PPTP:
 #ifdef ECM_INTERFACE_PPTP_ENABLE
-			/*
-			 * pptp packets from lan to wan gets routed twice.
-			 *	1. eth1-->br-lan to pptp
-			 *	2. pptp ---> eth0.
-			 * we need to push nss rule for both. Requirement
-			 * mandidates multiple session per tunnel and all tunnel
-			 * packets has same 5 tuple info. So need to create a
-			 * special static pptp interface with nss to identify
-			 * packets from wan side. So pptp--->eth0 rule to be
-			 * pushed with this static interface.
-			 */
-			ecm_db_connection_from_address_get(feci->ci, addr);
-			dev = ecm_interface_dev_find_by_local_addr(addr);
-			if (likely(dev)) {
-				dev_put(dev);
-				from_nss_iface_id =  NSS_PPTP_INTERFACE;
-				nircm->conn_rule.flow_interface_num = from_nss_iface_id;
-			}
+			ecm_db_iface_pptp_session_info_get(ii, &pptp_info);
+			is_from_ii_type_pptp = true;
 #else
 			rule_invalid = true;
 			DEBUG_TRACE("%p: PPTP - unsupported\n", nnpci);
@@ -915,7 +903,7 @@ static void ecm_nss_non_ported_ipv4_connection_accelerate(struct ecm_front_end_c
 	 */
 	nircm->conn_rule.flow_mtu = (uint32_t)ecm_db_connection_from_iface_mtu_get(feci->ci);
 #ifdef ECM_INTERFACE_PPTP_ENABLE
-	if (unlikely(from_nss_iface_id ==  NSS_PPTP_INTERFACE)) {
+	if (unlikely(is_from_ii_type_pptp)) {
 		dev = ecm_interface_dev_find_by_local_addr(addr);
 		if (likely(dev)) {
 			nircm->conn_rule.flow_mtu = dev->mtu;
@@ -956,6 +944,19 @@ static void ecm_nss_non_ported_ipv4_connection_accelerate(struct ecm_front_end_c
 	nircm->tuple.return_ident = ecm_db_connection_to_port_nat_get(feci->ci);
 	nircm->conn_rule.flow_ident_xlate = ecm_db_connection_from_port_nat_get(feci->ci);
 	nircm->conn_rule.return_ident_xlate = ecm_db_connection_to_port_get(feci->ci);
+
+#ifdef ECM_INTERFACE_PPTP_ENABLE
+	/*
+	 * If flow is going through a PPTP session, then
+	 * use PPTP local/peer call-id in place of L4 port
+	 */
+	if (unlikely(is_from_ii_type_pptp)) {
+		nircm->tuple.flow_ident = ntohs(pptp_info.src_call_id);
+		nircm->tuple.return_ident = ntohs(pptp_info.dst_call_id);
+		nircm->conn_rule.flow_ident_xlate = ntohs(pptp_info.src_call_id);
+		nircm->conn_rule.return_ident_xlate = ntohs(pptp_info.dst_call_id);
+	}
+#endif
 
 	/*
 	 * Get mac addresses.
@@ -1300,7 +1301,7 @@ static void ecm_nss_non_ported_ipv4_connection_decelerate(struct ecm_front_end_c
 	 * For non-ported protocols we only support IPv6 in 4 or ESP
 	 */
 	protocol = ecm_db_connection_protocol_get(feci->ci);
-	if ((protocol != IPPROTO_IPV6) && (protocol != IPPROTO_ESP)) {
+	if ((protocol != IPPROTO_IPV6) && (protocol != IPPROTO_ESP) && (protocol != IPPROTO_GRE)) {
 		DEBUG_TRACE("%p: unsupported protocol: %d\n", nnpci, protocol);
 		return;
 	}
@@ -1367,6 +1368,38 @@ static void ecm_nss_non_ported_ipv4_connection_decelerate(struct ecm_front_end_c
 	nirdm->tuple.flow_ident = ecm_db_connection_from_port_get(feci->ci);
 	nirdm->tuple.return_ident = ecm_db_connection_to_port_nat_get(feci->ci);
 
+#ifdef ECM_INTERFACE_PPTP_ENABLE
+	if (protocol == IPPROTO_GRE) {
+		struct ecm_db_interface_info_pptp pptp_info;
+		struct ecm_db_iface_instance *from_ifaces[ECM_DB_IFACE_HEIRARCHY_MAX];
+		int32_t from_ifaces_first;
+		struct ecm_db_iface_instance *ii;
+		ecm_db_iface_type_t ii_type;
+
+		/*
+		 * Get the interface lists of the connection, we must have at least one interface in the list to continue
+		 */
+		from_ifaces_first = ecm_db_connection_from_interfaces_get_and_ref(feci->ci, from_ifaces);
+		if (from_ifaces_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
+			DEBUG_WARN("%p: Decel attempt failed - no interfaces in from_interfaces list!\n", nnpci);
+			return;
+		}
+
+		ii = from_ifaces[from_ifaces_first];
+		ii_type = ecm_db_connection_iface_type_get(ii);
+		DEBUG_TRACE("%p: iface_first: %d, ii: %p, type: %d (%s)\n", nnpci, from_ifaces_first, ii, ii_type, ecm_db_interface_type_to_string(ii_type));
+
+		/*
+		 * For PPTP flows, use PPTP local/peer call-id in place of L4 ports
+		 */
+		if (ECM_DB_IFACE_TYPE_PPTP == ii_type) {
+			ecm_db_iface_pptp_session_info_get(ii, &pptp_info);
+			nirdm->tuple.flow_ident = ntohs(pptp_info.src_call_id);
+			nirdm->tuple.return_ident = ntohs(pptp_info.dst_call_id);
+		}
+		ecm_db_connection_interfaces_deref(from_ifaces, from_ifaces_first);
+	}
+#endif
 	DEBUG_INFO("%p: Non-Ported Connection %p decelerate\n"
 			"protocol: %d\n"
 			"src_ip: %pI4:%d\n"
@@ -1697,7 +1730,7 @@ static int ecm_nss_non_ported_ipv4_connection_state_get(struct ecm_front_end_con
 		return result;
 	}
 
- 	return ecm_state_prefix_remove(sfi);
+	return ecm_state_prefix_remove(sfi);
 }
 #endif
 

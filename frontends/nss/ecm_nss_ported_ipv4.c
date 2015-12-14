@@ -799,31 +799,6 @@ static void ecm_nss_ported_ipv4_connection_accelerate(struct ecm_front_end_conne
 			DEBUG_TRACE("%p: IPSEC - unsupported\n", npci);
 #endif
 			break;
-		case ECM_DB_IFACE_TYPE_PPTP:
-#ifdef ECM_INTERFACE_PPTP_ENABLE
-			/*
-			 * pptp packets from lan to wan gets routed twice.
-			 *	1. eth1-->br-lan to pptp
-			 *	2. pptp ---> eth0.
-			 * we need to push nss rule for both. Requirement
-			 * mandidates multiple session per tunnel and all tunnel
-			 * packets has same 5 tuple info. So need to create a
-			 * special static pptp interface with nss to identify
-			 * packets from wan side. So pptp--->eth0 rule to be
-			 * pushed with this static interface.
-			 */
-			ecm_db_connection_to_address_get(feci->ci, addr);
-			dev = ecm_interface_dev_find_by_local_addr(addr);
-			if (likely(dev)) {
-				dev_put(dev);
-				from_nss_iface_id =  NSS_PPTP_INTERFACE;
-				nircm->conn_rule.flow_interface_num = from_nss_iface_id;
-			}
-#else
-			rule_invalid = true;
-			DEBUG_TRACE("%p: PPTP - unsupported\n", npci);
-#endif
-			break;
 		default:
 			DEBUG_TRACE("%p: Ignoring: %d (%s)\n", npci, ii_type, ii_name);
 		}
