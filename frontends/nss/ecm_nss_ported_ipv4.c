@@ -909,6 +909,17 @@ static void ecm_nss_ported_ipv4_connection_accelerate(struct ecm_front_end_conne
 	 * Get MTU information
 	 */
 	nircm->conn_rule.return_mtu = (uint32_t)ecm_db_connection_to_iface_mtu_get(feci->ci);
+#ifdef ECM_INTERFACE_L2TPV2_ENABLE
+	/*
+	 * Since a single L2TPv2 tunnel can carry multiple sessions which
+	 * may have different MTUs, we set the flow/return MTU of the outer
+	 * rule equal to that of the WAN interface so that it may service
+	 * flows for all sessions over this tunnel.
+	 */
+	if (unlikely(from_nss_iface_id == NSS_L2TPV2_INTERFACE))
+		nircm->conn_rule.return_mtu = nircm->conn_rule.flow_mtu;
+#endif
+
 	ECM_IP_ADDR_TO_HIN4_ADDR(nircm->tuple.return_ip, addr);
 
 	/*
