@@ -215,8 +215,6 @@ struct ecm_db_node_instance *ecm_nss_ipv4_node_establish_and_ref(struct ecm_fron
 
 	for (i = ECM_DB_IFACE_HEIRARCHY_MAX - 1; (!done) && (i >= interface_list_first); i--) {
 		ecm_db_iface_type_t type;
-		ip_addr_t gw_addr = ECM_IP_ADDR_NULL;
-		bool on_link = false;
 #ifdef ECM_INTERFACE_PPPOE_ENABLE
 		struct ecm_db_interface_info_pppoe pppoe_info;
 #endif
@@ -295,19 +293,34 @@ struct ecm_db_node_instance *ecm_nss_ipv4_node_establish_and_ref(struct ecm_fron
 			ecm_db_iface_pptp_session_info_get(interface_list[i], &pptp_info);
 			ECM_HIN4_ADDR_TO_IP_ADDR(local_ip, pptp_info.src_ip);
 			ECM_HIN4_ADDR_TO_IP_ADDR(remote_ip, pptp_info.dst_ip);
+			DEBUG_TRACE("local=" ECM_IP_ADDR_DOT_FMT " remote=" ECM_IP_ADDR_DOT_FMT " addr=" ECM_IP_ADDR_DOT_FMT "\n",
+			       ECM_IP_ADDR_TO_DOT(local_ip), ECM_IP_ADDR_TO_DOT(remote_ip), ECM_IP_ADDR_TO_DOT(addr));
+
+			local_dev = ecm_interface_dev_find_by_local_addr(local_ip);
+
+			if (!local_dev) {
+				DEBUG_WARN("Failed to find local netdevice of pptp tunnel for " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(local_ip));
+				return NULL;
+			}
+
+			DEBUG_TRACE("local_dev found is %s\n", local_dev->name);
+
 			if (ECM_IP_ADDR_MATCH(local_ip, addr)) {
-				if (unlikely(!ecm_interface_mac_addr_get(local_ip, node_addr, &on_link, gw_addr))) {
+				if (unlikely(!ecm_interface_mac_addr_get_no_route(local_dev, local_ip, node_addr))) {
 					DEBUG_TRACE("failed to obtain node address for " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(local_ip));
+					dev_put(local_dev);
 					return NULL;
 				}
 
 			} else {
-				if (unlikely(!ecm_interface_mac_addr_get(remote_ip, node_addr, &on_link, gw_addr))) {
+				if (unlikely(!ecm_interface_mac_addr_get_no_route(local_dev, remote_ip, node_addr))) {
 					DEBUG_TRACE("failed to obtain node address for host " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(remote_ip));
+					dev_put(local_dev);
 					return NULL;
 				}
 			}
 
+			dev_put(local_dev);
 			done = true;
 			break;
 #else
