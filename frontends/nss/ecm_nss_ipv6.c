@@ -199,6 +199,9 @@ struct ecm_db_node_instance *ecm_nss_ipv6_node_establish_and_ref(struct ecm_fron
 	ip_addr_t remote_ip, local_ip;
 	struct net_device *local_dev;
 #endif
+#ifdef ECM_INTERFACE_MAP_T_ENABLE
+	struct inet6_dev *ip6_inetdev;
+#endif
 
 	DEBUG_INFO("Establish node for " ECM_IP_ADDR_OCTAL_FMT "\n", ECM_IP_ADDR_TO_OCTAL(addr));
 
@@ -291,6 +294,23 @@ struct ecm_db_node_instance *ecm_nss_ipv6_node_establish_and_ref(struct ecm_fron
 			DEBUG_TRACE("VLAN interface unsupported\n");
 			return NULL;
 #endif
+
+		case ECM_DB_IFACE_TYPE_MAP_T:
+#ifdef ECM_INTERFACE_MAP_T_ENABLE
+			ip6_inetdev = ip6_dst_idev(skb_dst(skb));
+			if (!ip6_inetdev) {
+				DEBUG_WARN("Failed to obtain mac address for MAP-T address " ECM_IP_ADDR_OCTAL_FMT "\n", ECM_IP_ADDR_TO_OCTAL(addr));
+				return NULL;
+			}
+
+			memcpy(node_addr, ip6_inetdev->dev->dev_addr, ETH_ALEN);
+			done = true;
+			break;
+#else
+			DEBUG_TRACE("MAP-T interface unsupported\n");
+			return NULL;
+#endif
+
 		case ECM_DB_IFACE_TYPE_ETHERNET:
 		case ECM_DB_IFACE_TYPE_LAG:
 		case ECM_DB_IFACE_TYPE_BRIDGE:

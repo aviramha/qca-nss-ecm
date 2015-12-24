@@ -192,7 +192,9 @@ struct ecm_db_node_instance *ecm_nss_ipv4_node_establish_and_ref(struct ecm_fron
 	ip_addr_t local_ip, remote_ip;
 	struct net_device *local_dev;
 #endif
-
+#if defined(ECM_INTERFACE_MAP_T_ENABLE)
+	struct net_device *in;
+#endif
 	DEBUG_INFO("Establish node for " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(addr));
 
 	/*
@@ -336,6 +338,22 @@ struct ecm_db_node_instance *ecm_nss_ipv4_node_establish_and_ref(struct ecm_fron
 			DEBUG_TRACE("VLAN interface unsupported\n");
 			return NULL;
 #endif
+		case ECM_DB_IFACE_TYPE_MAP_T:
+#ifdef ECM_INTERFACE_MAP_T_ENABLE
+			in = dev_get_by_index(&init_net, skb->skb_iif);
+			if (!in) {
+				DEBUG_WARN("failed to obtain node address for host " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(addr));
+				return NULL;
+			}
+			memcpy(node_addr, in->dev_addr, ETH_ALEN);
+			dev_put(in);
+			done = true;
+			break;
+#else
+			DEBUG_TRACE("MAP-T interface unsupported\n");
+			return NULL;
+#endif
+
 		case ECM_DB_IFACE_TYPE_ETHERNET:
 		case ECM_DB_IFACE_TYPE_LAG:
 		case ECM_DB_IFACE_TYPE_BRIDGE:
@@ -940,7 +958,6 @@ void ecm_nss_ipv4_connection_regenerate(struct ecm_db_connection_instance *ci, e
 		goto ecm_ipv4_regen_done;
 	}
 	DEBUG_INFO("%p: reclassify success\n", ci);
-
 
 ecm_ipv4_regen_done:
 

@@ -78,6 +78,9 @@
 #include <linux/netfilter/nf_conntrack_proto_gre.h>
 #endif
 #endif
+#ifdef ECM_INTERFACE_MAP_T_ENABLE
+#include <nat46-core.h>
+#endif
 
 /*
  * Debug output levels
@@ -1454,6 +1457,60 @@ static struct ecm_db_iface_instance *ecm_interface_pppoe_interface_establish(str
 }
 #endif
 
+#ifdef ECM_INTERFACE_MAP_T_ENABLE
+/*
+ * ecm_interface_map_t_interface_establish()
+ *	Returns a reference to a iface of the PPPoE type, possibly creating one if necessary.
+ * Returns NULL on failure or a reference to interface.
+ */
+static struct ecm_db_iface_instance *ecm_interface_map_t_interface_establish(struct ecm_db_interface_info_map_t *type_info,
+							char *dev_name, int32_t dev_interface_num, int32_t ae_interface_num, int32_t mtu)
+{
+	struct ecm_db_iface_instance *nii;
+	struct ecm_db_iface_instance *ii;
+
+	DEBUG_TRACE("Establish MAP-T iface: %s   MTU: %d, if num: %d, accel engine if id: %d\n",
+			dev_name, mtu, dev_interface_num, ae_interface_num);
+
+	/*
+	 * Locate the iface
+	 */
+	ii = ecm_db_iface_find_and_ref_map_t(type_info->if_index);
+	if (ii) {
+		DEBUG_TRACE("%p: iface established\n", ii);
+		ecm_db_iface_update_ae_interface_identifier(ii, ae_interface_num);
+		return ii;
+	}
+
+	/*
+	 * No iface - create one
+	 */
+	nii = ecm_db_iface_alloc();
+	if (!nii) {
+		DEBUG_WARN("Failed to establish iface\n");
+		return NULL;
+	}
+
+	/*
+	 * Add iface into the database, atomically to avoid races creating the same thing
+	 */
+	spin_lock_bh(&ecm_interface_lock);
+	ii = ecm_db_iface_find_and_ref_map_t(type_info->if_index);
+	if (ii) {
+		spin_unlock_bh(&ecm_interface_lock);
+		ecm_db_iface_deref(nii);
+		ecm_db_iface_update_ae_interface_identifier(ii, ae_interface_num);
+		return ii;
+	}
+	ecm_db_iface_add_map_t(nii, type_info, dev_name,
+			mtu, dev_interface_num, ae_interface_num, NULL, nii);
+	spin_unlock_bh(&ecm_interface_lock);
+
+	DEBUG_TRACE("%p: map_t iface established\n", nii);
+	return nii;
+}
+#endif
+
 #ifdef ECM_INTERFACE_L2TPV2_ENABLE
 /*
  * ecm_interface_pppol2tpv2_interface_establish()
@@ -1854,6 +1911,9 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct ecm_front_e
 #ifdef ECM_INTERFACE_PPTP_ENABLE
 		struct ecm_db_interface_info_pptp pptp;			/* type == ECM_DB_IFACE_TYPE_PPTP */
 #endif
+#ifdef ECM_INTERFACE_MAP_T_ENABLE
+		struct ecm_db_interface_info_map_t map_t;		/* type == ECM_DB_IFACE_TYPE_MAP_T */
+#endif
 		struct ecm_db_interface_info_unknown unknown;		/* type == ECM_DB_IFACE_TYPE_UNKNOWN */
 		struct ecm_db_interface_info_loopback loopback;		/* type == ECM_DB_IFACE_TYPE_LOOPBACK */
 #ifdef ECM_INTERFACE_IPSEC_ENABLE
@@ -2021,6 +2081,17 @@ identifier_update:
 		// GGG TODO Flesh this out with tunnel endpoint addressing detail
 		ii = ecm_interface_ipsec_tunnel_interface_establish(&type_info.ipsec_tunnel, dev_name, dev_interface_num, ae_interface_num, dev_mtu);
 		return ii;
+	}
+#endif
+
+#ifdef ECM_INTERFACE_MAP_T_ENABLE
+	if (dev_type == ARPHRD_NONE) {
+		if (is_map_t_dev(dev)) {
+			type_info.map_t.if_index = dev_interface_num;
+			ii = ecm_interface_map_t_interface_establish(&type_info.map_t, dev_name, dev_interface_num, ae_interface_num, dev_mtu);
+			return ii;
+		}
+
 	}
 #endif
 
@@ -3203,7 +3274,6 @@ static struct net_device *ecm_interface_should_update_egress_device_bridged(
 	if (!bridge)
 		return NULL;
 
-
 	if (!ecm_front_end_is_bridge_device(bridge)) {
 		/*
 		 * Master is not a bridge - free the reference and return
@@ -3786,6 +3856,18 @@ lag_success:
 				/* TODO Figure out the next device the tunnel is using... */
 				break;
 			}
+
+#ifdef ECM_INTERFACE_MAP_T_ENABLE
+			/*
+			 * MAP-T xlate ?
+			 */
+			if (dest_dev_type == ARPHRD_NONE) {
+				if (is_map_t_dev(dest_dev)) {
+					DEBUG_TRACE("Net device: %p is MAP-T type: %d\n", dest_dev, dest_dev_type);
+					break;
+				}
+			}
+#endif
 
 			/*
 			 * If this is NOT PPP then it is unknown to the ecm and we cannot figure out it's next device.

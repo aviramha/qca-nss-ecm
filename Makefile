@@ -101,6 +101,15 @@ endif
 ccflags-$(ECM_INTERFACE_PPP_ENABLE) += -DECM_INTERFACE_PPP_ENABLE
 
 # #############################################################################
+# Define ECM_INTERFACE_MAP_T_ENABLE=y in order
+# to enable support for MAP-T interface.
+# #############################################################################
+ifneq ($(findstring 3.14, $(KERNELVERSION)),)
+ECM_INTERFACE_MAP_T_ENABLE=y
+endif
+ccflags-$(ECM_INTERFACE_MAP_T_ENABLE) += -DECM_INTERFACE_MAP_T_ENABLE
+
+# #############################################################################
 # Define ECM_INTERFACE_SIT_ENABLE=y in order
 # to enable support for SIT interface.
 # #############################################################################
