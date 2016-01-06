@@ -2767,6 +2767,62 @@ static void _ecm_db_classifier_type_assignment_remove(struct ecm_db_connection_i
 #endif
 
 /*
+ * _ecm_db_connection_classifier_unassign()
+ *	Unassign a classifier and remove the classifier type
+ *
+ * The default classifier cannot be unassigned.
+ */
+static inline void _ecm_db_connection_classifier_unassign(struct ecm_db_connection_instance *ci, struct ecm_classifier_instance *cci, ecm_classifier_type_t ca_type)
+{
+#ifdef ECM_DB_CTA_TRACK_ENABLE
+	struct ecm_db_connection_classifier_type_assignment *ta;
+#endif
+	DEBUG_ASSERT(spin_is_locked(&ecm_db_lock), "%p: lock is not held\n", ci);
+
+	/*
+	 * Clear the assignment.
+	 */
+	ci->assignments_by_type[ca_type] = NULL;
+
+	/*
+	 * Link out of assignments list
+	 */
+	if (cci->ca_prev) {
+		cci->ca_prev->ca_next = cci->ca_next;
+	} else {
+		DEBUG_ASSERT(ci->assignments == cci, "%p: Bad assigmnment list, expecting: %p, got: %p", ci, cci, ci->assignments);
+		ci->assignments = cci->ca_next;
+	}
+	if (cci->ca_next) {
+		cci->ca_next->ca_prev = cci->ca_prev;
+	}
+
+#ifdef ECM_DB_CTA_TRACK_ENABLE
+	/*
+	 * Remove from the classifier type assignment list
+	 */
+	ta = &ci->type_assignment[ca_type];
+	DEBUG_CHECK_MAGIC(ta, ECM_DB_CLASSIFIER_TYPE_ASSIGNMENT_MAGIC, "%p: magic failed, ci: %p", ta, ci);
+	if (ta->iteration_count > 0) {
+		/*
+		 * The list entry is being iterated outside of db lock being held.
+		 * We cannot remove this entry since it would mess up iteration.
+		 * Set the pending flag to be actioned another time
+		 */
+		ta->pending_unassign = true;
+		return;
+	}
+
+	/*
+	 * Remove the list entry
+	 */
+	DEBUG_INFO("%p: Remove type assignment: %d\n", ci, ca_type);
+	_ecm_db_classifier_type_assignment_remove(ci, ca_type);
+#endif
+	cci->deref(cci);
+}
+
+/*
  * ecm_db_connection_deref()
  *	Release reference to connection.  Connection is removed from database on final deref and destroyed.
  */
@@ -2789,31 +2845,6 @@ int ecm_db_connection_deref(struct ecm_db_connection_instance *ci)
 		spin_unlock_bh(&ecm_db_lock);
 		return refs;
 	}
-
-#ifdef ECM_DB_CTA_TRACK_ENABLE
-	/*
-	 * Unlink from the "assignments by classifier type" lists.
-	 *
-	 * This is done whether the connection is inserted into the database or not - this is because
-	 * classifier assignments take place before adding into the db.
-	 *
-	 * NOTE: We know that the ci is not being iterated in any of these lists because otherwise
-	 * ci would be being held as part of iteration and so we would not be here!
-	 * Equally we know that if the assignments_by_type[] element is non-null then it must also be in the relevant list too.
-	 *
-	 * Default classifier is not in the classifier type assignement list, so we should start the loop index
-	 * with the first assigned classifier type.
-	 */
-	for (ca_type = ECM_CLASSIFIER_TYPE_DEFAULT + 1; ca_type < ECM_CLASSIFIER_TYPES; ++ca_type) {
-		if (!ci->assignments_by_type[ca_type]) {
-			/*
-			 * No assignment of this type, so would not be in the classifier type assignments list
-			 */
-			continue;
-		}
-		_ecm_db_classifier_type_assignment_remove(ci, ca_type);
-	}
-#endif
 
 	/*
 	 * Remove from database if inserted
@@ -3098,6 +3129,34 @@ int ecm_db_connection_deref(struct ecm_db_connection_instance *ci)
 			li = lin;
 		}
 	}
+
+#ifdef ECM_DB_CTA_TRACK_ENABLE
+	/*
+	 * Unlink from the "assignments by classifier type" lists.
+	 *
+	 * This is done whether the connection is inserted into the database or not - this is because
+	 * classifier assignments take place before adding into the db.
+	 *
+	 * NOTE: We know that the ci is not being iterated in any of these lists because otherwise
+	 * ci would be being held as part of iteration and so we would not be here!
+	 * Equally we know that if the assignments_by_type[] element is non-null then it must also be in the relevant list too.
+	 *
+	 * Default classifier is not in the classifier type assignement list, so we should start the loop index
+	 * with the first assigned classifier type.
+	 */
+	spin_lock_bh(&ecm_db_lock);
+	for (ca_type = ECM_CLASSIFIER_TYPE_DEFAULT + 1; ca_type < ECM_CLASSIFIER_TYPES; ++ca_type) {
+		struct ecm_classifier_instance *cci = ci->assignments_by_type[ca_type];
+		if (!cci) {
+			/*
+			 * No assignment of this type, so would not be in the classifier type assignments list
+			 */
+			continue;
+		}
+		_ecm_db_connection_classifier_unassign(ci, cci, ca_type);
+	}
+	spin_unlock_bh(&ecm_db_lock);
+#endif
 
 	/*
 	 * Throw final event
@@ -5848,72 +5907,28 @@ EXPORT_SYMBOL(ecm_db_connection_assigned_classifier_find_and_ref);
 void ecm_db_connection_classifier_unassign(struct ecm_db_connection_instance *ci, struct ecm_classifier_instance *cci)
 {
 	ecm_classifier_type_t ca_type;
-#ifdef ECM_DB_CTA_TRACK_ENABLE
-	struct ecm_db_connection_classifier_type_assignment *ta;
-#endif
-	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed\n", ci);
 
-	DEBUG_ASSERT(cci->type_get(cci) != ECM_CLASSIFIER_TYPE_DEFAULT, "%p: Cannot unassign default", ci);
+	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed\n", ci);
 
 	/*
 	 * Get the type
 	 */
 	ca_type = cci->type_get(cci);
+	DEBUG_ASSERT(ca_type != ECM_CLASSIFIER_TYPE_DEFAULT, "%p: Cannot unassign default", ci);
 
 	DEBUG_TRACE("%p: Unassign type: %d, classifier: %p\n", ci, ca_type, cci);
 
-	spin_lock_bh(&ecm_db_lock);
-
 	/*
-	 * Remove from assignments_by_type
 	 * NOTE: It is possible that in SMP this classifier has already been unassigned.
 	 */
+	spin_lock_bh(&ecm_db_lock);
 	if (ci->assignments_by_type[ca_type] == NULL) {
 		spin_unlock_bh(&ecm_db_lock);
 		DEBUG_TRACE("%p: Classifier type: %d already unassigned\n", ci, ca_type);
 		return;
 	}
-	ci->assignments_by_type[ca_type] = NULL;
-
-	/*
-	 * Link out of assignments list
-	 */
-	if (cci->ca_prev) {
-		cci->ca_prev->ca_next = cci->ca_next;
-	} else {
-		DEBUG_ASSERT(ci->assignments == cci, "%p: Bad assigmnment list, expecting: %p, got: %p", ci, cci, ci->assignments);
-		ci->assignments = cci->ca_next;
-	}
-	if (cci->ca_next) {
-		cci->ca_next->ca_prev = cci->ca_prev;
-	}
-
-#ifdef ECM_DB_CTA_TRACK_ENABLE
-	/*
-	 * Remove from the classifier type assignment list
-	 */
-	ta = &ci->type_assignment[ca_type];
-	DEBUG_CHECK_MAGIC(ta, ECM_DB_CLASSIFIER_TYPE_ASSIGNMENT_MAGIC, "%p: magic failed, ci: %p", ta, ci);
-	if (ta->iteration_count > 0) {
-		/*
-		 * The list entry is being iterated outside of db lock being held.
-		 * We cannot remove this entry since it would mess up iteration.
-		 * Set the pending flag to be actioned another time
-		 */
-		ta->pending_unassign = true;
-		spin_unlock_bh(&ecm_db_lock);
-		cci->deref(cci);
-		return;
-	}
-
-	/*
-	 * Remove the list entry
-	 */
-	DEBUG_INFO("%p: Remove type assignment: %d\n", ci, ca_type);
-	_ecm_db_classifier_type_assignment_remove(ci, ca_type);
-#endif
+	_ecm_db_connection_classifier_unassign(ci, cci, ca_type);
 	spin_unlock_bh(&ecm_db_lock);
-	cci->deref(cci);
 }
 EXPORT_SYMBOL(ecm_db_connection_classifier_unassign);
 
