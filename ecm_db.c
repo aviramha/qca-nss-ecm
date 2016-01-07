@@ -2784,8 +2784,11 @@ int ecm_db_connection_deref(struct ecm_db_connection_instance *ci)
 	 * NOTE: We know that the ci is not being iterated in any of these lists because otherwise
 	 * ci would be being held as part of iteration and so we would not be here!
 	 * Equally we know that if the assignments_by_type[] element is non-null then it must also be in the relevant list too.
+	 *
+	 * Default classifier is not in the classifier type assignement list, so we should start the loop index
+	 * with the first assigned classifier type.
 	 */
-	for (ca_type = 0; ca_type < ECM_CLASSIFIER_TYPES; ++ca_type) {
+	for (ca_type = ECM_CLASSIFIER_TYPE_DEFAULT + 1; ca_type < ECM_CLASSIFIER_TYPES; ++ca_type) {
 		if (!ci->assignments_by_type[ca_type]) {
 			/*
 			 * No assignment of this type, so would not be in the classifier type assignments list
@@ -5686,6 +5689,15 @@ void ecm_db_connection_classifier_assign(struct ecm_db_connection_instance *ci, 
 	ci->assignments_by_type[new_ca_type] = new_ca;
 
 #ifdef ECM_DB_CTA_TRACK_ENABLE
+	/*
+	 * Default classifier will not be added to the classifier type assignment list.
+	 * Only assigned classifiers can be added.
+	 */
+	if (new_ca_type == ECM_CLASSIFIER_TYPE_DEFAULT) {
+		spin_unlock_bh(&ecm_db_lock);
+		return;
+	}
+
 	/*
 	 * Add the connection into the type assignment list too.
 	 */
