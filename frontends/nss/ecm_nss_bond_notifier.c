@@ -284,6 +284,74 @@ static void ecm_nss_bond_notifier_bond_link_up(struct net_device *slave_dev)
 }
 
 /*
+ * ecm_nss_bond_notifier_bond_delete_by_slave()
+ *	Callback when defunct a LAG slave
+ */
+static void ecm_nss_bond_notifier_bond_delete_by_slave(struct net_device *slave_dev)
+{
+	struct net_device *master;
+
+	/*
+	 * If operations have stopped then do not process event
+	 */
+	spin_lock_bh(&ecm_nss_bond_notifier_lock);
+	if (unlikely(ecm_nss_bond_notifier_stopped)) {
+		spin_unlock_bh(&ecm_nss_bond_notifier_lock);
+		DEBUG_WARN("Ignoring bond defunct event - stopped\n");
+		return;
+	}
+	spin_unlock_bh(&ecm_nss_bond_notifier_lock);
+
+	/*
+	 * A net device that is a LAG slave has to
+	 * defunct all the connection.
+	 * Due to the heiarchical nature of network topologies, this can
+	 * change the packet transmit path for any connection that is using
+	 * a device that it sitting "higher" in the heirarchy.
+	 */
+	master = ecm_interface_get_and_hold_dev_master(slave_dev);
+	if (!master) {
+		DEBUG_WARN("Failed to find 'master' for the slave:%s\n", slave_dev->name);
+		return;
+	}
+
+	ecm_interface_dev_defunct_connections(master);
+	dev_put(master);
+}
+
+/*
+ * ecm_nss_bond_notifier_bond_delete_by_mac()
+ *     This is a call back to delete all the rules with the mac address
+ */
+static void ecm_nss_bond_notifier_bond_delete_by_mac(uint8_t *mac)
+{
+	struct ecm_db_node_instance *ni;
+
+	if (unlikely(!mac)) {
+		DEBUG_WARN("mac address passed to ecm_nss_bond_notifier_bond_delete_by_mac is null \n");
+		return;
+	}
+
+	/*
+	 * find node instance corresponding to mac address
+	 */
+	ni = ecm_db_node_find_and_ref(mac);
+	if (unlikely(!ni)) {
+		DEBUG_WARN("node address is null\n");
+		return;
+	}
+
+	DEBUG_INFO("FDB updated for node %pM\n", mac);
+	ecm_db_traverse_node_from_connection_list_and_decelerate(ni);
+	ecm_db_traverse_node_to_connection_list_and_decelerate(ni);
+	ecm_db_traverse_node_from_nat_connection_list_and_decelerate(ni);
+	ecm_db_traverse_node_to_nat_connection_list_and_decelerate(ni);
+
+	ecm_db_node_deref(ni);
+	return;
+}
+
+/*
  * ecm_nss_bond_notifier_lag_event_cb()
  *	Handle LAG event from the NSS driver
  */
@@ -352,6 +420,8 @@ int ecm_nss_bond_notifier_init(struct dentry *dentry)
 	ecm_nss_bond_notifier_bond_cb.bond_cb_link_down = ecm_nss_bond_notifier_bond_link_down;
 	ecm_nss_bond_notifier_bond_cb.bond_cb_release = ecm_nss_bond_notifier_bond_release;
 	ecm_nss_bond_notifier_bond_cb.bond_cb_enslave = ecm_nss_bond_notifier_bond_enslave;
+	ecm_nss_bond_notifier_bond_cb.bond_cb_delete_by_slave = ecm_nss_bond_notifier_bond_delete_by_slave;
+	ecm_nss_bond_notifier_bond_cb.bond_cb_delete_by_mac = ecm_nss_bond_notifier_bond_delete_by_mac;
 	bond_register_cb(&ecm_nss_bond_notifier_bond_cb);
 
 	return 0;

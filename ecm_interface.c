@@ -5015,6 +5015,102 @@ void ecm_interface_dev_regenerate_connections(struct net_device *dev)
 }
 
 /*
+ * ecm_interface_defunct_connections()
+ *	Cause defunct of all connections that are using the specified interface.
+ */
+static void ecm_interface_defunct_connections(struct ecm_db_iface_instance *ii)
+{
+#ifndef ECM_DB_XREF_ENABLE
+	ecm_db_connection_defunct_all();
+#else
+	struct ecm_db_connection_instance *ci_from;
+	struct ecm_db_connection_instance *ci_to;
+	struct ecm_db_connection_instance *ci_from_nat;
+	struct ecm_db_connection_instance *ci_to_nat;
+	struct ecm_db_connection_instance *ci_mcast __attribute__ ((unused));
+
+	DEBUG_TRACE("defunct connections using interface: %p\n", ii);
+
+	ci_from = ecm_db_iface_connections_from_get_and_ref_first(ii);
+	ci_to = ecm_db_iface_connections_to_get_and_ref_first(ii);
+	ci_from_nat = ecm_db_iface_connections_nat_from_get_and_ref_first(ii);
+	ci_to_nat = ecm_db_iface_connections_nat_to_get_and_ref_first(ii);
+
+	/*
+	 * Defunct all connections associated with this interface
+	 */
+	DEBUG_TRACE("%p: Defunct 'from' connections\n", ii);
+	while (ci_from) {
+		struct ecm_db_connection_instance *cin;
+		cin = ecm_db_connection_iface_from_get_and_ref_next(ci_from);
+
+		DEBUG_TRACE("%p: Defunct: %p", ii, ci_from);
+		ecm_db_connection_make_defunct(ci_from);
+		ecm_db_connection_deref(ci_from);
+		ci_from = cin;
+	}
+
+	DEBUG_TRACE("%p: Defunct 'to' connections\n", ii);
+	while (ci_to) {
+		struct ecm_db_connection_instance *cin;
+		cin = ecm_db_connection_iface_from_get_and_ref_next(ci_to);
+
+		DEBUG_TRACE("%p: Defunct: %p", ii, ci_to);
+		ecm_db_connection_make_defunct(ci_to);
+		ecm_db_connection_deref(ci_to);
+		ci_to = cin;
+	}
+
+	DEBUG_TRACE("%p: Defunct 'from_nat' connections\n", ii);
+	while (ci_from_nat) {
+		struct ecm_db_connection_instance *cin;
+		cin = ecm_db_connection_iface_from_get_and_ref_next(ci_from_nat);
+
+		DEBUG_TRACE("%p: Defunct: %p", ii, ci_from_nat);
+		ecm_db_connection_make_defunct(ci_from_nat);
+		ecm_db_connection_deref(ci_from_nat);
+		ci_from_nat = cin;
+	}
+
+	DEBUG_TRACE("%p: Defunct 'to_nat' connections\n", ii);
+	while (ci_to_nat) {
+		struct ecm_db_connection_instance *cin;
+		cin = ecm_db_connection_iface_from_get_and_ref_next(ci_to_nat);
+
+		DEBUG_TRACE("%p: Defunct: %p", ii, ci_to_nat);
+		ecm_db_connection_make_defunct(ci_to_nat);
+		ecm_db_connection_deref(ci_to_nat);
+		ci_to_nat = cin;
+	}
+#endif
+	DEBUG_TRACE("%p: Defunct COMPLETE\n", ii);
+}
+
+/*
+ * ecm_interface_dev_defunct_connections()
+ *	Cause defunct of all connections that are using the specified interface.
+ */
+void ecm_interface_dev_defunct_connections(struct net_device *dev)
+{
+	struct ecm_db_iface_instance *ii;
+
+	DEBUG_INFO("defunct connections for: %p (%s)\n", dev, dev->name);
+
+	/*
+	 * If the interface is known to us then we will get it returned by this
+	 * function and process it accordingly.
+	 */
+	ii = ecm_db_iface_find_and_ref_by_interface_identifier(dev->ifindex);
+	if (!ii) {
+		DEBUG_WARN("%p: No interface instance could be established for this dev\n", dev);
+		return;
+	}
+	ecm_interface_defunct_connections(ii);
+	DEBUG_TRACE("%p: defunct for %p: COMPLETE\n", dev, ii);
+	ecm_db_iface_deref(ii);
+}
+
+/*
  * ecm_interface_mtu_change()
  *	MTU of interface has changed
  */

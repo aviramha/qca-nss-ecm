@@ -104,3 +104,4 @@ struct net_device *ecm_interface_get_and_hold_dev_master(struct net_device *dev)
 void ecm_interface_dev_regenerate_connections(struct net_device *dev);
 struct net_device *ecm_interface_dev_find_by_local_addr(ip_addr_t addr);
 bool ecm_interface_find_gateway(ip_addr_t addr, ip_addr_t gw_addr);
+void ecm_interface_dev_defunct_connections(struct net_device *dev);
