@@ -2212,7 +2212,7 @@ unsigned int ecm_sfe_non_ported_ipv4_process(struct net_device *out_dev, struct 
 	 * Do we need to action generation change?
 	 */
 	if (unlikely(ecm_db_connection_regeneration_required_check(ci))) {
-		ecm_sfe_ipv4_connection_regenerate(ci, sender, ecm_dir, out_dev, out_dev_nat, in_dev, in_dev_nat, NULL, skb);
+		ecm_sfe_ipv4_connection_regenerate(ci, sender, out_dev, out_dev_nat, in_dev, in_dev_nat, NULL, skb);
 	}
 
 	/*

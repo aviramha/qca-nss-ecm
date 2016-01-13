@@ -168,7 +168,7 @@ extern void ecm_nss_ipv6_accel_done_time_update(struct ecm_front_end_connection_
 extern void ecm_nss_ipv6_decel_done_time_update(struct ecm_front_end_connection_instance *feci);
 extern struct ecm_classifier_instance *ecm_nss_ipv6_assign_classifier(struct ecm_db_connection_instance *ci, ecm_classifier_type_t type);
 extern bool ecm_nss_ipv6_reclassify(struct ecm_db_connection_instance *ci, int assignment_count, struct ecm_classifier_instance *assignments[]);
-extern void ecm_nss_ipv6_connection_regenerate(struct ecm_db_connection_instance *ci, ecm_tracker_sender_type_t sender, ecm_db_direction_t ecm_dir,
+extern void ecm_nss_ipv6_connection_regenerate(struct ecm_db_connection_instance *ci, ecm_tracker_sender_type_t sender,
 							struct net_device *out_dev, struct net_device *in_dev, __be16 *layer4hdr, struct sk_buff *skb);
 extern struct ecm_db_node_instance *ecm_nss_ipv6_node_establish_and_ref(struct ecm_front_end_connection_instance *feci,
 							struct net_device *dev, ip_addr_t addr,

@@ -760,7 +760,7 @@ bool ecm_nss_ipv4_reclassify(struct ecm_db_connection_instance *ci, int assignme
  * It also involves the possible triggering of classifier re-evaluation but only if all currently assigned
  * classifiers permit this operation.
  */
-void ecm_nss_ipv4_connection_regenerate(struct ecm_db_connection_instance *ci, ecm_tracker_sender_type_t sender, ecm_db_direction_t ecm_dir,
+void ecm_nss_ipv4_connection_regenerate(struct ecm_db_connection_instance *ci, ecm_tracker_sender_type_t sender,
 							struct net_device *out_dev, struct net_device *out_dev_nat,
 							struct net_device *in_dev, struct net_device *in_dev_nat,
 							__be16 *layer4hdr, struct sk_buff *skb)
@@ -789,6 +789,7 @@ void ecm_nss_ipv4_connection_regenerate(struct ecm_db_connection_instance *ci, e
 	struct ecm_classifier_instance *assignments[ECM_CLASSIFIER_TYPES];
 	struct ecm_front_end_connection_instance *feci;
 	struct ecm_front_end_interface_construct_instance efeici;
+	 ecm_db_direction_t ecm_dir;
 
 	DEBUG_INFO("%p: re-gen needed\n", ci);
 
@@ -823,6 +824,7 @@ void ecm_nss_ipv4_connection_regenerate(struct ecm_db_connection_instance *ci, e
 	protocol = ecm_db_connection_protocol_get(ci);
 
 	is_routed = ecm_db_connection_is_routed_get(ci);
+	ecm_dir = ecm_db_connection_direction_get(ci);
 
 	ecm_db_connection_from_address_get(ci, ip_src_addr);
 	ecm_db_connection_from_address_nat_get(ci, ip_src_addr_nat);

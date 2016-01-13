@@ -1963,7 +1963,7 @@ unsigned int ecm_sfe_non_ported_ipv6_process(struct net_device *out_dev,
 	 * Do we need to action generation change?
 	 */
 	if (unlikely(ecm_db_connection_regeneration_required_check(ci))) {
-		ecm_sfe_ipv6_connection_regenerate(ci, sender, ecm_dir, out_dev, in_dev, NULL, skb);
+		ecm_sfe_ipv6_connection_regenerate(ci, sender, out_dev, in_dev, NULL, skb);
 	}
 
 	/*
