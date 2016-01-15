@@ -2727,6 +2727,8 @@ static void _ecm_db_classifier_type_assignment_remove(struct ecm_db_connection_i
 	struct ecm_db_connection_classifier_type_assignment *ta;
 	struct ecm_db_connection_classifier_type_assignment_list *tal;
 
+	DEBUG_ASSERT(spin_is_locked(&ecm_db_lock), "%p: lock is not held\n", ci);
+
 	DEBUG_TRACE("%p: Classifier type assignment remove: %d\n", ci, ca_type);
 	ta = &ci->type_assignment[ca_type];
 	DEBUG_CHECK_MAGIC(ta, ECM_DB_CLASSIFIER_TYPE_ASSIGNMENT_MAGIC, "%p: magic failed, ci: %p\n", ta, ci);
@@ -2812,6 +2814,15 @@ int ecm_db_connection_deref(struct ecm_db_connection_instance *ci)
 		_ecm_db_classifier_type_assignment_remove(ci, ca_type);
 	}
 #endif
+	/*
+	 * Release instances to the objects referenced by the connection
+	 */
+	while (ci->assignments) {
+		struct ecm_classifier_instance *classi = ci->assignments;
+		ci->assignments = classi->ca_next;
+		classi->deref(classi);
+	}
+
 
 	/*
 	 * Remove from database if inserted
@@ -3102,15 +3113,6 @@ int ecm_db_connection_deref(struct ecm_db_connection_instance *ci)
 	 */
 	if (ci->final) {
 		ci->final(ci->arg);
-	}
-
-	/*
-	 * Release instances to the objects referenced by the connection
-	 */
-	while (ci->assignments) {
-		struct ecm_classifier_instance *classi = ci->assignments;
-		ci->assignments = classi->ca_next;
-		classi->deref(classi);
 	}
 
 	if (ci->mapping_from) {
@@ -5914,25 +5916,6 @@ void ecm_db_connection_classifier_unassign(struct ecm_db_connection_instance *ci
 	cci->deref(cci);
 }
 EXPORT_SYMBOL(ecm_db_connection_classifier_unassign);
-
-/*
- * ecm_db_connection_classifier_default_get_and_ref()
- *	Get a reference to default classifier associated with this connection
- */
-struct ecm_classifier_default_instance *ecm_db_connection_classifier_default_get_and_ref(struct ecm_db_connection_instance *ci)
-{
-	struct ecm_classifier_default_instance *dci;
-	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed\n", ci);
-
-	/*
-	 * No need to lock this object - it cannot change
-	 */
-	dci = (struct ecm_classifier_default_instance *)ci->assignments_by_type[ECM_CLASSIFIER_TYPE_DEFAULT];
-	DEBUG_ASSERT(dci, "%p: No default classifier!\n", ci);
-	dci->base.ref((struct ecm_classifier_instance *)dci);
-	return dci;
-}
-EXPORT_SYMBOL(ecm_db_connection_classifier_default_get_and_ref);
 
 #ifdef ECM_DB_CTA_TRACK_ENABLE
 /*
