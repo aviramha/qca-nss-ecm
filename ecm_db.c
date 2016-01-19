@@ -2814,15 +2814,6 @@ int ecm_db_connection_deref(struct ecm_db_connection_instance *ci)
 		_ecm_db_classifier_type_assignment_remove(ci, ca_type);
 	}
 #endif
-	/*
-	 * Release instances to the objects referenced by the connection
-	 */
-	while (ci->assignments) {
-		struct ecm_classifier_instance *classi = ci->assignments;
-		ci->assignments = classi->ca_next;
-		classi->deref(classi);
-	}
-
 
 	/*
 	 * Remove from database if inserted
@@ -3113,6 +3104,15 @@ int ecm_db_connection_deref(struct ecm_db_connection_instance *ci)
 	 */
 	if (ci->final) {
 		ci->final(ci->arg);
+	}
+
+	/*
+	 * Release instances to the objects referenced by the connection
+	 */
+	while (ci->assignments) {
+		struct ecm_classifier_instance *classi = ci->assignments;
+		ci->assignments = classi->ca_next;
+		classi->deref(classi);
 	}
 
 	if (ci->mapping_from) {
