@@ -11811,7 +11811,7 @@ static int ecm_db_iproute_connection_cmp(struct nf_conn *i, void *data)
 	 */
 	ci = ecm_db_connection_ipv4_from_ct_get_and_ref(i);
 	if (ci) {
-		ecm_db_connection_decelerate_and_defunct(ci);
+		ecm_db_connection_make_defunct(ci);
 		ecm_db_connection_deref(ci);
 	}
 
@@ -11855,7 +11855,7 @@ static int ecm_db_ip6route_connection_cmp(struct nf_conn *i, void *data)
 	 */
 	ci = ecm_db_connection_ipv6_from_ct_get_and_ref(i);
 	if (ci) {
-		ecm_db_connection_decelerate_and_defunct(ci);
+		ecm_db_connection_make_defunct(ci);
 		ecm_db_connection_deref(ci);
 	}
 
