@@ -139,6 +139,14 @@ bool ecm_front_end_ipv6_interface_construct_set(struct sk_buff *skb, ecm_tracker
 		ECM_IP_ADDR_COPY(from_mac_lookup, ip_src_addr);
 		ECM_IP_ADDR_COPY(to_mac_lookup, ip_dest_addr);
 	} else {
+		/*
+		 * Routed
+		 */
+		if (!rt) {
+			DEBUG_WARN("rt6_info is NULL\n");
+			return false;
+		}
+
 		DEBUG_TRACE("in_dev: %s\n", in_dev->name);
 		DEBUG_TRACE("out_dev: %s\n", out_dev->name);
 		DEBUG_TRACE("dst->dev: %s\n", dst->dev->name);

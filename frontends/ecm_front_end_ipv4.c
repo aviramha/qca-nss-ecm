@@ -153,11 +153,24 @@ bool ecm_front_end_ipv4_interface_construct_set(struct sk_buff *skb, ecm_tracker
 	 */
 	ECM_IP_ADDR_COPY(rt_dst_addr, ip_dest_addr);
 
-	/*
-	 * If the flow is routed, extract the route information from the skb.
-	 * Print the extracted information for debug purpose.
-	 */
-	if (is_routed) {
+	if (!is_routed) {
+		/*
+		 * Bridged
+		 */
+		from = in_dev;
+		from_other = in_dev;
+		to = out_dev;
+		to_other = out_dev;
+	} else {
+		if (!rt) {
+			DEBUG_WARN("rtable is NULL\n");
+			return false;
+		}
+
+		/*
+		 * If the flow is routed, extract the route information from the skb.
+		 * Print the extracted information for debug purpose.
+		 */
 #if (LINUX_VERSION_CODE <= KERNEL_VERSION(3, 6, 0))
 		rt_iif_dev = dev_get_by_index(&init_net, rt->rt_iif);
 #else
@@ -201,17 +214,17 @@ bool ecm_front_end_ipv4_interface_construct_set(struct sk_buff *skb, ecm_tracker
 		}
 
 		DEBUG_INFO("rt_dst_addr" ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(rt_dst_addr));
-	}
 
-	/*
-	 * Initialize the interfaces with defaults.
-	 * rt_iif_dev is the interface which the packet comes in to the system,
-	 * dst->dev is the interface whcih the packet goes out from the system.
-	 */
-	from = rt_iif_dev;
-	from_other = dst->dev;
-	to = dst->dev;
-	to_other = rt_iif_dev;
+		/*
+		 * Initialize the interfaces with defaults.
+		 * rt_iif_dev is the interface which the packet comes in to the system,
+		 * dst->dev is the interface which the packet goes out from the system.
+		 */
+		from = rt_iif_dev;
+		from_other = dst->dev;
+		to = dst->dev;
+		to_other = rt_iif_dev;
+	}
 
 	/*
 	 * Initialize the mac lookup ip addresses with defaults.
@@ -255,10 +268,6 @@ bool ecm_front_end_ipv4_interface_construct_set(struct sk_buff *skb, ecm_tracker
 			to_nat = rt_iif_dev;
 			to_nat_other = dst->dev;
 		} else if (ecm_dir == ECM_DB_DIRECTION_BRIDGED) {
-			from = in_dev;
-			from_other = in_dev;
-			to = out_dev;
-			to_other = out_dev;
 			from_nat = in_dev;
 			from_nat_other = in_dev;
 			to_nat = out_dev;
@@ -283,10 +292,6 @@ bool ecm_front_end_ipv4_interface_construct_set(struct sk_buff *skb, ecm_tracker
 			to_nat = dst->dev;
 			to_nat_other = rt_iif_dev;
 		} else if (ecm_dir == ECM_DB_DIRECTION_BRIDGED) {
-			from = in_dev;
-			from_other = in_dev;
-			to = out_dev;
-			to_other = out_dev;
 			from_nat = in_dev;
 			from_nat_other = in_dev;
 			to_nat = out_dev;
