@@ -594,7 +594,7 @@ static void ecm_nss_ported_ipv4_connection_accelerate(struct ecm_front_end_conne
 				DEBUG_TRACE("%p: IPSEC - additional unsupported\n", npci);
 				break;
 			}
-			nircm->conn_rule.flow_interface_num = NSS_C2C_TX_INTERFACE;
+			nircm->conn_rule.flow_interface_num = ECM_INTERFACE_IPSEC_IF_NUM;;
 #else
 			rule_invalid = true;
 			DEBUG_TRACE("%p: IPSEC - unsupported\n", npci);
@@ -793,7 +793,7 @@ static void ecm_nss_ported_ipv4_connection_accelerate(struct ecm_front_end_conne
 				DEBUG_TRACE("%p: IPSEC - additional unsupported\n", npci);
 				break;
 			}
-			nircm->conn_rule.return_interface_num = NSS_C2C_TX_INTERFACE;
+			nircm->conn_rule.return_interface_num = ECM_INTERFACE_IPSEC_IF_NUM;
 #else
 			rule_invalid = true;
 			DEBUG_TRACE("%p: IPSEC - unsupported\n", npci);

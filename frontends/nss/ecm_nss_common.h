@@ -57,7 +57,7 @@ static inline int32_t ecm_nss_common_get_interface_number_by_dev(struct net_devi
 	 * nss_interface_num for all IPsec tunnels will always be the one specific to acceleration engine.
 	 */
 	if (dev->type == ECM_ARPHRD_IPSEC_TUNNEL_TYPE) {
-		return NSS_C2C_TX_INTERFACE;
+		return ECM_INTERFACE_IPSEC_IF_NUM;
 	}
 
 	return nss_cmn_get_interface_number_by_dev(dev);

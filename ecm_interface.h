@@ -33,6 +33,13 @@ struct ecm_interface_route {
 #define ECM_INTERFACE_LOOPBACK_DEV_INDEX 1
 
 /*
+ * IPSec Core and Interface Definition
+ */
+#define ECM_INTERFACE_IPSEC_DEFAULT_CORE 0x2
+#define ECM_INTERFACE_IPSEC_CORE_OFFSET 24
+#define ECM_INTERFACE_IPSEC_IF_NUM ((ECM_INTERFACE_IPSEC_DEFAULT_CORE << ECM_INTERFACE_IPSEC_CORE_OFFSET) | NSS_IPSEC_RULE_INTERFACE)
+
+/*
  * External defined functions
  */
 extern struct net_device *bond_get_tx_dev(struct sk_buff *skb, uint8_t *src_mac,
