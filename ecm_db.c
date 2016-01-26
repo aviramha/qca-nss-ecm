@@ -2822,6 +2822,43 @@ static inline void _ecm_db_connection_classifier_unassign(struct ecm_db_connecti
 	cci->deref(cci);
 }
 
+#ifdef ECM_MULTICAST_ENABLE
+/*
+ * _ecm_db_multicast_tuple_instance_deref()
+ * 	Deref the reference count or
+ * 	Free the tuple_instance struct, when the multicast connection dies
+ */
+int _ecm_db_multicast_tuple_instance_deref(struct ecm_db_multicast_tuple_instance *ti)
+{
+	DEBUG_CHECK_MAGIC(ti, ECM_DB_MULTICAST_INSTANCE_MAGIC, "%p: magic failed", ti);
+	ti->refs--;
+	DEBUG_TRACE("%p: ti deref %d\n", ti, ti->refs);
+	DEBUG_ASSERT(ti->refs >= 0, "%p: ref wrap\n", ti);
+
+	if (ti->refs > 0) {
+		return ti->refs;
+	}
+
+	if (ti->flags & ECM_DB_MULTICAST_TUPLE_INSTANCE_FLAGS_INSERTED) {
+		if (!ti->prev) {
+			DEBUG_ASSERT(ecm_db_multicast_tuple_instance_table[ti->hash_index] == ti, "%p: hash table bad\n", ti);
+			ecm_db_multicast_tuple_instance_table[ti->hash_index] = ti->next;
+		} else {
+			ti->prev->next = ti->next;
+		}
+
+		if (ti->next) {
+			ti->next->prev = ti->prev;
+		}
+	}
+
+	DEBUG_CLEAR_MAGIC(ti);
+	kfree(ti);
+
+	return 0;
+}
+#endif
+
 /*
  * ecm_db_connection_deref()
  *	Release reference to connection.  Connection is removed from database on final deref and destroyed.
@@ -2846,6 +2883,15 @@ int ecm_db_connection_deref(struct ecm_db_connection_instance *ci)
 		return refs;
 	}
 
+#ifdef ECM_MULTICAST_ENABLE
+	/*
+	 * For multicast connections, we need to deref the
+	 * associated tuple instance as well
+	 */
+	if (ci->ti) {
+		_ecm_db_multicast_tuple_instance_deref(ci->ti);
+	}
+#endif
 	/*
 	 * Remove from database if inserted
 	 */
@@ -3201,11 +3247,7 @@ int ecm_db_connection_deref(struct ecm_db_connection_instance *ci)
 	if (ci->to_nat_node) {
 		ecm_db_node_deref(ci->to_nat_node);
 	}
-#ifdef ECM_MULTICAST_ENABLE
-	if (ci->ti) {
-		ecm_db_multicast_tuple_instance_deref(ci->ti);
-	}
-#endif
+
 	/*
 	 * Remove references to the interfaces in our heirarchy lists
 	 */
@@ -6858,6 +6900,10 @@ void ecm_db_connection_add(struct ecm_db_connection_instance *ci,
 	ci->final = final;
 	ci->defunct = defunct;
 	ci->arg = arg;
+
+#ifdef ECM_MULTICAST_ENABLE
+	ci->ti = NULL;
+#endif
 
 	/*
 	 * Take reference to the front end
@@ -10794,37 +10840,11 @@ EXPORT_SYMBOL(ecm_db_multicast_connection_find_and_ref);
  */
 int ecm_db_multicast_tuple_instance_deref(struct ecm_db_multicast_tuple_instance *ti)
 {
-	DEBUG_CHECK_MAGIC(ti, ECM_DB_MULTICAST_INSTANCE_MAGIC, "%p: magic failed", ti);
+	int refs;
 	spin_lock_bh(&ecm_db_lock);
-	ti->refs--;
-	DEBUG_TRACE("%p: ti deref %d\n", ti, ti->refs);
-	DEBUG_ASSERT(ti->refs >= 0, "%p: ref wrap\n", ti);
-
-	if (ti->refs > 0) {
-		int refs = ti->refs;
-		spin_unlock_bh(&ecm_db_lock);
-		return refs;
-	}
-
-	if (ti->flags & ECM_DB_MULTICAST_TUPLE_INSTANCE_FLAGS_INSERTED) {
-
-		if (!ti->prev) {
-			DEBUG_ASSERT(ecm_db_multicast_tuple_instance_table[ti->hash_index] == ti, "%p: hash table bad\n", ti);
-			ecm_db_multicast_tuple_instance_table[ti->hash_index] = ti->next;
-		} else {
-			ti->prev->next = ti->next;
-		}
-
-		if (ti->next) {
-			ti->next->prev = ti->prev;
-		}
-	}
-
+	refs = _ecm_db_multicast_tuple_instance_deref(ti);
 	spin_unlock_bh(&ecm_db_lock);
-	DEBUG_CLEAR_MAGIC(ti);
-	kfree(ti);
-
-	return 0;
+	return refs;
 }
 EXPORT_SYMBOL(ecm_db_multicast_tuple_instance_deref);
 

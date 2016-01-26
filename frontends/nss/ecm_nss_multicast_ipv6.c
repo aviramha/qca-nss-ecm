@@ -3201,8 +3201,7 @@ static void ecm_nss_multicast_ipv6_br_update_event_callback(struct net_device *b
 			from_ifaces_first = ecm_db_connection_from_interfaces_get_and_ref(ci, from_ifaces);
 			if (from_ifaces_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 				DEBUG_WARN("%p: MCS Snooper Update: no interfaces in from_interfaces list!\n", ci);
-				ecm_db_multicast_tuple_instance_deref(tuple_instance);
-				ecm_db_connection_deref(ci);
+				ecm_db_multicast_connection_deref(tuple_instance);
 				return;
 			}
 
