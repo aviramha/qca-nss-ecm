@@ -3595,17 +3595,20 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 						memcpy(src_mac_addr, src_node_addr, ETH_ALEN);
 						memcpy(dest_mac_addr, dest_node_addr, ETH_ALEN);
 					} else {
-						struct net_device *dest_dev_master;
+						struct net_device *master_dev;
 
 						/*
-						 * Use appropriate source MAC address for routed packets
+						 * Use appropriate source MAC address for routed packets and
+						 * find proper interface to find the destination mac address and
+						 * from which to issue ARP or neighbour solicitation packet.
 						 */
-						dest_dev_master = ecm_interface_get_and_hold_dev_master(dest_dev);
-						if (dest_dev_master) {
-							memcpy(src_mac_addr, dest_dev_master->dev_addr, ETH_ALEN);
-							dev_put(dest_dev_master);
+						master_dev = ecm_interface_get_and_hold_dev_master(dest_dev);
+						if (master_dev) {
+							memcpy(src_mac_addr, master_dev->dev_addr, ETH_ALEN);
 						} else {
 							memcpy(src_mac_addr, dest_dev->dev_addr, ETH_ALEN);
+							master_dev = dest_dev;
+							dev_hold(master_dev);
 						}
 
 						/*
@@ -3616,12 +3619,11 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 						} else if (!next_dest_addr_valid) {
 							dev_put(src_dev);
 							dev_put(dest_dev);
-
+							dev_put(master_dev);
 							ecm_db_connection_interfaces_deref(interfaces, current_interface_index);
 							return ECM_DB_IFACE_HEIRARCHY_MAX;
 						} else {
-
-							if (!ecm_interface_mac_addr_get_no_route(dest_dev, dest_addr, dest_mac_addr)) {
+							if (!ecm_interface_mac_addr_get_no_route(master_dev, dest_addr, dest_mac_addr)) {
 								ip_addr_t gw_addr = ECM_IP_ADDR_NULL;
 								/*
 								 * Try one more time with gateway ip address if it exists.
@@ -3639,19 +3641,20 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 									DEBUG_TRACE("Have a gw address " ECM_IP_ADDR_OCTAL_FMT "\n", ECM_IP_ADDR_TO_OCTAL(gw_addr));
 								}
 #endif
-								if (ecm_interface_mac_addr_get_no_route(dest_dev, gw_addr, dest_mac_addr)) {
+								if (ecm_interface_mac_addr_get_no_route(master_dev, gw_addr, dest_mac_addr)) {
 									DEBUG_TRACE("Found the mac address for gateway\n");
+									dev_put(master_dev);
 									goto lag_success;
 								}
 
 								if (ip_version == 4) {
-									ecm_interface_send_arp_request(dest_dev, dest_addr, false, gw_addr);
+									ecm_interface_send_arp_request(master_dev, dest_addr, false, gw_addr);
 
 									DEBUG_WARN("Unable to obtain any MAC address for " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(dest_addr));
 								}
 #ifdef ECM_IPV6_ENABLE
 								if (ip_version == 6) {
-									ecm_interface_send_neighbour_solicitation(dest_dev, dest_addr);
+									ecm_interface_send_neighbour_solicitation(master_dev, dest_addr);
 
 									DEBUG_WARN("Unable to obtain any MAC address for " ECM_IP_ADDR_OCTAL_FMT "\n", ECM_IP_ADDR_TO_OCTAL(dest_addr));
 								}
@@ -3659,10 +3662,12 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 lag_fail:
 								dev_put(src_dev);
 								dev_put(dest_dev);
+								dev_put(master_dev);
 
 								ecm_db_connection_interfaces_deref(interfaces, current_interface_index);
 								return ECM_DB_IFACE_HEIRARCHY_MAX;
 							}
+							dev_put(master_dev);
 						}
 					}
 lag_success:
