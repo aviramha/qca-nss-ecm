@@ -3069,7 +3069,6 @@ int32_t ecm_interface_multicast_heirarchy_construct_bridged(struct ecm_front_end
 	return ii_cnt;
 }
 EXPORT_SYMBOL(ecm_interface_multicast_heirarchy_construct_bridged);
-#endif
 
 /*
  * ecm_interface_multicast_get_next_node_mac_address()
@@ -3104,6 +3103,7 @@ static bool ecm_interface_multicast_get_next_node_mac_address(
 
 	return true;
 }
+#endif
 
 /*
  * ecm_interface_get_next_node_mac_address()
