@@ -52,7 +52,11 @@
 #include <net/netfilter/nf_conntrack_helper.h>
 #include <net/netfilter/nf_conntrack_l4proto.h>
 #include <net/netfilter/nf_conntrack_l3proto.h>
+#if (LINUX_VERSION_CODE <= KERNEL_VERSION(4, 2, 0))
 #include <net/netfilter/nf_conntrack_zones.h>
+#else
+#include <linux/netfilter/nf_conntrack_zones_common.h>
+#endif
 #include <net/netfilter/nf_conntrack_core.h>
 #include <net/netfilter/ipv6/nf_conntrack_ipv6.h>
 #include <net/netfilter/ipv6/nf_defrag_ipv6.h>
@@ -1062,20 +1066,27 @@ static unsigned int ecm_nss_ipv6_ip_process(struct net_device *out_dev, struct n
  * ecm_nss_ipv6_post_routing_hook()
  *	Called for IP packets that are going out to interfaces after IP routing stage.
  */
-#if (LINUX_VERSION_CODE <= KERNEL_VERSION(3,6,0))
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 4, 0))
+static unsigned int ecm_nss_ipv6_post_routing_hook(void *priv,
+				struct sk_buff *skb,
+				const struct nf_hook_state *nhs)
+{
+	struct net_device *out = nhs->out;
+#elif (LINUX_VERSION_CODE <= KERNEL_VERSION(3, 6, 0))
 static unsigned int ecm_nss_ipv6_post_routing_hook(unsigned int hooknum,
 				struct sk_buff *skb,
 				const struct net_device *in_unused,
 				const struct net_device *out,
 				int (*okfn)(struct sk_buff *))
+{
 #else
 static unsigned int ecm_nss_ipv6_post_routing_hook(const struct nf_hook_ops *ops,
 				struct sk_buff *skb,
 				const struct net_device *in_unused,
 				const struct net_device *out,
 				int (*okfn)(struct sk_buff *))
-#endif
 {
+#endif
 	struct net_device *in;
 	bool can_accel = true;
 	unsigned int result;
@@ -1193,20 +1204,27 @@ static unsigned int ecm_nss_ipv6_pppoe_bridge_process(struct net_device *out,
  * These may have come from another bridged interface or from a non-bridged interface.
  * Conntrack information may be available or not if this skb is bridged.
  */
-#if (LINUX_VERSION_CODE <= KERNEL_VERSION(3,6,0))
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 4, 0))
+static unsigned int ecm_nss_ipv6_bridge_post_routing_hook(void *priv,
+					struct sk_buff *skb,
+					const struct nf_hook_state *nhs)
+{
+	struct net_device *out = nhs->out;
+#elif (LINUX_VERSION_CODE <= KERNEL_VERSION(3, 6, 0))
 static unsigned int ecm_nss_ipv6_bridge_post_routing_hook(unsigned int hooknum,
 					struct sk_buff *skb,
 					const struct net_device *in_unused,
 					const struct net_device *out,
 					int (*okfn)(struct sk_buff *))
+{
 #else
 static unsigned int ecm_nss_ipv6_bridge_post_routing_hook(const struct nf_hook_ops *ops,
 					struct sk_buff *skb,
 					const struct net_device *in_unused,
 					const struct net_device *out,
 					int (*okfn)(struct sk_buff *))
-#endif
 {
+#endif
 	struct ethhdr *skb_eth_hdr;
 	uint16_t eth_type;
 	struct net_device *bridge;
@@ -1610,7 +1628,11 @@ sync_conntrack:
 	/*
 	 * Look up conntrack connection
 	 */
+#if (LINUX_VERSION_CODE <= KERNEL_VERSION(4, 2, 0))
 	h = nf_conntrack_find_get(&init_net, NF_CT_DEFAULT_ZONE, &tuple);
+#else
+	h = nf_conntrack_find_get(&init_net, &nf_ct_zone_dflt, &tuple);
+#endif
 	if (!h) {
 		DEBUG_WARN("%p: NSS Sync: no conntrack connection\n", sync);
 		return;
@@ -1804,7 +1826,9 @@ static struct nf_hook_ops ecm_nss_ipv6_netfilter_hooks[] __read_mostly = {
 	 */
 	{
 		.hook           = ecm_nss_ipv6_post_routing_hook,
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 4, 0))
 		.owner          = THIS_MODULE,
+#endif
 		.pf             = PF_INET6,
 		.hooknum        = NF_INET_POST_ROUTING,
 		.priority       = NF_IP6_PRI_NAT_SRC + 1,
@@ -1816,7 +1840,9 @@ static struct nf_hook_ops ecm_nss_ipv6_netfilter_hooks[] __read_mostly = {
 	 */
 	{
 		.hook		= ecm_nss_ipv6_bridge_post_routing_hook,
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 4, 0))
 		.owner		= THIS_MODULE,
+#endif
 		.pf		= PF_BRIDGE,
 		.hooknum	= NF_BR_POST_ROUTING,
 		.priority	= NF_BR_PRI_FILTER_OTHER,
@@ -1855,6 +1881,7 @@ static void ecm_nss_ipv6_conntrack_event_destroy(struct nf_conn *ct)
 	ecm_db_connection_deref(ci);
 }
 
+#if defined(CONFIG_NF_CONNTRACK_MARK)
 /*
  * ecm_nss_ipv6_conntrack_event_mark()
  *	Handles conntrack mark events
@@ -1895,6 +1922,7 @@ static void ecm_nss_ipv6_conntrack_event_mark(struct nf_conn *ct)
 	 */
 	ecm_db_connection_deref(ci);
 }
+#endif
 
 /*
  * ecm_nss_ipv6_conntrack_event()
@@ -1926,6 +1954,7 @@ int ecm_nss_ipv6_conntrack_event(unsigned long events, struct nf_conn *ct)
 		ecm_nss_ipv6_conntrack_event_destroy(ct);
 	}
 
+#if defined(CONFIG_NF_CONNTRACK_MARK)
 	/*
 	 * handle mark change events
 	 */
@@ -1933,7 +1962,7 @@ int ecm_nss_ipv6_conntrack_event(unsigned long events, struct nf_conn *ct)
 		DEBUG_TRACE("%p: Event is mark\n", ct);
 		ecm_nss_ipv6_conntrack_event_mark(ct);
 	}
-
+#endif
 	return NOTIFY_DONE;
 }
 EXPORT_SYMBOL(ecm_nss_ipv6_conntrack_event);

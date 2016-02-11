@@ -112,7 +112,7 @@ struct ecm_db_listener_instance *ecm_classifier_hyfi_li = NULL;
 /*
  * Operational control - defaults to false (disabled)
  */
-static bool ecm_classifier_hyfi_enabled;		/* Operational behaviour */
+static int ecm_classifier_hyfi_enabled;		/* Operational behaviour */
 
 /*
  * Management thread control
@@ -969,7 +969,7 @@ int ecm_classifier_hyfi_rules_init(struct dentry *dentry)
 		goto classifier_task_cleanup;
 	}
 
-	if (!debugfs_create_bool("enabled", S_IRUGO | S_IWUSR, ecm_classifier_hyfi_dentry,
+	if (!debugfs_create_u32("enabled", S_IRUGO | S_IWUSR, ecm_classifier_hyfi_dentry,
 					(u32 *)&ecm_classifier_hyfi_enabled)) {
 		DEBUG_ERROR("Failed to create ecm hyfi classifier enabled file in debugfs\n");
 		goto classifier_task_cleanup;

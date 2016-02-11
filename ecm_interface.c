@@ -926,7 +926,11 @@ void ecm_interface_send_neighbour_solicitation(struct net_device *dev, ip_addr_t
 	 * Issue a Neighbour soliciation request
 	 */
 	DEBUG_TRACE("Issue Neighbour solicitation request\n");
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 4, 0))
 	ndisc_send_ns(dev, neigh, &dst_addr, &mc_dst_addr, &src_addr);
+#else
+	ndisc_send_ns(dev, &dst_addr, &mc_dst_addr, &src_addr);
+#endif
 	neigh_release(neigh);
 	dst_release(&rt6i->dst);
 }
