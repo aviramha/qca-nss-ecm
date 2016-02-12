@@ -826,8 +826,8 @@ static void ecm_classifier_hyfi_connection_removed(void *arg, struct ecm_db_conn
 	/*
 	 * Mark as decelerated
 	 */
-	hyfi_ecm_decelerate(chfi->flow.hash, serial);
-	hyfi_ecm_decelerate(chfi->flow.reverse_hash, serial);
+	hyfi_ecm_decelerate(chfi->flow.hash, serial, &chfi->flow.da[0]);
+	hyfi_ecm_decelerate(chfi->flow.reverse_hash, serial, &chfi->flow.sa[0]);
 
 	aci->deref(aci);
 }
