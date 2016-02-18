@@ -3114,14 +3114,29 @@ static bool ecm_interface_get_next_node_mac_address(
 	uint8_t *mac_addr)
 {
 	if (!ecm_interface_mac_addr_get_no_route(dest_dev, dest_addr, mac_addr)) {
+		/*
+		 * MAC address look up failed. The host IP address may not be in the
+		 * neighbour table. So, let's send an ARP or neighbour solicitation
+		 * request to this host IP address, so in the subsequent lookups it can be
+		 * found.
+		 */
 		if (ip_version == 4) {
-			DEBUG_WARN("Unable to obtain MAC address for " ECM_IP_ADDR_DOT_FMT "\n",
+			ip_addr_t gw_addr = ECM_IP_ADDR_NULL;
+			bool on_link = true;
+
+			DEBUG_WARN("Unable to obtain MAC address for " ECM_IP_ADDR_DOT_FMT " send ARP request\n",
 				ECM_IP_ADDR_TO_DOT(dest_addr));
+
+			if (ecm_interface_find_gateway(dest_addr, gw_addr)) {
+				on_link = false;
+			}
+			ecm_interface_send_arp_request(dest_dev, dest_addr, on_link, gw_addr);
 		}
 #ifdef ECM_IPV6_ENABLE
 		if (ip_version == 6) {
-			DEBUG_WARN("Unable to obtain MAC address for " ECM_IP_ADDR_OCTAL_FMT "\n",
+			DEBUG_WARN("Unable to obtain MAC address for " ECM_IP_ADDR_OCTAL_FMT " send neighbour solicitation request\n",
 				ECM_IP_ADDR_TO_OCTAL(dest_addr));
+			ecm_interface_send_neighbour_solicitation(dest_dev, dest_addr);
 		}
 #endif
 		return false;
