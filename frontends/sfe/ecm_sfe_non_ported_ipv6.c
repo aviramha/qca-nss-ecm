@@ -1702,14 +1702,13 @@ unsigned int ecm_sfe_non_ported_ipv6_process(struct net_device *out_dev,
 		}
 		spin_unlock_bh(&ecm_sfe_ipv6_lock);
 
-		if (!ecm_front_end_ipv6_interface_construct_set(skb, sender, ecm_dir, is_routed,
+		if (!ecm_front_end_ipv6_interface_construct_set_and_hold(skb, sender, ecm_dir, is_routed,
 							in_dev, out_dev,
 							ip_src_addr, ip_dest_addr,
 							&efeici)) {
 			DEBUG_WARN("ECM front end ipv6 interface construct set failed\n");
 			return NF_ACCEPT;
 		}
-		ecm_front_end_ipv6_interface_construct_netdev_hold(&efeici);
 
 		/*
 		 * Does this connection have a conntrack entry?

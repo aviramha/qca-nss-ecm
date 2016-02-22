@@ -160,14 +160,14 @@ struct ecm_front_end_interface_construct_instance {
 
 extern void ecm_front_end_ipv6_interface_construct_netdev_put(struct ecm_front_end_interface_construct_instance *efeici);
 extern void ecm_front_end_ipv6_interface_construct_netdev_hold(struct ecm_front_end_interface_construct_instance *efeici);
-extern bool ecm_front_end_ipv6_interface_construct_set(struct sk_buff *skb, ecm_tracker_sender_type_t sender, ecm_db_direction_t ecm_dir, bool is_routed,
+extern bool ecm_front_end_ipv6_interface_construct_set_and_hold(struct sk_buff *skb, ecm_tracker_sender_type_t sender, ecm_db_direction_t ecm_dir, bool is_routed,
 							struct net_device *in_dev, struct net_device *out_dev,
 							ip_addr_t ip_src_addr, ip_addr_t ip_dest_addr,
 							struct ecm_front_end_interface_construct_instance *efeici);
 
 extern void ecm_front_end_ipv4_interface_construct_netdev_put(struct ecm_front_end_interface_construct_instance *efeici);
 extern void ecm_front_end_ipv4_interface_construct_netdev_hold(struct ecm_front_end_interface_construct_instance *efeici);
-extern bool ecm_front_end_ipv4_interface_construct_set(struct sk_buff *skb, ecm_tracker_sender_type_t sender, ecm_db_direction_t ecm_dir, bool is_routed,
+extern bool ecm_front_end_ipv4_interface_construct_set_and_hold(struct sk_buff *skb, ecm_tracker_sender_type_t sender, ecm_db_direction_t ecm_dir, bool is_routed,
 							struct net_device *in_dev, struct net_device *out_dev,
 							ip_addr_t ip_src_addr, ip_addr_t ip_src_addr_nat,
 							ip_addr_t ip_dest_addr, ip_addr_t ip_dest_addr_nat,

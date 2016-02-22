@@ -840,7 +840,7 @@ void ecm_nss_ipv4_connection_regenerate(struct ecm_db_connection_instance *ci, e
 
 	feci = ecm_db_connection_front_end_get_and_ref(ci);
 
-	if (!ecm_front_end_ipv4_interface_construct_set(skb, sender, ecm_dir, is_routed,
+	if (!ecm_front_end_ipv4_interface_construct_set_and_hold(skb, sender, ecm_dir, is_routed,
 							in_dev, out_dev,
 							ip_src_addr, ip_src_addr_nat,
 							ip_dest_addr, ip_dest_addr_nat,
@@ -849,7 +849,6 @@ void ecm_nss_ipv4_connection_regenerate(struct ecm_db_connection_instance *ci, e
 		DEBUG_WARN("ECM front end ipv4 interface construct set failed for regeneration\n");
 		goto ecm_ipv4_retry_regen;
 	}
-	ecm_front_end_ipv4_interface_construct_netdev_hold(&efeici);
 
 	DEBUG_TRACE("%p: Update the 'from' interface heirarchy list\n", ci);
 	from_list_first = ecm_interface_heirarchy_construct(feci, from_list, efeici.from_dev, efeici.from_other_dev, ip_dest_addr, efeici.from_mac_lookup_ip_addr, 4, protocol, in_dev, is_routed, in_dev, src_node_addr, dest_node_addr, layer4hdr, skb);

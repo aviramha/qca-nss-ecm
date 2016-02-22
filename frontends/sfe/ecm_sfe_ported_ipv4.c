@@ -1969,7 +1969,7 @@ unsigned int ecm_sfe_ported_ipv4_process(struct net_device *out_dev, struct net_
 		}
 		spin_unlock_bh(&ecm_sfe_ipv4_lock);
 
-		if (!ecm_front_end_ipv4_interface_construct_set(skb, sender, ecm_dir, is_routed,
+		if (!ecm_front_end_ipv4_interface_construct_set_and_hold(skb, sender, ecm_dir, is_routed,
 							in_dev, out_dev,
 							ip_src_addr, ip_src_addr_nat,
 							ip_dest_addr, ip_dest_addr_nat,
@@ -1978,7 +1978,6 @@ unsigned int ecm_sfe_ported_ipv4_process(struct net_device *out_dev, struct net_
 			DEBUG_WARN("ECM front end ipv4 interface construct set failed for routed traffic\n");
 			return NF_ACCEPT;
 		}
-		ecm_front_end_ipv4_interface_construct_netdev_hold(&efeici);
 
 		/*
 		 * Does this connection have a conntrack entry?
