@@ -244,7 +244,7 @@ struct ecm_db_node_instance *ecm_sfe_ipv4_node_establish_and_ref(struct ecm_fron
 				/*
 				 * Try one more time with gateway ip address if it exists.
 				 */
-				if (ecm_interface_find_gateway(addr, gw_addr)) {
+				if (!ecm_interface_find_gateway(addr, gw_addr)) {
 					DEBUG_WARN("Node establish failed, there is no gateway address for 2nd mac lookup try\n");
 					return NULL;
 				}
