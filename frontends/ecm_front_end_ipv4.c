@@ -228,6 +228,22 @@ bool ecm_front_end_ipv4_interface_construct_set_and_hold(struct sk_buff *skb, ec
 	}
 
 	/*
+	 * Just in case the is_routed flag comes as 0, but the ecm_dir is different than
+	 * bridge flow, we check the netdevices here before setting the efeici fields.
+	 *
+	 * TODO: Why ecm_dir comes as non-bridge flow, even though the is_routed flag is bridged?
+	 */
+	if (ecm_dir != ECM_DB_DIRECTION_BRIDGED) {
+		if (!dst || !dst->dev || !rt_iif_dev) {
+			DEBUG_WARN("Traffic is not bridged but the netdevs are not valid\n");
+			if (rt_iif_dev) {
+				dev_put(rt_iif_dev);
+			}
+			return false;
+		}
+	}
+
+	/*
 	 * Initialize the mac lookup ip addresses with defaults.
 	 */
 	ECM_IP_ADDR_COPY(from_mac_lookup, ip_src_addr);
