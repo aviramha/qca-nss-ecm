@@ -3270,6 +3270,7 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 	bool next_dest_node_addr_valid = false;
 	ip_addr_t next_dest_addr;
 	uint8_t next_dest_node_addr[ETH_ALEN] = {0};
+	struct net_device *bridge;
 
 	/*
 	 * Get a big endian of the IPv4 address we have been given as our starting point.
@@ -3446,39 +3447,38 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 			dev_put(dest_dev);
 			return ECM_DB_IFACE_HEIRARCHY_MAX;
 		}
-	} else {
-		struct net_device *bridge =
-			ecm_interface_should_update_egress_device_bridged(
-				given_dest_dev, dest_dev, is_routed);
+	}
 
-		if (bridge) {
+	bridge = ecm_interface_should_update_egress_device_bridged(
+		given_dest_dev, dest_dev, is_routed);
 
-			struct net_device *new_dest_dev;
+	if (bridge) {
 
-			next_dest_node_addr_valid = ecm_interface_get_next_node_mac_address(
-				dest_addr, dest_dev, ip_version, next_dest_node_addr);
-			if (next_dest_node_addr_valid) {
+		struct net_device *new_dest_dev;
 
-				new_dest_dev = br_port_dev_get(bridge,
-								next_dest_node_addr,
-								skb);
+		next_dest_node_addr_valid = ecm_interface_get_next_node_mac_address(
+			dest_addr, bridge, ip_version, next_dest_node_addr);
+		if (next_dest_node_addr_valid) {
 
-				if (new_dest_dev) {
-					dev_put(dest_dev);
-					if (new_dest_dev != given_dest_dev) {
-						DEBUG_INFO("Adjusted port for %pM is %s (given was %s)\n",
-							next_dest_node_addr, new_dest_dev->name,
-							given_dest_dev->name);
+			new_dest_dev = br_port_dev_get(bridge,
+							next_dest_node_addr,
+							skb);
 
-						dest_dev = new_dest_dev;
-						dest_dev_name = dest_dev->name;
-						dest_dev_type = dest_dev->type;
-					}
+			if (new_dest_dev) {
+				dev_put(dest_dev);
+				if (new_dest_dev != given_dest_dev) {
+					DEBUG_INFO("Adjusted port for %pM is %s (given was %s)\n",
+						next_dest_node_addr, new_dest_dev->name,
+						given_dest_dev->name);
+
+					dest_dev = new_dest_dev;
+					dest_dev_name = dest_dev->name;
+					dest_dev_type = dest_dev->type;
 				}
 			}
-
-			dev_put(bridge);
 		}
+
+		dev_put(bridge);
 	}
 
 	next_dest_addr_valid = true;
@@ -3998,6 +3998,7 @@ int32_t ecm_interface_multicast_from_heirarchy_construct(struct ecm_front_end_co
 	bool next_dest_node_addr_valid = false;
 	ip_addr_t next_dest_addr;
 	uint8_t next_dest_node_addr[ETH_ALEN] = {0};
+	struct net_device *bridge;
 
 	/*
 	 * Get a big endian of the IPv4 address we have been given as our starting point.
@@ -4200,39 +4201,38 @@ int32_t ecm_interface_multicast_from_heirarchy_construct(struct ecm_front_end_co
 			dev_put(dest_dev);
 			return ECM_DB_IFACE_HEIRARCHY_MAX;
 		}
-	} else {
-		struct net_device *bridge =
-			ecm_interface_should_update_egress_device_bridged(
-				given_dest_dev, dest_dev, is_routed);
+	}
 
-		if (bridge) {
+	bridge = ecm_interface_should_update_egress_device_bridged(
+		given_dest_dev, dest_dev, is_routed);
 
-			struct net_device *new_dest_dev;
+	if (bridge) {
 
-			next_dest_node_addr_valid = ecm_interface_multicast_get_next_node_mac_address(
-				dest_addr, dest_dev, ip_version, next_dest_node_addr);
-			if (next_dest_node_addr_valid) {
+		struct net_device *new_dest_dev;
 
-				new_dest_dev = br_port_dev_get(bridge,
-								next_dest_node_addr,
-								skb);
+		next_dest_node_addr_valid = ecm_interface_multicast_get_next_node_mac_address(
+			dest_addr, bridge, ip_version, next_dest_node_addr);
+		if (next_dest_node_addr_valid) {
 
-				if (new_dest_dev) {
-					dev_put(dest_dev);
-					if (new_dest_dev != given_dest_dev) {
-						DEBUG_INFO("Adjusted port for %pM is %s (given was %s)\n",
-							next_dest_node_addr, new_dest_dev->name,
-							given_dest_dev->name);
+			new_dest_dev = br_port_dev_get(bridge,
+							next_dest_node_addr,
+							skb);
 
-						dest_dev = new_dest_dev;
-						dest_dev_name = dest_dev->name;
-						dest_dev_type = dest_dev->type;
-					}
+			if (new_dest_dev) {
+				dev_put(dest_dev);
+				if (new_dest_dev != given_dest_dev) {
+					DEBUG_INFO("Adjusted port for %pM is %s (given was %s)\n",
+						next_dest_node_addr, new_dest_dev->name,
+						given_dest_dev->name);
+
+					dest_dev = new_dest_dev;
+					dest_dev_name = dest_dev->name;
+					dest_dev_type = dest_dev->type;
 				}
 			}
-
-			dev_put(bridge);
 		}
+
+		dev_put(bridge);
 	}
 
 	next_dest_addr_valid = true;
