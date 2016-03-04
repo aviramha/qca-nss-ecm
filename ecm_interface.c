@@ -3346,6 +3346,7 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 	ip_addr_t next_dest_addr;
 	uint8_t next_dest_node_addr[ETH_ALEN] = {0};
 	struct net_device *bridge;
+	uint32_t serial = ecm_db_connection_serial_get(feci->ci);
 
 	/*
 	 * Get a big endian of the IPv4 address we have been given as our starting point.
@@ -3355,12 +3356,14 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 	ECM_IP_ADDR_COPY(dest_addr, packet_dest_addr);
 
 	if (ip_version == 4) {
-		DEBUG_TRACE("Construct interface heirarchy for from src_addr: " ECM_IP_ADDR_DOT_FMT " to dest_addr: " ECM_IP_ADDR_DOT_FMT ", protocol: %d\n",
-				ECM_IP_ADDR_TO_DOT(src_addr), ECM_IP_ADDR_TO_DOT(dest_addr), protocol);
+		DEBUG_TRACE("Construct interface heirarchy for from src_addr: " ECM_IP_ADDR_DOT_FMT " to dest_addr: " ECM_IP_ADDR_DOT_FMT ", protocol: %d (serial %u)\n",
+				ECM_IP_ADDR_TO_DOT(src_addr), ECM_IP_ADDR_TO_DOT(dest_addr), protocol,
+				serial);
 #ifdef ECM_IPV6_ENABLE
 	} else if (ip_version == 6) {
-		DEBUG_TRACE("Construct interface heirarchy for from src_addr: " ECM_IP_ADDR_OCTAL_FMT " to dest_addr: " ECM_IP_ADDR_OCTAL_FMT ", protocol: %d\n",
-				ECM_IP_ADDR_TO_OCTAL(src_addr), ECM_IP_ADDR_TO_OCTAL(dest_addr), protocol);
+		DEBUG_TRACE("Construct interface heirarchy for from src_addr: " ECM_IP_ADDR_OCTAL_FMT " to dest_addr: " ECM_IP_ADDR_OCTAL_FMT ", protocol: %d (serial %u)\n",
+				ECM_IP_ADDR_TO_OCTAL(src_addr), ECM_IP_ADDR_TO_OCTAL(dest_addr), protocol,
+				serial);
 #endif
 	} else {
 		DEBUG_WARN("Wrong IP protocol: %d\n", ip_version);
@@ -3537,7 +3540,7 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 
 			new_dest_dev = br_port_dev_get(bridge,
 							next_dest_node_addr,
-							skb);
+							skb, serial);
 
 			if (new_dest_dev) {
 				dev_put(dest_dev);
@@ -3667,7 +3670,8 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 						}
 					}
 
-					next_dev = br_port_dev_get(dest_dev, mac_addr, skb);
+					next_dev = br_port_dev_get(dest_dev,
+						mac_addr, skb, serial);
 
 					if (!next_dev) {
 						DEBUG_WARN("Unable to obtain output port for: %pM\n", mac_addr);
@@ -4086,6 +4090,7 @@ int32_t ecm_interface_multicast_from_heirarchy_construct(struct ecm_front_end_co
 	ip_addr_t next_dest_addr;
 	uint8_t next_dest_node_addr[ETH_ALEN] = {0};
 	struct net_device *bridge;
+	uint32_t serial = ecm_db_connection_serial_get(feci->ci);
 
 	/*
 	 * Get a big endian of the IPv4 address we have been given as our starting point.
@@ -4095,12 +4100,14 @@ int32_t ecm_interface_multicast_from_heirarchy_construct(struct ecm_front_end_co
 	ECM_IP_ADDR_COPY(dest_addr, packet_dest_addr);
 
 	if (ip_version == 4) {
-		DEBUG_TRACE("Construct interface heirarchy for from src_addr: " ECM_IP_ADDR_DOT_FMT " to dest_addr: " ECM_IP_ADDR_DOT_FMT ", protocol: %d\n",
-				ECM_IP_ADDR_TO_DOT(src_addr), ECM_IP_ADDR_TO_DOT(dest_addr), protocol);
+		DEBUG_TRACE("Construct interface heirarchy for from src_addr: " ECM_IP_ADDR_DOT_FMT " to dest_addr: " ECM_IP_ADDR_DOT_FMT ", protocol: %d (serial %u)\n",
+				ECM_IP_ADDR_TO_DOT(src_addr), ECM_IP_ADDR_TO_DOT(dest_addr), protocol,
+				serial);
 #ifdef ECM_IPV6_ENABLE
 	} else if (ip_version == 6) {
-		DEBUG_TRACE("Construct interface heirarchy for from src_addr: " ECM_IP_ADDR_OCTAL_FMT " to dest_addr: " ECM_IP_ADDR_OCTAL_FMT ", protocol: %d\n",
-				ECM_IP_ADDR_TO_OCTAL(src_addr), ECM_IP_ADDR_TO_OCTAL(dest_addr), protocol);
+		DEBUG_TRACE("Construct interface heirarchy for from src_addr: " ECM_IP_ADDR_OCTAL_FMT " to dest_addr: " ECM_IP_ADDR_OCTAL_FMT ", protocol: %d (serial %u)\n",
+				ECM_IP_ADDR_TO_OCTAL(src_addr), ECM_IP_ADDR_TO_OCTAL(dest_addr), protocol,
+				serial);
 #endif
 	} else {
 		DEBUG_WARN("Wrong IP protocol: %d\n", ip_version);
@@ -4303,7 +4310,7 @@ int32_t ecm_interface_multicast_from_heirarchy_construct(struct ecm_front_end_co
 
 			new_dest_dev = br_port_dev_get(bridge,
 							next_dest_node_addr,
-							skb);
+							skb, serial);
 
 			if (new_dest_dev) {
 				dev_put(dest_dev);
@@ -4433,7 +4440,8 @@ int32_t ecm_interface_multicast_from_heirarchy_construct(struct ecm_front_end_co
 							return ECM_DB_IFACE_HEIRARCHY_MAX;
 						}
 					}
-					next_dev = br_port_dev_get(dest_dev, mac_addr, skb);
+					next_dev = br_port_dev_get(dest_dev,
+						mac_addr, skb, serial);
 					if (!next_dev) {
 						DEBUG_WARN("Unable to obtain output port for: %pM\n", mac_addr);
 						dev_put(src_dev);

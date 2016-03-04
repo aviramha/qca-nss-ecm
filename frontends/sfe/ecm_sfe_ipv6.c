@@ -1262,7 +1262,11 @@ static unsigned int ecm_sfe_ipv6_bridge_post_routing_hook(const struct nf_hook_o
 	 * Case 3:
 	 *	If the packet was not local (case 1) or routed (case 2) then we process.
 	 */
-	in = br_port_dev_get(bridge, skb_eth_hdr->h_source, NULL);
+
+	/*
+	 * Pass in NULL (for skb) and 0 for cookie since doing FDB lookup only
+	 */
+	in = br_port_dev_get(bridge, skb_eth_hdr->h_source, NULL, 0);
 	if (!in) {
 		DEBUG_TRACE("skb: %p, no in device for bridge: %p (%s)\n", skb, bridge, bridge->name);
 		dev_put(bridge);
