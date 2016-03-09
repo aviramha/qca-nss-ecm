@@ -150,8 +150,21 @@ struct net_device *ecm_interface_get_and_hold_dev_master(struct net_device *dev)
 EXPORT_SYMBOL(ecm_interface_get_and_hold_dev_master);
 
 /*
+ * ecm_interface_vlan_real_dev()
+ *	Return immediate VLAN net device or Physical device pointer
+ */
+static inline struct net_device *ecm_interface_vlan_real_dev(struct net_device *vlan_dev)
+{
+#if (LINUX_VERSION_CODE > KERNEL_VERSION(3, 6, 0))
+	return vlan_dev_next_dev(vlan_dev);
+#else
+	return vlan_dev_real_dev(vlan_dev);
+#endif
+}
+
+/*
  * ecm_interface_dev_find_by_local_addr_ipv4()
- *	Return a hold to the device for the given local IP address.  Returns NULL on failure.
+ *	Return a hold to the device for the given local IP address. Returns NULL on failure.
  */
 static struct net_device *ecm_interface_dev_find_by_local_addr_ipv4(ip_addr_t addr)
 {
@@ -2465,7 +2478,7 @@ static uint32_t ecm_interface_multicast_heirarchy_construct_single(struct ecm_fr
 					 * VLAN master
 					 * No locking needed here, ASSUMPTION is that real_dev is held for as long as we have dev.
 					 */
-					next_dev = vlan_dev_real_dev(dest_dev);
+					next_dev = ecm_interface_vlan_real_dev(dest_dev);
 					dev_hold(next_dev);
 					DEBUG_TRACE("Net device: %p is VLAN, slave dev: %p (%s)\n",
 							dest_dev, next_dev, next_dev->name);
@@ -3537,7 +3550,7 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 					 * VLAN master
 					 * No locking needed here, ASSUMPTION is that real_dev is held for as long as we have dev.
 					 */
-					next_dev = vlan_dev_real_dev(dest_dev);
+					next_dev = ecm_interface_vlan_real_dev(dest_dev);
 					dev_hold(next_dev);
 					DEBUG_TRACE("Net device: %p is VLAN, slave dev: %p (%s)\n",
 							dest_dev, next_dev, next_dev->name);
@@ -4292,7 +4305,7 @@ int32_t ecm_interface_multicast_from_heirarchy_construct(struct ecm_front_end_co
 					 * VLAN master
 					 * No locking needed here, ASSUMPTION is that real_dev is held for as long as we have dev.
 					 */
-					next_dev = vlan_dev_real_dev(dest_dev);
+					next_dev = ecm_interface_vlan_real_dev(dest_dev);
 					dev_hold(next_dev);
 					DEBUG_TRACE("Net device: %p is VLAN, slave dev: %p (%s)\n",
 							dest_dev, next_dev, next_dev->name);
