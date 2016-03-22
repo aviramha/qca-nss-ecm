@@ -1000,6 +1000,17 @@ static unsigned int ecm_nss_ipv4_ip_process(struct net_device *out_dev, struct n
 	}
 
 	/*
+	 * if it's a IPSec pass-through flow, don't accelerate it.
+	 */
+	if ((ip_hdr.protocol == IPPROTO_ESP) &&
+		(in_dev->type != ECM_ARPHRD_IPSEC_TUNNEL_TYPE) &&
+		(out_dev->type != ECM_ARPHRD_IPSEC_TUNNEL_TYPE)) {
+
+		DEBUG_TRACE("ipsec pass through flow\n");
+		return NF_ACCEPT;
+	}
+
+	/*
 	 * Extract information, if we have conntrack then use that info as far as we can.
 	 */
         ct = nf_ct_get(skb, &ctinfo);
