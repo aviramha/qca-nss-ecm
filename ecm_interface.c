@@ -942,6 +942,9 @@ void ecm_interface_send_arp_request(struct net_device *dest_dev, ip_addr_t dest_
 	/*
 	 * Possible ARP does not know the address yet
 	 */
+#if (LINUX_VERSION_CODE > KERNEL_VERSION(3, 6, 0))
+	struct neighbour *neigh;
+#endif
 	__be32 ipv4_addr;
 	__be32 src_ip;
 
@@ -962,6 +965,18 @@ void ecm_interface_send_arp_request(struct net_device *dest_dev, ip_addr_t dest_
 		ECM_IP_ADDR_TO_NIN4_ADDR(ipv4_addr, gw_addr);
 	}
 
+#if (LINUX_VERSION_CODE > KERNEL_VERSION(3, 6, 0))
+	/*
+	 * If we don't have this neighbor, create it before sending the arp request,
+	 * so that when we receive the arp reply we update the neigh entry.
+	 */
+	neigh = neigh_lookup(&arp_tbl, &ipv4_addr, dest_dev);
+	if (!neigh) {
+		__neigh_create(&arp_tbl, &ipv4_addr, dest_dev, false);
+	} else {
+		neigh_release(neigh);
+	}
+#endif
 	DEBUG_TRACE("Send ARP for %pI4 using src_ip as %pI4\n", &ipv4_addr, &src_ip);
 	arp_send(ARPOP_REQUEST, ETH_P_ARP, ipv4_addr, dest_dev, src_ip, NULL, NULL, NULL);
 
