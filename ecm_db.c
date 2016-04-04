@@ -5958,6 +5958,11 @@ void ecm_db_connection_classifier_unassign(struct ecm_db_connection_instance *ci
 	ca_type = cci->type_get(cci);
 	DEBUG_ASSERT(ca_type != ECM_CLASSIFIER_TYPE_DEFAULT, "%p: Cannot unassign default", ci);
 
+	if (ca_type >= ECM_CLASSIFIER_TYPES) {
+		DEBUG_WARN("%p: ca_type: %d is higher than the max classifier type number: %d\n", ci, ca_type, (ECM_CLASSIFIER_TYPES - 1));
+		return;
+	}
+
 	DEBUG_TRACE("%p: Unassign type: %d, classifier: %p\n", ci, ca_type, cci);
 
 	/*
