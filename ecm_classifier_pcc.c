@@ -217,21 +217,13 @@ void ecm_classifier_pcc_permit_accel_v4(uint8_t *src_mac, __be32 src_ip, int src
 	ECM_NIN4_ADDR_TO_IP_ADDR(ecm_src_ip, src_ip);
 	ECM_NIN4_ADDR_TO_IP_ADDR(ecm_dest_ip, dest_ip);
 
-	{
-		char src_ip_str[40];
-		char dest_ip_str[40];
-
-		ecm_ip_addr_to_string(src_ip_str, ecm_src_ip);
-		ecm_ip_addr_to_string(dest_ip_str, ecm_dest_ip);
-
-		DEBUG_INFO("Permit Accel v4, lookup connection using \n"
-				"Protocol: %d\n"
-				"src: %s:%d\n"
-				"dest: %s:%d\n",
-				protocol,
-				src_ip_str, src_port,
-				dest_ip_str, dest_port);
-	}
+	DEBUG_INFO("Permit Accel v4, lookup connection using \n"
+			"Protocol: %d\n"
+			"src: " ECM_IP_ADDR_DOT_FMT ":%d\n"
+			"dest: " ECM_IP_ADDR_DOT_FMT ":%d\n",
+			protocol,
+			ECM_IP_ADDR_TO_DOT(ecm_src_ip), src_port,
+			ECM_IP_ADDR_TO_DOT(ecm_dest_ip), dest_port);
 
 	ci = ecm_db_connection_find_and_ref(ecm_src_ip, ecm_dest_ip, protocol, src_port, dest_port);
 	if (!ci) {
@@ -296,21 +288,13 @@ void ecm_classifier_pcc_permit_accel_v6(uint8_t *src_mac, struct in6_addr *src_i
 	in6 = *dest_ip;
 	ECM_NIN6_ADDR_TO_IP_ADDR(ecm_dest_ip, in6);
 
-	{
-		char src_ip_str[40];
-		char dest_ip_str[40];
-
-		ecm_ip_addr_to_string(src_ip_str, ecm_src_ip);
-		ecm_ip_addr_to_string(dest_ip_str, ecm_dest_ip);
-
-		DEBUG_INFO("Permit Accel v6, lookup connection using \n"
-				"Protocol: %d\n"
-				"src: %s:%d\n"
-				"dest: %s:%d\n",
-				protocol,
-				src_ip_str, src_port,
-				dest_ip_str, dest_port);
-	}
+	DEBUG_INFO("Permit Accel v6, lookup connection using \n"
+			"Protocol: %d\n"
+			"src: " ECM_IP_ADDR_OCTAL_FMT ":%d\n"
+			"dest: " ECM_IP_ADDR_OCTAL_FMT ":%d\n",
+			protocol,
+			ECM_IP_ADDR_TO_OCTAL(ecm_src_ip), src_port,
+			ECM_IP_ADDR_TO_OCTAL(ecm_dest_ip), dest_port);
 
 	ci = ecm_db_connection_find_and_ref(ecm_src_ip, ecm_dest_ip, protocol, src_port, dest_port);
 	if (!ci) {
@@ -369,21 +353,13 @@ void ecm_classifier_pcc_deny_accel_v4(uint8_t *src_mac, __be32 src_ip, int src_p
 	ECM_NIN4_ADDR_TO_IP_ADDR(ecm_src_ip, src_ip);
 	ECM_NIN4_ADDR_TO_IP_ADDR(ecm_dest_ip, dest_ip);
 
-	{
-		char src_ip_str[40];
-		char dest_ip_str[40];
-
-		ecm_ip_addr_to_string(src_ip_str, ecm_src_ip);
-		ecm_ip_addr_to_string(dest_ip_str, ecm_dest_ip);
-
-		DEBUG_INFO("Deny Accel v4, lookup connection using \n"
-				"Protocol: %d\n"
-				"src: %s:%d\n"
-				"dest: %s:%d\n",
-				protocol,
-				src_ip_str, src_port,
-				dest_ip_str, dest_port);
-	}
+	DEBUG_INFO("Deny Accel v4, lookup connection using \n"
+			"Protocol: %d\n"
+			"src: " ECM_IP_ADDR_DOT_FMT ":%d\n"
+			"dest: " ECM_IP_ADDR_DOT_FMT ":%d\n",
+			protocol,
+			ECM_IP_ADDR_TO_DOT(ecm_src_ip), src_port,
+			ECM_IP_ADDR_TO_DOT(ecm_dest_ip), dest_port);
 
 	ci = ecm_db_connection_find_and_ref(ecm_src_ip, ecm_dest_ip, protocol, src_port, dest_port);
 	if (!ci) {
@@ -455,21 +431,13 @@ void ecm_classifier_pcc_deny_accel_v6(uint8_t *src_mac, struct in6_addr *src_ip,
 	in6 = *dest_ip;
 	ECM_NIN6_ADDR_TO_IP_ADDR(ecm_dest_ip, in6);
 
-	{
-		char src_ip_str[40];
-		char dest_ip_str[40];
-
-		ecm_ip_addr_to_string(src_ip_str, ecm_src_ip);
-		ecm_ip_addr_to_string(dest_ip_str, ecm_dest_ip);
-
-		DEBUG_INFO("Deny Accel v6, lookup connection using \n"
-				"Protocol: %d\n"
-				"src: %s:%d\n"
-				"dest: %s:%d\n",
-				protocol,
-				src_ip_str, src_port,
-				dest_ip_str, dest_port);
-	}
+	DEBUG_INFO("Deny Accel v6, lookup connection using \n"
+			"Protocol: %d\n"
+			"src: " ECM_IP_ADDR_OCTAL_FMT ":%d\n"
+			"dest: " ECM_IP_ADDR_OCTAL_FMT ":%d\n",
+			protocol,
+			ECM_IP_ADDR_TO_OCTAL(ecm_src_ip), src_port,
+			ECM_IP_ADDR_TO_OCTAL(ecm_dest_ip), dest_port);
 
 	ci = ecm_db_connection_find_and_ref(ecm_src_ip, ecm_dest_ip, protocol, src_port, dest_port);
 	if (!ci) {

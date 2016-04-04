@@ -874,13 +874,8 @@ void ecm_interface_send_neighbour_solicitation(struct net_device *dev, ip_addr_t
 	struct in6_addr mc_dst_addr;
 	struct rt6_info *rt6i;
 	struct neighbour *neigh;
-	ip_addr_t ecm_mc_dst_addr, ecm_src_addr;
 	struct net *netf = dev_net(dev);
 	int ret;
-
-	char __attribute__((unused)) dst_addr_str[ECM_IP_ADDR_STRING_BUFFER_SIZE];
-	char __attribute__((unused)) mc_dst_addr_str[ECM_IP_ADDR_STRING_BUFFER_SIZE];
-	char __attribute__((unused)) src_addr_str[ECM_IP_ADDR_STRING_BUFFER_SIZE];
 
 	/*
 	 * Find source and destination addresses in Linux format. We need
@@ -891,20 +886,11 @@ void ecm_interface_send_neighbour_solicitation(struct net_device *dev, ip_addr_t
 	ret = ipv6_dev_get_saddr(netf, dev, &dst_addr, 0, &src_addr);
 
 	/*
-	 * IP address in string format for debug
-	 */
-	ecm_ip_addr_to_string(dst_addr_str, addr);
-	ECM_NIN6_ADDR_TO_IP_ADDR(ecm_mc_dst_addr, mc_dst_addr);
-	ecm_ip_addr_to_string(mc_dst_addr_str, ecm_mc_dst_addr);
-	ECM_NIN6_ADDR_TO_IP_ADDR(ecm_src_addr, src_addr);
-	ecm_ip_addr_to_string(src_addr_str, ecm_src_addr);
-
-	/*
 	 * Find the route entry
 	 */
 	rt6i = rt6_lookup(netf, &dst_addr, NULL, 0, 0);
 	if (!rt6i) {
-		DEBUG_TRACE("IPv6 Route lookup failure for destination IPv6 address %s\n", dst_addr_str);
+		DEBUG_TRACE("IPv6 Route lookup failure for destination IPv6 address " ECM_IP_ADDR_OCTAL_FMT "\n", ECM_IP_ADDR_TO_OCTAL(addr));
 		return;
 	}
 
@@ -917,7 +903,7 @@ void ecm_interface_send_neighbour_solicitation(struct net_device *dev, ip_addr_t
 	neigh = rt6i->dst.ops->neigh_lookup(&rt6i->dst, NULL, &dst_addr);
 #endif
 	if (neigh == NULL) {
-		DEBUG_TRACE("Neighbour lookup failure for destination IPv6 address %s\n", dst_addr_str);
+		DEBUG_TRACE("Neighbour lookup failure for destination IPv6 address " ECM_IP_ADDR_OCTAL_FMT "\n", ECM_IP_ADDR_TO_OCTAL(addr));
 		dst_release(&rt6i->dst);
 		return;
 	}
