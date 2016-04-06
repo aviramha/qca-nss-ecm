@@ -6033,6 +6033,11 @@ void ecm_db_connection_classifier_unassign(struct ecm_db_connection_instance *ci
 	ca_type = cci->type_get(cci);
 	DEBUG_ASSERT(ca_type != ECM_CLASSIFIER_TYPE_DEFAULT, "%p: Cannot unassign default", ci);
 
+	if (ca_type >= ECM_CLASSIFIER_TYPES) {
+		DEBUG_WARN("%p: ca_type: %d is higher than the max classifier type number: %d\n", ci, ca_type, (ECM_CLASSIFIER_TYPES - 1));
+		return;
+	}
+
 	DEBUG_TRACE("%p: Unassign type: %d, classifier: %p\n", ci, ca_type, cci);
 
 	/*
@@ -8264,16 +8269,16 @@ int ecm_db_connection_state_get(struct ecm_state_file_instance *sfi, struct ecm_
 	long int expires_in;
 	int sport;
 	int sport_nat;
-	char snode_address[25];
-	char snode_address_nat[25];
-	char sip_address[50];
-	char sip_address_nat[50];
-	char dnode_address[25];
-	char dnode_address_nat[25];
+	char snode_address[ECM_MAC_ADDR_STR_BUFF_SIZE];
+	char snode_address_nat[ECM_MAC_ADDR_STR_BUFF_SIZE];
+	char sip_address[ECM_IP_ADDR_STR_BUFF_SIZE];
+	char sip_address_nat[ECM_IP_ADDR_STR_BUFF_SIZE];
+	char dnode_address[ECM_MAC_ADDR_STR_BUFF_SIZE];
+	char dnode_address_nat[ECM_MAC_ADDR_STR_BUFF_SIZE];
 	int dport;
 	int dport_nat;
-	char dip_address[50];
-	char dip_address_nat[50];
+	char dip_address[ECM_IP_ADDR_STR_BUFF_SIZE];
+	char dip_address_nat[ECM_IP_ADDR_STR_BUFF_SIZE];
 	ecm_db_direction_t direction;
 	int ip_version;
 	int protocol;
@@ -8341,22 +8346,22 @@ int ecm_db_connection_state_get(struct ecm_state_file_instance *sfi, struct ecm_
 	hi = ci->mapping_to->host;
 	ecm_ip_addr_to_string(dip_address, hi->address);
 	ni = ci->to_node;
-	sprintf(dnode_address, "%pM", ni->address);
+	snprintf(dnode_address, sizeof(dnode_address), "%pM", ni->address);
 	hi = ci->mapping_nat_to->host;
 	ecm_ip_addr_to_string(dip_address_nat, hi->address);
 
 	hi = ci->mapping_from->host;
 	ecm_ip_addr_to_string(sip_address, hi->address);
 	ni = ci->from_node;
-	sprintf(snode_address, "%pM", ni->address);
+	snprintf(snode_address, sizeof(snode_address), "%pM", ni->address);
 	hi = ci->mapping_nat_from->host;
 	ecm_ip_addr_to_string(sip_address_nat, hi->address);
 
 	ni = ci->to_nat_node;
-	sprintf(dnode_address_nat, "%pM", ni->address);
+	snprintf(dnode_address_nat, sizeof(dnode_address_nat), "%pM", ni->address);
 
 	ni = ci->from_nat_node;
-	sprintf(snode_address_nat, "%pM", ni->address);
+	snprintf(snode_address_nat, sizeof(snode_address_nat), "%pM", ni->address);
 
 	direction = ci->direction;
 	ip_version = ci->ip_version;
@@ -8622,7 +8627,7 @@ int ecm_db_mapping_state_get(struct ecm_state_file_instance *sfi, struct ecm_db_
 {
 	int result;
 	int port;
-	char address[25];
+	char address[ECM_IP_ADDR_STR_BUFF_SIZE];
 	int tcp_from;
 	int tcp_to;
 	int udp_from;
@@ -8752,7 +8757,7 @@ EXPORT_SYMBOL(ecm_db_mapping_state_get);
 int ecm_db_host_state_get(struct ecm_state_file_instance *sfi, struct ecm_db_host_instance *hi)
 {
 	int result;
-	char address[50];
+	char address[ECM_IP_ADDR_STR_BUFF_SIZE];
 #ifdef ECM_DB_XREF_ENABLE
 	int mapping_count;
 #endif
@@ -8829,7 +8834,7 @@ EXPORT_SYMBOL(ecm_db_host_state_get);
 int ecm_db_node_state_get(struct ecm_state_file_instance *sfi, struct ecm_db_node_instance *ni)
 {
 	int result;
-	char address[25];
+	char address[ECM_MAC_ADDR_STR_BUFF_SIZE];
 #ifdef ECM_DB_XREF_ENABLE
 	int from_connections_count;
 	int to_connections_count;
@@ -8865,7 +8870,7 @@ int ecm_db_node_state_get(struct ecm_state_file_instance *sfi, struct ecm_db_nod
 	spin_unlock_bh(&ecm_db_lock);
 #endif
 	time_added = ni->time_added;
-	sprintf(address, "%pM", ni->address);
+	snprintf(address, sizeof(address), "%pM", ni->address);
 
 #ifdef ECM_DB_ADVANCED_STATS_ENABLE
 	ecm_db_node_data_stats_get(ni, &from_data_total, &to_data_total,

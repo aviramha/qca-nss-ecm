@@ -44,7 +44,9 @@ typedef uint32_t ip_addr_t[4];
 
 #define ECM_IP_ADDR_NULL {0, 0, 0, 0}
 
-#define ECM_IP_ADDR_STRING_BUFFER_SIZE 40
+#define ECM_MAC_ADDR_STR_BUFF_SIZE		18	/* This is the size of a string in the format of aa:bb:cc:dd:ee:ff */
+#define ECM_IP_ADDR_STR_BUFF_SIZE		40	/* This is the size of a string in the format of aaaa:bbbb:cccc:0000:1111:dddd:eeee:ffff */
+#define ECM_IP_ADDR_DOT_FMT_STR_BUFF_SIZE	16	/* This is the size of a string in the format of 192.168.100.200 */
 
 /*
  * Type checking functions for various forms of IP address
@@ -344,12 +346,12 @@ static inline void ecm_ip_addr_to_string(char *str, ip_addr_t a)
 {
 #ifdef ECM_IPV6_ENABLE
 	if (!ECM_IP_ADDR_IS_V4(a)) {
-		sprintf(str, ECM_IP_ADDR_OCTAL_FMT, ECM_IP_ADDR_TO_OCTAL(a));
+		snprintf(str, ECM_IP_ADDR_STR_BUFF_SIZE, ECM_IP_ADDR_OCTAL_FMT, ECM_IP_ADDR_TO_OCTAL(a));
 		return;
 	}
 #endif
 
-	sprintf(str, ECM_IP_ADDR_DOT_FMT, ECM_IP_ADDR_TO_DOT(a));
+	snprintf(str, ECM_IP_ADDR_DOT_FMT_STR_BUFF_SIZE, ECM_IP_ADDR_DOT_FMT, ECM_IP_ADDR_TO_DOT(a));
 }
 
 /*
