@@ -283,6 +283,10 @@ hyfi_classifier_out:
 	 * Fast path, already accelerated or ignored
 	 */
 	if (chfi->hyfi_state & (ECM_CLASSIFIER_HYFI_STATE_REGISTERED | ECM_CLASSIFIER_HYFI_STATE_IGNORE)) {
+		if (chfi->hyfi_state & ECM_CLASSIFIER_HYFI_STATE_REGISTERED) {
+			DEBUG_INFO("%p: Regen of Flow serial: %d Flow hash: 0x%02x (@%lu)\n",
+				aci, chfi->flow.ecm_serial, chfi->flow.hash, jiffies);
+		}
 		goto hyfi_classifier_done;
 	}
 
@@ -305,9 +309,11 @@ hyfi_classifier_out:
 	memcpy(&chfi->flow.sa, eth_hdr(skb)->h_source, ETH_ALEN);
 	memcpy(&chfi->flow.da, eth_hdr(skb)->h_dest, ETH_ALEN);
 
-	DEBUG_INFO("Flow serial: %d\nFlow hash: 0x%02x, priority 0x%08x, flag: %d\nSA: %pM\nDA: %pM\n\n",
-			chfi->flow.ecm_serial, chfi->flow.hash, chfi->flow.priority, chfi->flow.flag,
-			chfi->flow.sa, chfi->flow.da);
+	DEBUG_INFO("%p: Flow serial: %d\nFlow hash: 0x%02x, priority 0x%08x, "
+			"flag: %d\nSA: %pM\nDA: %pM (@%lu)\n\n",
+			aci, chfi->flow.ecm_serial, chfi->flow.hash,
+			chfi->flow.priority, chfi->flow.flag,
+			chfi->flow.sa, chfi->flow.da, jiffies);
 
 	chfi->hyfi_state = ECM_CLASSIFIER_HYFI_STATE_REGISTERED;
 
@@ -460,7 +466,6 @@ static void ecm_classifier_hyfi_sync_to_v4(struct ecm_classifier_instance *aci, 
 			&from_packets, &to_packets,
 			&from_bytes_dropped, &to_bytes_dropped,
 			&from_packets_dropped, &to_packets_dropped);
-	ecm_db_connection_deref(ci);
 
 	DEBUG_INFO("UPDATE STATS: Flow serial: %d\npriority 0x%08x, flag: %d\nSA: %pM\nDA: %pM\n\n",
 			chfi->flow.ecm_serial, chfi->flow.priority, chfi->flow.flag,
@@ -537,12 +542,38 @@ static void ecm_classifier_hyfi_sync_to_v4(struct ecm_classifier_instance *aci, 
 
 	if (!hyfi_ecm_port_matches(&chfi->flow, to_system_index, from_system_index)) {
 		struct ecm_front_end_connection_instance *feci;
-		DEBUG_INFO("%p: Mismatch in egress port between HyFi and ECM, regenerate\n",
-			ci);
+		unsigned long start_time, end_time;
+
 		feci = ecm_db_connection_front_end_get_and_ref(ci);
-		feci->regenerate(feci, ci);
+		start_time = feci->stats.cmd_time_begun;
+		end_time = feci->stats.cmd_time_completed;
+		if (chfi->flow.cmd_time_begun != start_time &&
+			chfi->flow.cmd_time_completed != end_time) {
+
+			/*
+			 * Only do another regenerate operation if the timestamps have
+			 * changed (indicating that the front-end has completed the
+			 * previously requested operation)
+			 */
+			feci->regenerate(feci, ci);
+			DEBUG_INFO("%p: Mismatch for %u egress port between HyFi and "
+				"ECM,\nregenerate start %lu, end %lu, "
+				"previous start %lu, end %lu (@%u)\n",
+				ci, chfi->flow.ecm_serial, start_time, end_time,
+				chfi->flow.cmd_time_begun, chfi->flow.cmd_time_completed,
+				time_now);
+			chfi->flow.cmd_time_begun = start_time;
+			chfi->flow.cmd_time_completed = end_time;
+		} else {
+			DEBUG_INFO("%p: Mismatch for %u egress port between HyFi and "
+				"ECM,\nbut previous regeneration in progress start "
+				" %lu, end %lu (@%u)\n",
+				ci, chfi->flow.ecm_serial, start_time, end_time, time_now);
+		}
 		feci->deref(feci);
 	}
+
+	ecm_db_connection_deref(ci);
 
 	if (ret_fwd < 0 || ret_rev < 0) {
 		DEBUG_ERROR("%p: Error updating stats", aci);
@@ -849,6 +880,8 @@ static ssize_t ecm_classifier_hyfi_set_command(struct file *file,
 	uint32_t serial;
 	struct ecm_db_connection_instance *ci;
 	struct ecm_front_end_connection_instance *feci;
+	struct ecm_classifier_hyfi_instance *chfi;
+	struct ecm_classifier_instance *classi;
 
 	/*
 	 * Check if we are enabled
@@ -928,20 +961,49 @@ static ssize_t ecm_classifier_hyfi_set_command(struct file *file,
 	DEBUG_TRACE("Connection found: %p\n", ci);
 
 	/*
+	 * Get the Hy-Fi classifier instance
+	 */
+	classi = ecm_db_connection_assigned_classifier_find_and_ref(
+		ci, ECM_CLASSIFIER_TYPE_HYFI);
+
+	if (!classi) {
+		DEBUG_WARN("%p: No Hy-Fi classifier instance\n", ci);
+		ecm_db_connection_deref(ci);
+		return -ENOMEM;
+	}
+
+	chfi = (struct ecm_classifier_hyfi_instance *)classi;
+
+	/*
 	 * Now action the command
 	 */
 	switch (cmd) {
 	case 's':
 	case 'f':
+
 		/*
-		 * Decelerate the connection
+		 * Regenerate the connection
 		 */
-		DEBUG_TRACE("%p: Force regeneration\n", ci);
 		feci = ecm_db_connection_front_end_get_and_ref(ci);
+
+		/*
+		 * Store the begin / end timestamps here (from the previous
+		 * operation). Will not attempt another regen if
+		 * ports don't match until this regenerate is completed (which
+		 * can be detected by a change in the timestamps).
+		 */
+		chfi->flow.cmd_time_begun = feci->stats.cmd_time_begun;
+		chfi->flow.cmd_time_completed = feci->stats.cmd_time_completed;
 		feci->regenerate(feci, ci);
 		feci->deref(feci);
+
+		DEBUG_TRACE("%p: Force regeneration %u start_time %lu end_time"
+			" %lu (@%lu)\n", ci, serial,
+			chfi->flow.cmd_time_begun,
+			chfi->flow.cmd_time_completed, jiffies);
 		break;
 	}
+	classi->deref(classi);
 	ecm_db_connection_deref(ci);
 
 	return sz;
