@@ -63,6 +63,7 @@
 #include <net/netfilter/nf_conntrack_l3proto.h>
 #include <net/netfilter/nf_conntrack_zones.h>
 #include <net/netfilter/nf_conntrack_core.h>
+#include <linux/netfilter_ipv6/ip6_tables.h>
 #include <net/netfilter/ipv4/nf_conntrack_ipv4.h>
 #include <net/netfilter/ipv4/nf_defrag_ipv4.h>
 #ifdef ECM_INTERFACE_VLAN_ENABLE
@@ -3497,12 +3498,52 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 
 	/*
 	 * Check if source and dest dev are same.
-	 * For the forwarded flows which involve tunnels this will happen when called from input hook.
 	 */
 	if (src_dev == dest_dev) {
+		bool skip = false;
+
 		DEBUG_TRACE("Protocol is :%d source dev and dest dev are same\n", protocol);
-		if (((ip_version == 4) && ((protocol == IPPROTO_IPV6) || (protocol == IPPROTO_ESP)))
-				|| ((ip_version == 6) && (protocol == IPPROTO_IPIP))) {
+
+		switch (ip_version) {
+		case 4:
+			if ((protocol == IPPROTO_IPV6) || (protocol == IPPROTO_ESP)) {
+				skip = true;
+				break;
+			}
+
+			if ((protocol == IPPROTO_UDP) && (udp_hdr(skb)->dest == htons(4500))) {
+				skip = true;
+				break;
+			}
+
+			break;
+
+		case 6:
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 5, 0))
+			protocol = ipv6_find_hdr(skb, (unsigned int *)layer4hdr, -1, NULL, NULL);
+#else
+			protocol = ipv6_find_hdr(skb, (unsigned int *)layer4hdr, -1, NULL);
+#endif
+
+			if (protocol < 0) {
+				skip = true;
+				break;
+			}
+
+			if ((protocol == IPPROTO_IPIP) || (protocol == IPPROTO_ESP)) {
+				skip = true;
+				break;
+			}
+
+			break;
+
+		default:
+			DEBUG_WARN("IP version = %d, Protocol = %d: Corrupted packet entered ecm\n", ip_version, protocol);
+			skip = true;
+			break;
+		}
+
+		if (skip) {
 			/*
 			 * This happens from the input hook
 			 * We do not want to create a connection entry for this
