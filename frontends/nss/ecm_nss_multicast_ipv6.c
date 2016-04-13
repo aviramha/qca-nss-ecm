@@ -1213,6 +1213,7 @@ static void ecm_nss_multicast_ipv6_connection_accelerate(struct ecm_front_end_co
 	 */
 	create->qos_tag = (uint32_t)pr->flow_qos_tag;
 
+#ifdef ECM_CLASSIFIER_DSCP_ENABLE
 	/*
 	 * DSCP information?
 	 */
@@ -1220,7 +1221,7 @@ static void ecm_nss_multicast_ipv6_connection_accelerate(struct ecm_front_end_co
 			create->egress_dscp = pr->flow_dscp;
 			create->valid_flags |= NSS_IPV6_MC_RULE_CREATE_FLAG_DSCP_MARKING_VALID;
 	}
-
+#endif
 	ecm_db_connection_to_node_address_get(feci->ci, dest_mac);
 	memcpy(create->dest_mac, dest_mac, ETH_ALEN);
 
@@ -3006,6 +3007,7 @@ unsigned int ecm_nss_multicast_ipv6_connection_process(struct net_device *out_de
 			prevalent_pr.return_qos_tag = aci_pr.return_qos_tag;
 		}
 
+#ifdef ECM_CLASSIFIER_DSCP_ENABLE
 		/*
 		 * If any classifier denied DSCP remarking then that overrides every classifier
 		 */
@@ -3028,6 +3030,7 @@ unsigned int ecm_nss_multicast_ipv6_connection_process(struct net_device *out_de
 				prevalent_pr.return_dscp = aci_pr.return_dscp;
 			}
 		}
+#endif
 	}
 	ecm_db_connection_assignments_release(assignment_count, assignments);
 

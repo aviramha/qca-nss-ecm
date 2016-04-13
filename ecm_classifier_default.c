@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2014-2015, The Linux Foundation.  All rights reserved.
+ * Copyright (c) 2014-2016, The Linux Foundation.  All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -109,7 +109,7 @@ static int ecm_classifier_default_count = 0;			/* Tracks number of instances all
  */
 static ecm_classifier_acceleration_mode_t ecm_classifier_default_accel_mode = ECM_CLASSIFIER_ACCELERATION_MODE_ACCEL;
 								/* Cause connections whose hosts are both on-link to be accelerated */
-static bool ecm_classifier_default_enabled = true;		/* When disabled the qos algorithm will not be applied to skb's */
+static int ecm_classifier_default_enabled = 1;		/* When disabled the qos algorithm will not be applied to skb's */
 
 /*
  * Management thread control
@@ -650,7 +650,7 @@ int ecm_classifier_default_init(struct dentry *dentry)
 		return -1;
 	}
 
-	if (!debugfs_create_bool("enabled", S_IRUGO | S_IWUSR, ecm_classifier_default_dentry,
+	if (!debugfs_create_u32("enabled", S_IRUGO | S_IWUSR, ecm_classifier_default_dentry,
 					(u32 *)&ecm_classifier_default_enabled)) {
 		DEBUG_ERROR("Failed to create ecm deafult classifier enabled file in debugfs\n");
 		debugfs_remove_recursive(ecm_classifier_default_dentry);

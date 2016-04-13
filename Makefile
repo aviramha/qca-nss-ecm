@@ -47,8 +47,10 @@ ccflags-$(ECM_FRONT_END_NSS_ENABLE) += -DECM_FRONT_END_NSS_ENABLE
 # Define ECM_FRONT_END_SFE_ENABLE=y in order to select
 # sfe as ECM's front end.
 # #############################################################################
+ifeq ($(findstring 4.4., $(KERNELVERSION)),)
 ifeq ($(ECM_FRONT_END_SFE_ENABLE),)
 ECM_FRONT_END_SFE_ENABLE=y
+endif
 endif
 ecm-$(ECM_FRONT_END_SFE_ENABLE) += frontends/sfe/ecm_sfe_ipv4.o
 ecm-$(ECM_FRONT_END_SFE_ENABLE) += frontends/sfe/ecm_sfe_ported_ipv4.o
@@ -59,8 +61,10 @@ ccflags-$(ECM_FRONT_END_SFE_ENABLE) += -DECM_FRONT_END_SFE_ENABLE
 # Define ECM_INTERFACE_BOND_ENABLE=y in order to enable
 # Bonding / Link Aggregation support.
 # #############################################################################
+ifeq ($(findstring 4.4., $(KERNELVERSION)),)
 ifeq ($(ECM_FRONT_END_NSS_ENABLE), y)
 ECM_INTERFACE_BOND_ENABLE=y
+endif
 endif
 ecm-$(ECM_INTERFACE_BOND_ENABLE) += frontends/nss/ecm_nss_bond_notifier.o
 ccflags-$(ECM_INTERFACE_BOND_ENABLE) += -DECM_INTERFACE_BOND_ENABLE
@@ -170,14 +174,18 @@ ccflags-$(ECM_IPV6_ENABLE) += -DECM_IPV6_ENABLE
 # #############################################################################
 # Define ECM_CLASSIFIER_NL_ENABLE=y in order to enable NL classifier.
 # #############################################################################
+ifeq ($(findstring 4.4., $(KERNELVERSION)),)
 ECM_CLASSIFIER_NL_ENABLE=y
+endif
 ecm-$(ECM_CLASSIFIER_NL_ENABLE) += ecm_classifier_nl.o
 ccflags-$(ECM_CLASSIFIER_NL_ENABLE) += -DECM_CLASSIFIER_NL_ENABLE
 
 # #############################################################################
 # Define ECM_CLASSIFIER_DSCP_ENABLE=y in order to enable DSCP classifier.
 # #############################################################################
+ifeq ($(findstring 4.4., $(KERNELVERSION)),)
 ECM_CLASSIFIER_DSCP_ENABLE=y
+endif
 ecm-$(ECM_CLASSIFIER_DSCP_ENABLE) += ecm_classifier_dscp.o
 ccflags-$(ECM_CLASSIFIER_DSCP_ENABLE) += -DECM_CLASSIFIER_DSCP_ENABLE
 

@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2014-2015, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2016, The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -87,7 +87,7 @@
 /*
  * Locking of the classifier - concurrency control
  */
-static DEFINE_SPINLOCK(ecm_nss_conntrack_notifier_lock);				/* Protect against SMP access between netfilter, events and private threaded function. */
+static DEFINE_SPINLOCK(ecm_nss_conntrack_notifier_lock __attribute__((unused)));				/* Protect against SMP access between netfilter, events and private threaded function. */
 
 /*
  * Debugfs dentry object.
@@ -186,7 +186,7 @@ EXPORT_SYMBOL(ecm_nss_conntrack_notifier_stop);
  */
 int ecm_nss_conntrack_notifier_init(struct dentry *dentry)
 {
-	int result;
+	int result __attribute__((unused));
 	DEBUG_INFO("ECM Conntrack Notifier init\n");
 
 	ecm_nss_conntrack_notifier_dentry = debugfs_create_dir("ecm_nss_conntrack_notifier", dentry);

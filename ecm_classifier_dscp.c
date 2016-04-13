@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2014-2015, The Linux Foundation.  All rights reserved.
+ * Copyright (c) 2014-2016, The Linux Foundation.  All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -96,7 +96,7 @@ struct ecm_classifier_dscp_instance {
 /*
  * Operational control
  */
-static bool ecm_classifier_dscp_enabled = true;			/* Operational behaviour */
+static int ecm_classifier_dscp_enabled = 1;			/* Operational behaviour */
 
 /*
  * Management thread control
@@ -644,7 +644,7 @@ int ecm_classifier_dscp_init(struct dentry *dentry)
 		return -1;
 	}
 
-	if (!debugfs_create_bool("enabled", S_IRUGO | S_IWUSR, ecm_classifier_dscp_dentry,
+	if (!debugfs_create_u32("enabled", S_IRUGO | S_IWUSR, ecm_classifier_dscp_dentry,
 					(u32 *)&ecm_classifier_dscp_enabled)) {
 		DEBUG_ERROR("Failed to create dscp enabled file in debugfs\n");
 		debugfs_remove_recursive(ecm_classifier_dscp_dentry);
