@@ -12162,7 +12162,7 @@ int ecm_db_init(struct dentry *dentry)
 	 * Get a random seed for jhash()
 	 */
 	get_random_bytes(&ecm_db_jhash_rnd, sizeof(ecm_db_jhash_rnd));
-	DEBUG_INFO("jhash random seed: %u\n", ecm_db_jhash_rnd);
+	printk(KERN_INFO "ECM database jhash random seed: 0x%x\n", ecm_db_jhash_rnd);
 
 	if (!debugfs_create_u32("connection_count", S_IRUGO, ecm_db_dentry,
 					(u32 *)&ecm_db_connection_count)) {
