@@ -2289,7 +2289,7 @@ unsigned int ecm_nss_ported_ipv4_process(struct net_device *out_dev, struct net_
 		 * NOTE: Default classifier is a special case considered previously
 		 */
 		for (classifier_type = ECM_CLASSIFIER_TYPE_DEFAULT + 1; classifier_type < ECM_CLASSIFIER_TYPES; ++classifier_type) {
-			struct ecm_classifier_instance *aci = ecm_nss_ipv4_assign_classifier(nci, classifier_type);
+			struct ecm_classifier_instance *aci = ecm_classifier_assign_classifier(nci, classifier_type);
 			if (aci) {
 				aci->deref(aci);
 			} else {

@@ -1841,7 +1841,7 @@ unsigned int ecm_sfe_non_ported_ipv6_process(struct net_device *out_dev,
 		 * NOTE: Default classifier is a special case considered previously
 		 */
 		for (classifier_type = ECM_CLASSIFIER_TYPE_DEFAULT + 1; classifier_type < ECM_CLASSIFIER_TYPES; ++classifier_type) {
-			struct ecm_classifier_instance *aci = ecm_sfe_ipv6_assign_classifier(nci, classifier_type);
+			struct ecm_classifier_instance *aci = ecm_classifier_assign_classifier(nci, classifier_type);
 			if (aci) {
 				aci->deref(aci);
 			} else {

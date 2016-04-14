@@ -273,5 +273,6 @@ static inline int ecm_classifier_process_response_state_get(struct ecm_state_fil
 }
 #endif
 
-
+extern struct ecm_classifier_instance *ecm_classifier_assign_classifier(struct ecm_db_connection_instance *ci, ecm_classifier_type_t type);
+extern bool ecm_classifier_reclassify(struct ecm_db_connection_instance *ci, int assignment_count, struct ecm_classifier_instance *assignments[]);
 

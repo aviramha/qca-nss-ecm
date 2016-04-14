@@ -166,8 +166,6 @@ static inline bool ecm_sfe_ipv4_accel_pending_clear(struct ecm_front_end_connect
 extern int ecm_sfe_ipv4_conntrack_event(unsigned long events, struct nf_conn *ct);
 extern void ecm_sfe_ipv4_accel_done_time_update(struct ecm_front_end_connection_instance *feci);
 extern void ecm_sfe_ipv4_decel_done_time_update(struct ecm_front_end_connection_instance *feci);
-extern struct ecm_classifier_instance *ecm_sfe_ipv4_assign_classifier(struct ecm_db_connection_instance *ci, ecm_classifier_type_t type);
-extern bool ecm_sfe_ipv4_reclassify(struct ecm_db_connection_instance *ci, int assignment_count, struct ecm_classifier_instance *assignments[]);
 extern void ecm_sfe_ipv4_connection_regenerate(struct ecm_db_connection_instance *ci, ecm_tracker_sender_type_t sender,
 							struct net_device *out_dev, struct net_device *out_dev_nat,
 							struct net_device *in_dev, struct net_device *in_dev_nat, __be16 *layer4hdr, struct sk_buff *skb);

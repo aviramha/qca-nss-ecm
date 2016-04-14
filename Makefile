@@ -35,6 +35,7 @@ ecm-y := \
 	 frontends/ecm_front_end_ipv6.o \
 	 frontends/ecm_front_end_common.o \
 	 ecm_db.o \
+	 ecm_classifier.o \
 	 ecm_classifier_default.o \
 	 ecm_interface.o \
 	 ecm_init.o
@@ -284,6 +285,7 @@ ccflags-$(ECM_BAND_STEERING_ENABLE) += -DECM_BAND_STEERING_ENABLE
 # file.
 # By turning off debugs you gain maximum ECM performance.
 # #############################################################################
+ccflags-y += -DECM_CLASSIFIER_DEBUG_LEVEL=1
 ccflags-y += -DECM_CLASSIFIER_DSCP_DEBUG_LEVEL=1
 ccflags-y += -DECM_CLASSIFIER_HYFI_DEBUG_LEVEL=1
 ccflags-y += -DECM_CLASSIFIER_PCC_DEBUG_LEVEL=1
