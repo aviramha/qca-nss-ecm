@@ -289,16 +289,6 @@ struct ecm_db_node_instance *ecm_nss_ipv6_node_establish_and_ref(struct ecm_fron
 			DEBUG_TRACE("PPPoL2TPV2 interface unsupported\n");
 			return NULL;
 #endif
-		case ECM_DB_IFACE_TYPE_VLAN:
-#ifdef ECM_INTERFACE_VLAN_ENABLE
-			/*
-			 * VLAN handled same along with bridge etc.
-			 */
-#else
-			DEBUG_TRACE("VLAN interface unsupported\n");
-			return NULL;
-#endif
-
 		case ECM_DB_IFACE_TYPE_MAP_T:
 #ifdef ECM_INTERFACE_MAP_T_ENABLE
 			ip6_inetdev = ip6_dst_idev(skb_dst(skb));
@@ -314,7 +304,15 @@ struct ecm_db_node_instance *ecm_nss_ipv6_node_establish_and_ref(struct ecm_fron
 			DEBUG_TRACE("MAP-T interface unsupported\n");
 			return NULL;
 #endif
-
+		case ECM_DB_IFACE_TYPE_VLAN:
+#ifdef ECM_INTERFACE_VLAN_ENABLE
+			/*
+			 * VLAN handled same along with bridge etc.
+			 */
+#else
+			DEBUG_TRACE("VLAN interface unsupported\n");
+			return NULL;
+#endif
 		case ECM_DB_IFACE_TYPE_ETHERNET:
 		case ECM_DB_IFACE_TYPE_LAG:
 		case ECM_DB_IFACE_TYPE_BRIDGE:
