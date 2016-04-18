@@ -2957,7 +2957,9 @@ int32_t ecm_interface_multicast_heirarchy_construct_routed(struct ecm_front_end_
 				return 0;
 			}
 
-			if_num = ecm_interface_multicast_check_for_src_ifindex(mc_dst_if_index, if_num, in_dev->ifindex);
+			if (!mfc_update) {
+				if_num = ecm_interface_multicast_check_for_src_ifindex(mc_dst_if_index, if_num, in_dev->ifindex);
+			}
 
 			for (br_if = 0; br_if < if_num; br_if++) {
 				mc_br_slave_dev = dev_get_by_index(&init_net, mc_dst_if_index[br_if]);
