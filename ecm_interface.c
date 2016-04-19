@@ -935,21 +935,13 @@ void ecm_interface_send_arp_request(struct net_device *dest_dev, ip_addr_t dest_
 	/*
 	 * Possible ARP does not know the address yet
 	 */
-#if (LINUX_VERSION_CODE > KERNEL_VERSION(3, 6, 0))
 	struct neighbour *neigh;
-#endif
 	__be32 ipv4_addr;
-	__be32 src_ip;
 
 	/*
-	 * Issue an ARP request for it, select the src_ip from which to issue the request.
+	 * Convert the ECM IP address type to network order IPv4 address.
 	 */
 	ECM_IP_ADDR_TO_NIN4_ADDR(ipv4_addr, dest_addr);
-	src_ip = inet_select_addr(dest_dev, ipv4_addr, RT_SCOPE_LINK);
-	if (!src_ip) {
-		DEBUG_TRACE("Failed to lookup IP for %pI4\n", &ipv4_addr);
-		return;
-	}
 
 	/*
 	 * If we have a GW for this address, then we have to send ARP request to the GW
@@ -958,22 +950,22 @@ void ecm_interface_send_arp_request(struct net_device *dest_dev, ip_addr_t dest_
 		ECM_IP_ADDR_TO_NIN4_ADDR(ipv4_addr, gw_addr);
 	}
 
-#if (LINUX_VERSION_CODE > KERNEL_VERSION(3, 6, 0))
 	/*
 	 * If we don't have this neighbor, create it before sending the arp request,
 	 * so that when we receive the arp reply we update the neigh entry.
 	 */
 	neigh = neigh_lookup(&arp_tbl, &ipv4_addr, dest_dev);
 	if (!neigh) {
-		__neigh_create(&arp_tbl, &ipv4_addr, dest_dev, false);
-	} else {
-		neigh_release(neigh);
+		neigh = neigh_create(&arp_tbl, &ipv4_addr, dest_dev);
+		if (IS_ERR(neigh)) {
+			DEBUG_WARN("Unable to create ARP request neigh for %pI4\n", &ipv4_addr);
+			return;
+		}
 	}
-#endif
-	DEBUG_TRACE("Send ARP for %pI4 using src_ip as %pI4\n", &ipv4_addr, &src_ip);
-	arp_send(ARPOP_REQUEST, ETH_P_ARP, ipv4_addr, dest_dev, src_ip, NULL, NULL, NULL);
 
-	return;
+	DEBUG_TRACE("Send ARP for %pI4\n", &ipv4_addr);
+	neigh_event_send(neigh, NULL);
+	neigh_release(neigh);
 }
 EXPORT_SYMBOL(ecm_interface_send_arp_request);
 
