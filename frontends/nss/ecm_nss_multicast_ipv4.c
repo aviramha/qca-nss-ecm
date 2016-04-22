@@ -2795,7 +2795,7 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 
 		DEBUG_TRACE("%p: Create source mapping\n", nci);
 		dest_mi = ecm_nss_ipv4_mapping_establish_and_ref(ip_dest_addr, dest_port);
-		if (!src_mi) {
+		if (!dest_mi) {
 			for (vif = 0; vif < ECM_DB_MULTICAST_IF_MAX; vif++) {
 				to_list_single = ecm_db_multicast_if_heirarchy_get(to_list, vif);
 				ecm_db_multicast_copy_if_heirarchy(to_list_temp, to_list_single);
@@ -2852,7 +2852,7 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 			ecm_db_node_deref(src_ni);
 			ecm_db_node_deref(dest_ni);
 			ecm_db_mapping_deref(src_mi);
-			ecm_db_mapping_deref(src_mi);
+			ecm_db_mapping_deref(dest_mi);
 			feci->deref(feci);
 			ecm_db_connection_deref(nci);
 			ecm_db_multicast_tuple_instance_deref(tuple_instance);
