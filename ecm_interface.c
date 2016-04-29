@@ -2642,7 +2642,7 @@ static uint32_t ecm_interface_multicast_heirarchy_construct_single(struct ecm_fr
 						ECM_IP_ADDR_TO_NIN6_ADDR(dest_addr6, dest_addr);
 						next_dev = bond_get_tx_dev(NULL, src_mac_addr, dest_mac_addr,
 									   src_addr6.s6_addr, dest_addr6.s6_addr,
-									   htons((uint16_t)ETH_P_IPV6), dest_dev, NULL);
+									   htons((uint16_t)ETH_P_IPV6), dest_dev, layer4hdr);
 					}
 
 					if (!(next_dev && netif_carrier_ok(next_dev))) {
@@ -3825,7 +3825,7 @@ lag_success:
 						ECM_IP_ADDR_TO_NIN6_ADDR(dest_addr6, dest_addr);
 						next_dev = bond_get_tx_dev(NULL, src_mac_addr, dest_mac_addr,
 									   src_addr6.s6_addr, dest_addr6.s6_addr,
-									   htons((uint16_t)ETH_P_IPV6), dest_dev, NULL);
+									   htons((uint16_t)ETH_P_IPV6), dest_dev, layer4hdr);
 					}
 
 					if (next_dev && netif_carrier_ok(next_dev)) {
@@ -4590,7 +4590,7 @@ int32_t ecm_interface_multicast_from_heirarchy_construct(struct ecm_front_end_co
 						ECM_IP_ADDR_TO_NIN6_ADDR(dest_addr6, dest_addr);
 						next_dev = bond_get_tx_dev(NULL, src_mac_addr, dest_mac_addr,
 									   src_addr6.s6_addr, dest_addr6.s6_addr,
-									   htons((uint16_t)ETH_P_IPV6), dest_dev, NULL);
+									   htons((uint16_t)ETH_P_IPV6), dest_dev, layer4hdr);
 					}
 
 					if (next_dev && netif_carrier_ok(next_dev)) {
