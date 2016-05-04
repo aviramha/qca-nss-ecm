@@ -3519,17 +3519,6 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 			break;
 
 		case 6:
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 5, 0))
-			protocol = ipv6_find_hdr(skb, (unsigned int *)layer4hdr, -1, NULL, NULL);
-#else
-			protocol = ipv6_find_hdr(skb, (unsigned int *)layer4hdr, -1, NULL);
-#endif
-
-			if (protocol < 0) {
-				skip = true;
-				break;
-			}
-
 			if ((protocol == IPPROTO_IPIP) || (protocol == IPPROTO_ESP)) {
 				skip = true;
 				break;
