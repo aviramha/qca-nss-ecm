@@ -2078,6 +2078,8 @@ unsigned int ecm_sfe_ported_ipv6_process(struct net_device *out_dev,
 			}
 		}
 
+		ecm_db_front_end_instance_ref_and_set(nci, feci);
+
 		/*
 		 * Now add the connection into the database.
 		 * NOTE: In an SMP situation such as ours there is a possibility that more than one packet for the same
@@ -2111,7 +2113,7 @@ unsigned int ecm_sfe_ported_ipv6_process(struct net_device *out_dev,
 			 * Add the new connection we created into the database
 			 * NOTE: assign to a short timer group for now - it is the assigned classifiers responsibility to do this
 			 */
-			ecm_db_connection_add(nci, feci, src_mi, dest_mi, src_mi, dest_mi,
+			ecm_db_connection_add(nci, src_mi, dest_mi, src_mi, dest_mi,
 					src_ni, dest_ni, src_ni, dest_ni,
 					6, protocol, ecm_dir,
 					NULL /* final callback */,

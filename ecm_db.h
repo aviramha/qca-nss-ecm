@@ -22,6 +22,7 @@
 
 #include <net/netfilter/nf_conntrack.h>
 
+void ecm_db_front_end_instance_ref_and_set(struct ecm_db_connection_instance *ci, struct ecm_front_end_connection_instance *feci);
 struct ecm_db_connection_instance *ecm_db_connection_ipv4_from_ct_get_and_ref(struct nf_conn *ct);
 struct ecm_db_connection_instance *ecm_db_connection_ipv6_from_ct_get_and_ref(struct nf_conn *ct);
 uint32_t ecm_db_time_get(void);
@@ -312,7 +313,7 @@ void ecm_db_iface_add_tunipip6(struct ecm_db_iface_instance *ii, struct ecm_db_i
 void ecm_db_node_add(struct ecm_db_node_instance *ni, struct ecm_db_iface_instance *ii, uint8_t *address, ecm_db_node_final_callback_t final, void *arg);
 void ecm_db_host_add(struct ecm_db_host_instance *hi, ip_addr_t address, bool on_link, ecm_db_host_final_callback_t final, void *arg);
 void ecm_db_mapping_add(struct ecm_db_mapping_instance *mi, struct ecm_db_host_instance *hi, int port, ecm_db_mapping_final_callback_t final, void *arg);
-void ecm_db_connection_add(struct ecm_db_connection_instance *ci, struct ecm_front_end_connection_instance *feci, struct ecm_db_mapping_instance *mapping_from, struct ecm_db_mapping_instance *mapping_to, struct ecm_db_mapping_instance *mapping_nat_from, struct ecm_db_mapping_instance *mapping_nat_to, struct ecm_db_node_instance *from_node, struct ecm_db_node_instance *to_node, struct ecm_db_node_instance *from_nat_node, struct ecm_db_node_instance *to_nat_node, int ip_version, int protocol, ecm_db_direction_t dir, ecm_db_connection_final_callback_t final, ecm_db_connection_defunct_callback_t defunct, ecm_db_timer_group_t tg, bool is_routed, void *arg);
+void ecm_db_connection_add(struct ecm_db_connection_instance *ci, struct ecm_db_mapping_instance *mapping_from, struct ecm_db_mapping_instance *mapping_to, struct ecm_db_mapping_instance *mapping_nat_from, struct ecm_db_mapping_instance *mapping_nat_to, struct ecm_db_node_instance *from_node, struct ecm_db_node_instance *to_node, struct ecm_db_node_instance *from_nat_node, struct ecm_db_node_instance *to_nat_node, int ip_version, int protocol, ecm_db_direction_t dir, ecm_db_connection_final_callback_t final, ecm_db_connection_defunct_callback_t defunct, ecm_db_timer_group_t tg, bool is_routed, void *arg);
 
 void ecm_db_listener_ref(struct ecm_db_listener_instance *li);
 void ecm_db_connection_ref(struct ecm_db_connection_instance *ci);

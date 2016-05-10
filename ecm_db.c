@@ -6930,6 +6930,19 @@ void ecm_db_connection_to_nat_interfaces_clear(struct ecm_db_connection_instance
 EXPORT_SYMBOL(ecm_db_connection_to_nat_interfaces_clear);
 
 /*
+ * ecm_db_front_end_instance_ref_and_set()
+ *	Refs and sets the front end instance of connection.
+ */
+void ecm_db_front_end_instance_ref_and_set(struct ecm_db_connection_instance *ci, struct ecm_front_end_connection_instance *feci)
+{
+	DEBUG_CHECK_MAGIC(ci, ECM_DB_CONNECTION_INSTANCE_MAGIC, "%p: magic failed\n", ci);
+
+	feci->ref(feci);
+	ci->feci = feci;
+}
+EXPORT_SYMBOL(ecm_db_front_end_instance_ref_and_set);
+
+/*
  * ecm_db_connection_add()
  *	Add the connection into the database.
  *
@@ -6937,7 +6950,6 @@ EXPORT_SYMBOL(ecm_db_connection_to_nat_interfaces_clear);
  * NOTE: Dir confirms if this is an egressing or ingressing connection.  This applies to firewalling front ends mostly. If INGRESS then mapping_from is the WAN side.  If EGRESS then mapping_to is the WAN side.
  */
 void ecm_db_connection_add(struct ecm_db_connection_instance *ci,
-							struct ecm_front_end_connection_instance *feci,
 							struct ecm_db_mapping_instance *mapping_from, struct ecm_db_mapping_instance *mapping_to,
 							struct ecm_db_mapping_instance *mapping_nat_from, struct ecm_db_mapping_instance *mapping_nat_to,
 							struct ecm_db_node_instance *from_node, struct ecm_db_node_instance *to_node,
@@ -6984,12 +6996,6 @@ void ecm_db_connection_add(struct ecm_db_connection_instance *ci,
 #ifdef ECM_MULTICAST_ENABLE
 	ci->ti = NULL;
 #endif
-
-	/*
-	 * Take reference to the front end
-	 */
-	feci->ref(feci);
-	ci->feci = feci;
 
 	/*
 	 * Ensure default classifier has been assigned this is a must to ensure minimum level of classification
