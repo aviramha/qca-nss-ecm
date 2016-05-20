@@ -5655,6 +5655,68 @@ bool ecm_interface_multicast_find_updates_to_iface_list(struct ecm_db_connection
 EXPORT_SYMBOL(ecm_interface_multicast_find_updates_to_iface_list);
 #endif
 
+#ifdef ECM_DB_XREF_ENABLE
+/*
+ * ecm_interface_neigh_mac_update_notify_event()
+ *	Neighbour mac address change handler.
+ */
+static int ecm_interface_neigh_mac_update_notify_event(struct notifier_block *nb,
+						       unsigned long val,
+						       void *data)
+{
+	struct ecm_db_node_instance *node = NULL;
+	struct neigh_mac_update *nmu = (struct neigh_mac_update *)data;
+
+	/*
+	 * If the old and new mac addresses are equal, do nothing.
+	 * This case shouldn't happen.
+	 */
+	if (!ecm_mac_addr_equal(nmu->old_mac, nmu->update_mac)) {
+		DEBUG_TRACE("old and new mac addresses are equal: %pM\n", nmu->old_mac);
+		return NOTIFY_DONE;
+	}
+
+	/*
+	 * If the old mac is zero, do nothing. When a host joins the arp table first
+	 * time, its old mac comes as zero. We shouldn't handle this case, because
+	 * there is not any connection in ECM db with zero mac.
+	 */
+	if (is_zero_ether_addr(nmu->old_mac)) {
+		DEBUG_WARN("old mac is zero\n");
+		return NOTIFY_DONE;
+	}
+
+	DEBUG_TRACE("old mac: %pM new mac: %pM\n", nmu->old_mac, nmu->update_mac);
+
+	/*
+	 * find node instance corresponding to old mac address
+	 */
+	node = ecm_db_node_find_and_ref((uint8_t *)nmu->old_mac);
+
+	if (unlikely(!node)) {
+		DEBUG_WARN("node address is null\n");
+		return NOTIFY_DONE;
+	}
+	DEBUG_INFO("%p: decelerate the connections for node %pM\n", node, nmu->old_mac);
+	ecm_db_traverse_node_from_connection_list_and_decelerate(node);
+	ecm_db_traverse_node_to_connection_list_and_decelerate(node);
+	ecm_db_traverse_node_from_nat_connection_list_and_decelerate(node);
+	ecm_db_traverse_node_to_nat_connection_list_and_decelerate(node);
+
+	ecm_db_node_deref(node);
+
+	return NOTIFY_DONE;
+}
+
+/*
+ * struct notifier_block ecm_interface_neigh_mac_update_nb
+ *	Registration for neighbour mac address update.
+ */
+static struct notifier_block ecm_interface_neigh_mac_update_nb = {
+	.notifier_call = ecm_interface_neigh_mac_update_notify_event,
+};
+#endif
+
 /*
  * ecm_interface_init()
  */
@@ -5674,6 +5736,9 @@ int ecm_interface_init(void)
 	 */
 	br_fdb_update_register_notify(&ecm_interface_node_br_fdb_update_nb);
 #endif
+#ifdef ECM_DB_XREF_ENABLE
+	neigh_mac_update_register_notify(&ecm_interface_neigh_mac_update_nb);
+#endif
 	return 0;
 }
 EXPORT_SYMBOL(ecm_interface_init);
@@ -5690,6 +5755,10 @@ void ecm_interface_exit(void)
 	spin_unlock_bh(&ecm_interface_lock);
 
 	unregister_netdevice_notifier(&ecm_interface_netdev_notifier);
+#ifdef ECM_DB_XREF_ENABLE
+	neigh_mac_update_unregister_notify(&ecm_interface_neigh_mac_update_nb);
+#endif
+
 #if defined(ECM_DB_XREF_ENABLE) && defined(ECM_BAND_STEERING_ENABLE)
 	/*
 	 * unregister for bridge fdb update events
