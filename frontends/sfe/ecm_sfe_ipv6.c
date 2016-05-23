@@ -1179,7 +1179,9 @@ static void ecm_sfe_ipv6_stats_sync_callback(void *app_data, struct sfe_ipv6_msg
 	feci = ecm_db_connection_front_end_get_and_ref(ci);
 
 	if (sync->flow_tx_packet_count || sync->return_tx_packet_count) {
-		DEBUG_TRACE("%p: flow_tx_packet_count: %u, flow_tx_byte_count: %u, return_tx_packet_count: %u, , return_tx_byte_count: %u\n",
+		DEBUG_TRACE("%p: flow_rx_packet_count: %u, flow_rx_byte_count: %u, return_rx_packet_count: %u, , return_rx_byte_count: %u\n",
+				ci, sync->flow_rx_packet_count, sync->flow_rx_byte_count, sync->return_rx_packet_count, sync->return_rx_byte_count);
+		DEBUG_TRACE("%p: flow_tx_packet_count: %u, flow_tx_byte_count: %u, return_tx_packet_count: %u, return_tx_byte_count: %u\n",
 				ci, sync->flow_tx_packet_count, sync->flow_tx_byte_count, sync->return_tx_packet_count, sync->return_tx_byte_count);
 #ifdef ECM_MULTICAST_ENABLE
 		if (ecm_ip_addr_is_multicast(return_ip)) {
@@ -1277,46 +1279,56 @@ static void ecm_sfe_ipv6_stats_sync_callback(void *app_data, struct sfe_ipv6_msg
 		feci->accel_ceased(feci);
 		break;
 	default:
+		if (ecm_db_connection_is_routed_get(ci)) {
+			/*
+			 * Update the neighbour entry for source IP address
+			 */
+			neigh = ecm_interface_ipv6_neigh_get(flow_ip);
+			if (!neigh) {
+				DEBUG_WARN("Neighbour entry for " ECM_IP_ADDR_OCTAL_FMT " not found\n", ECM_IP_ADDR_TO_OCTAL(flow_ip));
+			} else {
+				if (sync->flow_tx_packet_count) {
+					DEBUG_TRACE("Neighbour entry event send for " ECM_IP_ADDR_OCTAL_FMT ": %p\n", ECM_IP_ADDR_TO_OCTAL(flow_ip), neigh);
+					neigh_event_send(neigh, NULL);
+				}
 
-		/*
-		 * Update the neighbour entry for source IP address
-		 */
-		neigh = ecm_interface_ipv6_neigh_get(flow_ip);
-		if (!neigh) {
-			DEBUG_WARN("Neighbour entry for " ECM_IP_ADDR_OCTAL_FMT " not found\n", ECM_IP_ADDR_TO_OCTAL(flow_ip));
-		} else {
-			DEBUG_TRACE("Neighbour entry for " ECM_IP_ADDR_OCTAL_FMT " update: %p\n", ECM_IP_ADDR_TO_OCTAL(flow_ip), neigh);
-			neigh_update(neigh, NULL, neigh->nud_state, NEIGH_UPDATE_F_WEAK_OVERRIDE);
-			neigh_release(neigh);
-		}
+				neigh_release(neigh);
+			}
 
 #ifdef ECM_MULTICAST_ENABLE
-		/*
-		 * Update the neighbour entry for destination IP address
-		 */
-		if (!ecm_ip_addr_is_multicast(return_ip)) {
+			/*
+			 * Update the neighbour entry for destination IP address
+			 */
+			if (!ecm_ip_addr_is_multicast(return_ip)) {
+				neigh = ecm_interface_ipv6_neigh_get(return_ip);
+				if (!neigh) {
+					DEBUG_WARN("Neighbour entry for " ECM_IP_ADDR_OCTAL_FMT " not found\n", ECM_IP_ADDR_TO_OCTAL(return_ip));
+				} else {
+					if (sync->return_tx_packet_count) {
+						DEBUG_TRACE("Neighbour entry event send for " ECM_IP_ADDR_OCTAL_FMT ": %p\n", ECM_IP_ADDR_TO_OCTAL(return_ip), neigh);
+						neigh_event_send(neigh, NULL);
+					}
+
+					neigh_release(neigh);
+				}
+			}
+#else
+			/*
+			 * Update the neighbour entry for destination IP address
+			 */
 			neigh = ecm_interface_ipv6_neigh_get(return_ip);
 			if (!neigh) {
 				DEBUG_WARN("Neighbour entry for " ECM_IP_ADDR_OCTAL_FMT " not found\n", ECM_IP_ADDR_TO_OCTAL(return_ip));
 			} else {
-				DEBUG_TRACE("Neighbour entry for " ECM_IP_ADDR_OCTAL_FMT " update: %p\n", ECM_IP_ADDR_TO_OCTAL(return_ip), neigh);
-				neigh_update(neigh, NULL, neigh->nud_state, NEIGH_UPDATE_F_WEAK_OVERRIDE);
+				if (sync->return_tx_packet_count) {
+					DEBUG_TRACE("Neighbour entry event send for " ECM_IP_ADDR_OCTAL_FMT ": %p\n", ECM_IP_ADDR_TO_OCTAL(return_ip), neigh);
+					neigh_event_send(neigh, NULL);
+				}
+
 				neigh_release(neigh);
 			}
-		}
-#else
-		/*
-		 * Update the neighbour entry for destination IP address
-		 */
-		neigh = ecm_interface_ipv6_neigh_get(return_ip);
-		if (!neigh) {
-			DEBUG_WARN("Neighbour entry for " ECM_IP_ADDR_OCTAL_FMT " not found\n", ECM_IP_ADDR_TO_OCTAL(return_ip));
-		} else {
-			DEBUG_TRACE("Neighbour entry for " ECM_IP_ADDR_OCTAL_FMT " update: %p\n", ECM_IP_ADDR_TO_OCTAL(return_ip), neigh);
-			neigh_update(neigh, NULL, neigh->nud_state, NEIGH_UPDATE_F_WEAK_OVERRIDE);
-			neigh_release(neigh);
-		}
 #endif
+		}
 	}
 
 	/*
