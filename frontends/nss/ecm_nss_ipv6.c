@@ -205,6 +205,11 @@ struct ecm_db_node_instance *ecm_nss_ipv6_node_establish_and_ref(struct ecm_fron
 #endif
 #ifdef ECM_INTERFACE_MAP_T_ENABLE
 	struct inet6_dev *ip6_inetdev;
+#ifdef ECM_INTERFACE_PPPOE_ENABLE
+	struct ppp_channel *ppp_chan[1];
+	struct pppoe_opt addressing;
+	int px_proto;
+#endif
 #endif
 
 	DEBUG_INFO("Establish node for " ECM_IP_ADDR_OCTAL_FMT "\n", ECM_IP_ADDR_TO_OCTAL(addr));
@@ -290,6 +295,7 @@ struct ecm_db_node_instance *ecm_nss_ipv6_node_establish_and_ref(struct ecm_fron
 			return NULL;
 #endif
 		case ECM_DB_IFACE_TYPE_MAP_T:
+
 #ifdef ECM_INTERFACE_MAP_T_ENABLE
 			ip6_inetdev = ip6_dst_idev(skb_dst(skb));
 			if (!ip6_inetdev) {
@@ -297,9 +303,38 @@ struct ecm_db_node_instance *ecm_nss_ipv6_node_establish_and_ref(struct ecm_fron
 				return NULL;
 			}
 
-			memcpy(node_addr, ip6_inetdev->dev->dev_addr, ETH_ALEN);
+			if (ip6_inetdev->dev->type != ARPHRD_PPP) {
+				DEBUG_TRACE("obtained mac address for %s MAP-T address " ECM_IP_ADDR_OCTAL_FMT "\n", ip6_inetdev->dev->name, ECM_IP_ADDR_TO_OCTAL(addr));
+				memcpy(node_addr, ip6_inetdev->dev->dev_addr, ETH_ALEN);
+				done = true;
+				break;
+			}
+
+#ifndef ECM_INTERFACE_PPPOE_ENABLE
+			DEBUG_TRACE("MAP-T over netdevice %s unsupported\n", ip6_inetdev->dev->name);
+			return NULL;
+#else
+			if (ppp_hold_channels(ip6_inetdev->dev, ppp_chan, 1) != 1) {
+				DEBUG_WARN("MAP-T over netdevice %s unsupported; could not hold ppp channels\n", ip6_inetdev->dev->name);
+				return NULL;
+			}
+
+			px_proto = ppp_channel_get_protocol(ppp_chan[0]);
+			if (px_proto != PX_PROTO_OE) {
+				DEBUG_WARN("MAP-T over PPP protocol %d unsupported\n", px_proto);
+				ppp_release_channels(ppp_chan, 1);
+				return NULL;
+			}
+
+			pppoe_channel_addressing_get(ppp_chan[0], &addressing);
+			DEBUG_TRACE("Obtained mac address for %s MAP-T address " ECM_IP_ADDR_OCTAL_FMT "\n", addressing.dev->name, ECM_IP_ADDR_TO_OCTAL(addr));
+			memcpy(node_addr, addressing.dev->dev_addr, ETH_ALEN);
+			dev_put(addressing.dev);
+			ppp_release_channels(ppp_chan, 1);
 			done = true;
 			break;
+#endif
+
 #else
 			DEBUG_TRACE("MAP-T interface unsupported\n");
 			return NULL;
@@ -901,8 +936,8 @@ static unsigned int ecm_nss_ipv6_ip_process(struct net_device *out_dev, struct n
 							struct sk_buff *skb)
 {
 	struct ecm_tracker_ip_header ip_hdr;
-        struct nf_conn *ct;
-        enum ip_conntrack_info ctinfo;
+	struct nf_conn *ct;
+	enum ip_conntrack_info ctinfo;
 	struct nf_conntrack_tuple orig_tuple;
 	struct nf_conntrack_tuple reply_tuple;
 	ecm_tracker_sender_type_t sender;
@@ -926,7 +961,7 @@ static unsigned int ecm_nss_ipv6_ip_process(struct net_device *out_dev, struct n
 	/*
 	 * Extract information, if we have conntrack then use that info as far as we can.
 	 */
-        ct = nf_ct_get(skb, &ctinfo);
+	ct = nf_ct_get(skb, &ctinfo);
 	if (unlikely(!ct)) {
 		DEBUG_TRACE("%p: no ct\n", skb);
 		ECM_IP_ADDR_TO_NIN6_ADDR(orig_tuple.src.u3.in6, ip_hdr.src_addr);
@@ -1317,7 +1352,7 @@ static unsigned int ecm_nss_ipv6_bridge_post_routing_hook(const struct nf_hook_o
 	bridge = ecm_interface_get_and_hold_dev_master((struct net_device *)out);
 	DEBUG_ASSERT(bridge, "Expected bridge\n");
 	in = dev_get_by_index(&init_net, skb->skb_iif);
-	if  (!in) {
+	if (!in) {
 		/*
 		 * Case 1.
 		 */
@@ -1671,9 +1706,9 @@ sync_conntrack:
 		unsigned long int delta_jiffies;
 
 		/*
-		 * Convert ms ticks from the NSS to jiffies.  We know that inc_ticks is small
+		 * Convert ms ticks from the NSS to jiffies. We know that inc_ticks is small
 		 * and we expect HZ to be small too so we can multiply without worrying about
-		 * wrap-around problems.  We add a rounding constant to ensure that the different
+		 * wrap-around problems. We add a rounding constant to ensure that the different
 		 * time bases don't cause truncation errors.
 		 */
 		DEBUG_ASSERT(HZ <= 100000, "Bad HZ\n");
@@ -1786,7 +1821,7 @@ static void ecm_nss_ipv6_connection_sync_many_callback(void *app_data, struct ns
 
 /*
  * ecm_nss_ipv6_stats_sync_req_work()
- *      Schedule delayed work to process connection stats and request next sync
+ *	Schedule delayed work to process connection stats and request next sync
  */
 static void ecm_nss_ipv6_stats_sync_req_work(struct work_struct *work)
 {
