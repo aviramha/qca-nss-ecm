@@ -52,6 +52,7 @@
 #include <net/netfilter/nf_conntrack_core.h>
 #include <net/netfilter/ipv6/nf_conntrack_ipv6.h>
 #include <net/netfilter/ipv6/nf_defrag_ipv6.h>
+#include <linux/netfilter/nf_conntrack_tftp.h>
 #ifdef ECM_INTERFACE_VLAN_ENABLE
 #include <linux/../../net/8021q/vlan.h>
 #include <linux/if_vlan.h>
@@ -1810,6 +1811,12 @@ unsigned int ecm_nss_ported_ipv6_process(struct net_device *out_dev,
 				DEBUG_ASSERT(false, "Unhandled ecm_dir: %d\n", ecm_dir);
 			}
 		}
+
+		if (ct && nfct_help(ct) && (dest_port == TFTP_PORT)) {
+			DEBUG_TRACE("%p: Connection has helper but protocol is TFTP, it can be accelerated\n", ct);
+			can_accel = true;
+		}
+
 		DEBUG_TRACE("UDP src: " ECM_IP_ADDR_OCTAL_FMT ":%d, dest: " ECM_IP_ADDR_OCTAL_FMT ":%d, dir %d\n",
 				ECM_IP_ADDR_TO_OCTAL(ip_src_addr), src_port, ECM_IP_ADDR_TO_OCTAL(ip_dest_addr), dest_port, ecm_dir);
 	} else {
