@@ -170,7 +170,9 @@ bool ecm_front_end_ipv6_interface_construct_set_and_hold(struct sk_buff *skb, ec
 		 * for routed connections.
 		 */
 		if (!ECM_IP_ADDR_MATCH(rt->rt6i_dst.addr.in6_u.u6_addr32, rt->rt6i_gateway.in6_u.u6_addr32) || (rt->rt6i_flags & RTF_GATEWAY)) {
-			ECM_NIN6_ADDR_TO_IP_ADDR(rt_dst_addr, rt->rt6i_gateway);
+			if (!ECM_IP_ADDR_IS_NULL(rt->rt6i_gateway.in6_u.u6_addr32)) {
+				ECM_NIN6_ADDR_TO_IP_ADDR(rt_dst_addr, rt->rt6i_gateway);
+			}
 		}
 
 		from = skb->dev;
