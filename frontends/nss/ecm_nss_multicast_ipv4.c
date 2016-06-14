@@ -399,8 +399,6 @@ static int ecm_nss_multicast_ipv4_connection_update_accelerate(struct ecm_front_
 	struct nss_ipv4_mc_rule_create_msg *create;
 	struct nss_ipv4_msg *nim;
 	ip_addr_t addr;
-	ecm_db_iface_type_t from_iface_type = ECM_DB_IFACE_TYPE_COUNT;
-	ecm_db_iface_type_t to_iface_type = ECM_DB_IFACE_TYPE_COUNT;
 	int32_t *to_ifaces_first;
 	int32_t *to_ii_first;
 	int32_t vif;
@@ -481,7 +479,6 @@ static int ecm_nss_multicast_ipv4_connection_update_accelerate(struct ecm_front_
 
 	create->src_interface_num = from_nss_iface_id;
 	from_nss_iface = from_ifaces[ECM_DB_IFACE_HEIRARCHY_MAX - 1];
-	from_iface_type = ecm_db_connection_iface_type_get(from_nss_iface);
 	from_iface_bridge_identifier = ecm_db_iface_interface_identifier_get(from_nss_iface);
 	ecm_db_connection_interfaces_deref(from_ifaces, from_ifaces_first);
 
@@ -515,7 +512,6 @@ static int ecm_nss_multicast_ipv4_connection_update_accelerate(struct ecm_front_
 		 * We have an update for this interface. Construct the interface information
 		 */
 		to_nss_iface_id = -1;
-		to_iface_type = ECM_DB_IFACE_TYPE_COUNT;
 		memset(interface_type_counts, 0, sizeof(interface_type_counts));
 		to_ii_first = ecm_db_multicast_if_first_get_at_index(to_ifaces_first, vif);
 
@@ -555,7 +551,6 @@ static int ecm_nss_multicast_ipv4_connection_update_accelerate(struct ecm_front_
 					break;
 				}
 				ecm_db_iface_bridge_address_get(ii, to_nss_iface_address);
-				to_iface_type = ECM_DB_IFACE_TYPE_BRIDGE;
 				to_iface_bridge_identifier = ecm_db_iface_interface_identifier_get(ii);
 				DEBUG_TRACE("%p: Bridge - mac: %pM\n", nmci, to_nss_iface_address);
 				break;
@@ -678,9 +673,7 @@ static int ecm_nss_multicast_ipv4_connection_update_accelerate(struct ecm_front_
 			/*
 			 * Do not set the ROUTED flag for pure bridged interfaces
 			 */
-			if (((from_iface_type == ECM_DB_IFACE_TYPE_BRIDGE &&
-				to_iface_type == ECM_DB_IFACE_TYPE_BRIDGE) || is_bridge) &&
-				(to_iface_bridge_identifier == from_iface_bridge_identifier)) {
+			if (is_bridge) {
 				uint8_t from_nss_iface_address[ETH_ALEN];
 				ecm_db_connection_from_node_address_get(feci->ci, (uint8_t *)from_nss_iface_address);
 				memcpy(create->if_rule[valid_vif_idx].if_mac, from_nss_iface_address, ETH_ALEN);
@@ -849,8 +842,6 @@ static void ecm_nss_multicast_ipv4_connection_accelerate(struct ecm_front_end_co
 	struct nss_ipv4_mc_rule_create_msg *create;
 	struct nss_ipv4_msg *nim;
 	struct ecm_classifier_instance *assignments[ECM_CLASSIFIER_TYPES];
-	ecm_db_iface_type_t from_iface_type = ECM_DB_IFACE_TYPE_COUNT;
-	ecm_db_iface_type_t to_iface_type = ECM_DB_IFACE_TYPE_COUNT;
 	int32_t *to_ifaces_first;
 	int32_t *to_ii_first;
 	int32_t from_ifaces_first;
@@ -955,7 +946,6 @@ static void ecm_nss_multicast_ipv4_connection_accelerate(struct ecm_front_end_co
 #endif
 		case ECM_DB_IFACE_TYPE_BRIDGE:
 			DEBUG_TRACE("%p: Bridge\n", nmci);
-			from_iface_type = ECM_DB_IFACE_TYPE_BRIDGE;
 			from_iface_bridge_identifier = ecm_db_iface_interface_identifier_get(ii);
 			break;
 		case ECM_DB_IFACE_TYPE_VLAN:
@@ -1030,7 +1020,6 @@ static void ecm_nss_multicast_ipv4_connection_accelerate(struct ecm_front_end_co
 		int32_t to_mtu = 0;
 
 		to_nss_iface_id = -1;
-		to_iface_type = ECM_DB_IFACE_TYPE_COUNT;
 
 		create->if_rule[vif].egress_vlan_tag[0] = ECM_NSS_CONNMGR_VLAN_ID_NOT_CONFIGURED;
 		create->if_rule[vif].egress_vlan_tag[1] = ECM_NSS_CONNMGR_VLAN_ID_NOT_CONFIGURED;
@@ -1090,7 +1079,6 @@ static void ecm_nss_multicast_ipv4_connection_accelerate(struct ecm_front_end_co
 					break;
 				}
 				ecm_db_iface_bridge_address_get(ii, to_nss_iface_address);
-				to_iface_type = ECM_DB_IFACE_TYPE_BRIDGE;
 				to_iface_bridge_identifier = ecm_db_iface_interface_identifier_get(ii);
 				DEBUG_TRACE("%p: Bridge - mac: %pM\n", nmci, to_nss_iface_address);
 				break;
@@ -1230,9 +1218,7 @@ static void ecm_nss_multicast_ipv4_connection_accelerate(struct ecm_front_end_co
 			/*
 			 * Identify if the destination interface blongs to pure bridge or routed flow.
 			 */
-			if (((from_iface_type == ECM_DB_IFACE_TYPE_BRIDGE &&
-				to_iface_type == ECM_DB_IFACE_TYPE_BRIDGE) || is_bridge) &&
-				(from_iface_bridge_identifier == to_iface_bridge_identifier)) {
+			if (is_bridge) {
 				uint8_t from_nss_iface_address[ETH_ALEN];
 				ecm_db_connection_from_node_address_get(feci->ci, (uint8_t *)from_nss_iface_address);
 				memcpy(create->if_rule[valid_vif_idx].if_mac, from_nss_iface_address, ETH_ALEN);
