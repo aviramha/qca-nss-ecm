@@ -1363,8 +1363,8 @@ sync_conntrack:
 			"src_addr: " ECM_IP_ADDR_OCTAL_FMT ":%d\n"
 			"dest_addr: " ECM_IP_ADDR_OCTAL_FMT ":%d\n",
 			(int)tuple.dst.protonum,
-			ECM_IP_ADDR_TO_OCTAL(flow_ip), (int)tuple.src.u.all,
-			ECM_IP_ADDR_TO_OCTAL(return_ip), (int)tuple.dst.u.all);
+			ECM_IP_ADDR_TO_OCTAL(flow_ip), (int)ntohs(tuple.src.u.all),
+			ECM_IP_ADDR_TO_OCTAL(return_ip), (int)ntohs(tuple.dst.u.all));
 
 	/*
 	 * Look up conntrack connection

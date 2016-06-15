@@ -1649,8 +1649,8 @@ sync_conntrack:
 			"src_addr: %pI4:%d\n"
 			"dest_addr: %pI4:%d\n",
 			(int)tuple.dst.protonum,
-			&tuple.src.u3.ip, (int)tuple.src.u.all,
-			&tuple.dst.u3.ip, (int)tuple.dst.u.all);
+			&tuple.src.u3.ip, (int)(ntohs(tuple.src.u.all)),
+			&tuple.dst.u3.ip, (int)(ntohs(tuple.dst.u.all)));
 
 	/*
 	 * Look up conntrack connection
