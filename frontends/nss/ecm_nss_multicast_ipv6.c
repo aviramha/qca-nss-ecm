@@ -2564,7 +2564,6 @@ unsigned int ecm_nss_multicast_ipv6_connection_process(struct net_device *out_de
 
 		to_list_first = (int32_t *)kzalloc(sizeof(int32_t *) * ECM_DB_MULTICAST_IF_MAX, GFP_ATOMIC | __GFP_NOWARN);
 		if (!to_list_first) {
-			kfree(to_list);
 			ecm_db_mapping_deref(src_mi);
 			ecm_db_node_deref(src_ni);
 			feci->deref(feci);

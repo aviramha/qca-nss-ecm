@@ -2700,7 +2700,6 @@ unsigned int ecm_nss_multicast_ipv4_connection_process(struct net_device *out_de
 		to_list_first = (int32_t *)kzalloc(sizeof(int32_t *) * ECM_DB_MULTICAST_IF_MAX, GFP_ATOMIC | __GFP_NOWARN);
 		if (!to_list_first) {
 			DEBUG_WARN("%p: Failed to alloc memory for multicast dest interfaces first list\n", nci);
-			kfree(to_list);
 			ecm_db_mapping_deref(src_mi);
 			ecm_db_node_deref(src_ni);
 			feci->deref(feci);

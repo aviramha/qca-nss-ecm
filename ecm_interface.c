@@ -3164,7 +3164,7 @@ int32_t ecm_interface_multicast_heirarchy_construct_bridged(struct ecm_front_end
 		dev_put(mc_br_slave_dev);
 	}
 
-	return ii_cnt;
+	return valid_if;
 }
 EXPORT_SYMBOL(ecm_interface_multicast_heirarchy_construct_bridged);
 
