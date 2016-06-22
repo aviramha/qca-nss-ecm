@@ -5373,6 +5373,25 @@ static int ecm_interface_node_br_fdb_notify_event(struct notifier_block *nb,
 static struct notifier_block ecm_interface_node_br_fdb_update_nb = {
 	.notifier_call = ecm_interface_node_br_fdb_notify_event,
 };
+
+static int ecm_interface_node_br_fdb_delete_event(struct notifier_block *nb,
+					       unsigned long event,
+					       void *ctx)
+{
+	struct br_fdb_event *fe = (struct br_fdb_event *)ctx;
+
+	if ((event != BR_FDB_EVENT_DEL) || fe->is_local) {
+		DEBUG_WARN("local fdb or not deleting event, ignore\n");
+		return NOTIFY_DONE;
+	}
+
+	return ecm_interface_node_br_fdb_notify_event(nb, event, fe->addr);
+}
+
+static struct notifier_block ecm_interface_node_br_fdb_delete_nb = {
+	.notifier_call = ecm_interface_node_br_fdb_delete_event,
+};
+
 #endif
 
 #ifdef ECM_MULTICAST_ENABLE
@@ -5735,6 +5754,7 @@ int ecm_interface_init(void)
 	 * register for bridge fdb database modificationevents
 	 */
 	br_fdb_update_register_notify(&ecm_interface_node_br_fdb_update_nb);
+	br_fdb_register_notify(&ecm_interface_node_br_fdb_delete_nb);
 #endif
 #ifdef ECM_DB_XREF_ENABLE
 	neigh_mac_update_register_notify(&ecm_interface_neigh_mac_update_nb);
@@ -5764,6 +5784,7 @@ void ecm_interface_exit(void)
 	 * unregister for bridge fdb update events
 	 */
         br_fdb_update_unregister_notify(&ecm_interface_node_br_fdb_update_nb);
+	br_fdb_unregister_notify(&ecm_interface_node_br_fdb_delete_nb);
 #endif
 }
 EXPORT_SYMBOL(ecm_interface_exit);
