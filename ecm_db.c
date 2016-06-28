@@ -952,6 +952,17 @@ int32_t ecm_db_iface_ae_interface_identifier_get(struct ecm_db_iface_instance *i
 EXPORT_SYMBOL(ecm_db_iface_ae_interface_identifier_get);
 
 /*
+ * ecm_db_iface_ae_interface_identifier_set()
+ *	Sets accel engine  interface number of this ecm interface
+ */
+void ecm_db_iface_ae_interface_identifier_set(struct ecm_db_iface_instance *ii, uint32_t num)
+{
+	DEBUG_CHECK_MAGIC(ii, ECM_DB_IFACE_INSTANCE_MAGIC, "%p: magic failed", ii);
+	ii->ae_interface_identifier = num;
+}
+EXPORT_SYMBOL(ecm_db_iface_ae_interface_identifier_set);
+
+/*
  * ecm_db_iface_interface_identifier_get()
  *	Return the interface number of this ecm interface
  */
