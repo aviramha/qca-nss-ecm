@@ -3341,6 +3341,7 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 	ip_addr_t next_dest_addr;
 	uint8_t next_dest_node_addr[ETH_ALEN] = {0};
 	struct net_device *bridge;
+	struct net_device *top_dev_vlan = NULL;
 	uint32_t serial = ecm_db_connection_serial_get(feci->ci);
 
 	/*
@@ -3656,6 +3657,9 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 					dev_hold(next_dev);
 					DEBUG_TRACE("Net device: %p is VLAN, slave dev: %p (%s)\n",
 							dest_dev, next_dev, next_dev->name);
+					if (current_interface_index == (ECM_DB_IFACE_HEIRARCHY_MAX - 1)) {
+						top_dev_vlan = dest_dev;
+					}
 					break;
 				}
 #endif
@@ -3753,6 +3757,9 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 						} else {
 							memcpy(src_mac_addr, dest_dev->dev_addr, ETH_ALEN);
 							master_dev = dest_dev;
+							if (top_dev_vlan) {
+								master_dev = top_dev_vlan;
+							}
 							dev_hold(master_dev);
 						}
 
