@@ -980,10 +980,6 @@ static int ecm_classifier_pcc_state_get(struct ecm_classifier_instance *ci, stru
 		return result;
 	}
 
-	if ((result = ecm_state_prefix_remove(sfi))) {
-		return result;
-	}
-
 	return ecm_state_prefix_remove(sfi);
 }
 #endif
