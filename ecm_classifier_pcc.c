@@ -799,7 +799,9 @@ not_relevant:
 	pcci->process_response.process_actions = 0;
 	*process_response = pcci->process_response;
 	spin_unlock_bh(&ecm_classifier_pcc_lock);
-	ecm_db_connection_deref(ci);
+	if (ci) {
+		ecm_db_connection_deref(ci);
+	}
 	return;
 
 deny_accel:
