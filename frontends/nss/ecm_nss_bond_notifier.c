@@ -191,8 +191,8 @@ static void ecm_nss_bond_notifier_bond_release(struct net_device *slave_dev)
 	DEBUG_INFO("Bond slave release: %p (%s)\n", slave_dev, slave_dev->name);
 	spin_lock_bh(&ecm_nss_bond_notifier_lock);
 	if (unlikely(ecm_nss_bond_notifier_stopped)) {
-		DEBUG_WARN("Ignoring bond release event - stopped\n");
 		spin_unlock_bh(&ecm_nss_bond_notifier_lock);
+		DEBUG_WARN("Ignoring bond release event - stopped\n");
 		return;
 	}
 	spin_unlock_bh(&ecm_nss_bond_notifier_lock);
@@ -211,8 +211,8 @@ static void ecm_nss_bond_notifier_bond_enslave(struct net_device *slave_dev)
 	DEBUG_INFO("Bond slave enslave: %p (%s)\n", slave_dev, slave_dev->name);
 	spin_lock_bh(&ecm_nss_bond_notifier_lock);
 	if (unlikely(ecm_nss_bond_notifier_stopped)) {
-		DEBUG_WARN("Ignoring bond enslave event - stopped\n");
 		spin_unlock_bh(&ecm_nss_bond_notifier_lock);
+		DEBUG_WARN("Ignoring bond enslave event - stopped\n");
 		return;
 	}
 	spin_unlock_bh(&ecm_nss_bond_notifier_lock);
@@ -232,8 +232,8 @@ static void ecm_nss_bond_notifier_bond_link_down(struct net_device *slave_dev)
 	 */
 	spin_lock_bh(&ecm_nss_bond_notifier_lock);
 	if (unlikely(ecm_nss_bond_notifier_stopped)) {
-		DEBUG_WARN("Ignoring bond link down event - stopped\n");
 		spin_unlock_bh(&ecm_nss_bond_notifier_lock);
+		DEBUG_WARN("Ignoring bond link down event - stopped\n");
 		return;
 	}
 	spin_unlock_bh(&ecm_nss_bond_notifier_lock);
@@ -247,6 +247,10 @@ static void ecm_nss_bond_notifier_bond_link_down(struct net_device *slave_dev)
 	 */
 
 	master = ecm_interface_get_and_hold_dev_master(slave_dev);
+	if (!master) {
+		DEBUG_WARN("No master dev\n");
+		return;
+	}
 	ecm_interface_dev_regenerate_connections(master);
 	dev_put(master);
 }
@@ -264,8 +268,8 @@ static void ecm_nss_bond_notifier_bond_link_up(struct net_device *slave_dev)
 	 */
 	spin_lock_bh(&ecm_nss_bond_notifier_lock);
 	if (unlikely(ecm_nss_bond_notifier_stopped)) {
-		DEBUG_WARN("Ignoring bond enslave event - stopped\n");
 		spin_unlock_bh(&ecm_nss_bond_notifier_lock);
+		DEBUG_WARN("Ignoring bond enslave event - stopped\n");
 		return;
 	}
 	spin_unlock_bh(&ecm_nss_bond_notifier_lock);
@@ -279,6 +283,10 @@ static void ecm_nss_bond_notifier_bond_link_up(struct net_device *slave_dev)
 	 */
 
 	master = ecm_interface_get_and_hold_dev_master(slave_dev);
+	if (!master) {
+		DEBUG_WARN("No master dev\n");
+		return;
+	}
 	ecm_interface_dev_regenerate_connections(master);
 	dev_put(master);
 }
@@ -362,8 +370,8 @@ static void ecm_nss_bond_notifier_lag_event_cb(void *if_ctx, struct nss_lag_msg 
 	 */
 	spin_lock_bh(&ecm_nss_bond_notifier_lock);
 	if (unlikely(ecm_nss_bond_notifier_stopped)) {
-		DEBUG_WARN("Ignoring LAG event event - stopped\n");
 		spin_unlock_bh(&ecm_nss_bond_notifier_lock);
+		DEBUG_WARN("Ignoring LAG event event - stopped\n");
 		return;
 	}
 	spin_unlock_bh(&ecm_nss_bond_notifier_lock);
