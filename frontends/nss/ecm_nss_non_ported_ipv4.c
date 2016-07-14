@@ -556,6 +556,12 @@ static void ecm_nss_non_ported_ipv4_connection_accelerate(struct ecm_front_end_c
 				break;
 			}
 			ecm_db_iface_bridge_address_get(ii, from_nss_iface_address);
+			if (is_valid_ether_addr(from_nss_iface_address)) {
+				memcpy(nircm->src_mac_rule.flow_src_mac, from_nss_iface_address, ETH_ALEN);
+				nircm->src_mac_rule.mac_valid_flags |= NSS_IPV4_SRC_MAC_FLOW_VALID;
+				nircm->valid_flags |= NSS_IPV4_RULE_CREATE_SRC_MAC_VALID;
+			}
+
 			DEBUG_TRACE("%p: Bridge - mac: %pM\n", nnpci, from_nss_iface_address);
 			break;
 		case ECM_DB_IFACE_TYPE_ETHERNET:
@@ -639,10 +645,13 @@ static void ecm_nss_non_ported_ipv4_connection_accelerate(struct ecm_front_end_c
 			/*
 			 * If we have not yet got an ethernet mac then take this one (very unlikely as mac should have been propagated to the slave (outer) device
 			 */
-			if (interface_type_counts[ECM_DB_IFACE_TYPE_ETHERNET] == 0) {
-				memcpy(from_nss_iface_address, vlan_info.address, ETH_ALEN);
-				interface_type_counts[ECM_DB_IFACE_TYPE_ETHERNET]++;
+			memcpy(from_nss_iface_address, vlan_info.address, ETH_ALEN);
+			if (is_valid_ether_addr(from_nss_iface_address)) {
 				DEBUG_TRACE("%p: VLAN use mac: %pM\n", nnpci, from_nss_iface_address);
+				interface_type_counts[ECM_DB_IFACE_TYPE_ETHERNET]++;
+				memcpy(nircm->src_mac_rule.flow_src_mac, from_nss_iface_address, ETH_ALEN);
+				nircm->src_mac_rule.mac_valid_flags |= NSS_IPV4_SRC_MAC_FLOW_VALID;
+				nircm->valid_flags |= NSS_IPV4_RULE_CREATE_SRC_MAC_VALID;
 			}
 			DEBUG_TRACE("%p: vlan tag: %x\n", nnpci, vlan_value);
 #else
@@ -732,6 +741,12 @@ static void ecm_nss_non_ported_ipv4_connection_accelerate(struct ecm_front_end_c
 				break;
 			}
 			ecm_db_iface_bridge_address_get(ii, to_nss_iface_address);
+			if (is_valid_ether_addr(to_nss_iface_address)) {
+				memcpy(nircm->src_mac_rule.return_src_mac, to_nss_iface_address, ETH_ALEN);
+				nircm->src_mac_rule.mac_valid_flags |= NSS_IPV4_SRC_MAC_RETURN_VALID;
+				nircm->valid_flags |= NSS_IPV4_RULE_CREATE_SRC_MAC_VALID;
+			}
+
 			DEBUG_TRACE("%p: Bridge - mac: %pM\n", nnpci, to_nss_iface_address);
 			break;
 		case ECM_DB_IFACE_TYPE_ETHERNET:
@@ -814,11 +829,15 @@ static void ecm_nss_non_ported_ipv4_connection_accelerate(struct ecm_front_end_c
 			/*
 			 * If we have not yet got an ethernet mac then take this one (very unlikely as mac should have been propagated to the slave (outer) device
 			 */
-			if (interface_type_counts[ECM_DB_IFACE_TYPE_ETHERNET] == 0) {
-				memcpy(to_nss_iface_address, vlan_info.address, ETH_ALEN);
-				interface_type_counts[ECM_DB_IFACE_TYPE_ETHERNET]++;
+			memcpy(to_nss_iface_address, vlan_info.address, ETH_ALEN);
+			if (is_valid_ether_addr(to_nss_iface_address)) {
 				DEBUG_TRACE("%p: VLAN use mac: %pM\n", nnpci, to_nss_iface_address);
+				interface_type_counts[ECM_DB_IFACE_TYPE_ETHERNET]++;
+				memcpy(nircm->src_mac_rule.return_src_mac, to_nss_iface_address, ETH_ALEN);
+				nircm->src_mac_rule.mac_valid_flags |= NSS_IPV4_SRC_MAC_RETURN_VALID;
+				nircm->valid_flags |= NSS_IPV4_RULE_CREATE_SRC_MAC_VALID;
 			}
+
 			DEBUG_TRACE("%p: vlan tag: %x\n", nnpci, vlan_value);
 #else
 			rule_invalid = true;
