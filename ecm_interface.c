@@ -3321,8 +3321,9 @@ static struct net_device *ecm_interface_should_update_egress_device_bridged(
 int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instance *feci,
 						struct ecm_db_iface_instance *interfaces[],
 						struct net_device *const_if, struct net_device *other_if,
-						ip_addr_t packet_src_addr,
-						ip_addr_t packet_dest_addr,
+						ip_addr_t lookup_src_addr,
+						ip_addr_t lookup_dest_addr,
+						ip_addr_t real_dest_addr,
 						int ip_version, int packet_protocol,
 						struct net_device *given_dest_dev,
 						bool is_routed, struct net_device *given_src_dev,
@@ -3352,8 +3353,8 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 	 * Get a big endian of the IPv4 address we have been given as our starting point.
 	 */
 	protocol = packet_protocol;
-	ECM_IP_ADDR_COPY(src_addr, packet_src_addr);
-	ECM_IP_ADDR_COPY(dest_addr, packet_dest_addr);
+	ECM_IP_ADDR_COPY(src_addr, lookup_src_addr);
+	ECM_IP_ADDR_COPY(dest_addr, lookup_dest_addr);
 
 	if (ip_version == 4) {
 		DEBUG_TRACE("Construct interface heirarchy for from src_addr: " ECM_IP_ADDR_DOT_FMT " to dest_addr: " ECM_IP_ADDR_DOT_FMT ", protocol: %d (serial %u)\n",
@@ -3741,7 +3742,7 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 
 					if (ip_version == 4) {
 						ECM_IP_ADDR_TO_NIN4_ADDR(src_addr_32, src_addr);
-						ECM_IP_ADDR_TO_NIN4_ADDR(dest_addr_32, dest_addr);
+						ECM_IP_ADDR_TO_NIN4_ADDR(dest_addr_32, real_dest_addr);
 					}
 
 					if (!is_routed) {
@@ -3833,7 +3834,7 @@ lag_success:
 										htons((uint16_t)ETH_P_IP), dest_dev, layer4hdr);
 					} else if (ip_version == 6) {
 						ECM_IP_ADDR_TO_NIN6_ADDR(src_addr6, src_addr);
-						ECM_IP_ADDR_TO_NIN6_ADDR(dest_addr6, dest_addr);
+						ECM_IP_ADDR_TO_NIN6_ADDR(dest_addr6, real_dest_addr);
 						next_dev = bond_get_tx_dev(NULL, src_mac_addr, dest_mac_addr,
 									   src_addr6.s6_addr, dest_addr6.s6_addr,
 									   htons((uint16_t)ETH_P_IPV6), dest_dev, layer4hdr);
