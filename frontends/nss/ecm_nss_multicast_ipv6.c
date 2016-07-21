@@ -1882,7 +1882,7 @@ static void ecm_nss_multicast_ipv6_connection_regenerate(struct ecm_db_connectio
 	feci = ecm_db_connection_front_end_get_and_ref(ci);
 
 	DEBUG_TRACE("%p: Update the 'from' interface heirarchy list\n", ci);
-	from_list_first = ecm_interface_multicast_from_heirarchy_construct(feci, from_list, ip_dest_addr, ip_src_addr, 4, protocol, in_dev, is_routed, in_dev, src_node_addr, dest_node_addr, layer4hdr, NULL);
+	from_list_first = ecm_interface_multicast_from_heirarchy_construct(feci, from_list, ip_dest_addr, ip_src_addr, 6, protocol, in_dev, is_routed, in_dev, src_node_addr, dest_node_addr, layer4hdr, NULL);
 	if (from_list_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
 		goto ecm_multicast_ipv6_retry_regen;
 	}
