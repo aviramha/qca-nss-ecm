@@ -69,6 +69,7 @@ ecm_db_iface_type_t ecm_db_connection_to_iface_type_get(struct ecm_db_connection
 ecm_db_iface_type_t ecm_db_connection_iface_type_get(struct ecm_db_iface_instance *ii);
 int32_t ecm_db_iface_mtu_reset(struct ecm_db_iface_instance *ii, int32_t mtu);
 int32_t ecm_db_iface_ae_interface_identifier_get(struct ecm_db_iface_instance *ii);
+void ecm_db_iface_ae_interface_identifier_set(struct ecm_db_iface_instance *ii, uint32_t num);
 int32_t ecm_db_iface_interface_identifier_get(struct ecm_db_iface_instance *ii);
 void ecm_db_iface_interface_name_get(struct ecm_db_iface_instance *ii, char *name_buffer);
 void ecm_db_iface_identifier_hash_table_entry_check_and_update(struct ecm_db_iface_instance *ii, int32_t new_interface_identifier);
