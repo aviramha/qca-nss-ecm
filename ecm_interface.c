@@ -2962,7 +2962,7 @@ int32_t ecm_interface_multicast_heirarchy_construct_routed(struct ecm_front_end_
 				return 0;
 			}
 
-			if (!mfc_update) {
+			if (in_dev && !mfc_update) {
 				if_num = ecm_interface_multicast_check_for_src_ifindex(mc_dst_if_index, if_num, in_dev->ifindex);
 			}
 
