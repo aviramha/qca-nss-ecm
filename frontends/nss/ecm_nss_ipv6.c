@@ -1016,7 +1016,7 @@ static unsigned int ecm_nss_ipv6_ip_process(struct net_device *out_dev, struct n
 	 * Check for a multicast Destination address here.
 	 */
 	ECM_NIN6_ADDR_TO_IP_ADDR(ip_dest_addr, orig_tuple.dst.u3.in6);
-	if (ecm_ip_addr_is_multicast(ip_dest_addr)) {
+	if (ecm_ip_addr_is_multicast(ip_dest_addr) && (skb->pkt_type == PACKET_MULTICAST)) {
 		DEBUG_TRACE("skb %p multicast daddr " ECM_IP_ADDR_OCTAL_FMT "\n", skb, ECM_IP_ADDR_TO_OCTAL(ip_dest_addr));
 
 		return ecm_nss_multicast_ipv6_connection_process(out_dev,

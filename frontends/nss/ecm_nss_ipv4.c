@@ -1088,7 +1088,7 @@ static unsigned int ecm_nss_ipv4_ip_process(struct net_device *out_dev, struct n
 	 * Check for a multicast Destination address here.
 	 */
 	ECM_NIN4_ADDR_TO_IP_ADDR(ip_dest_addr, orig_tuple.dst.u3.ip);
-	if (ecm_ip_addr_is_multicast(ip_dest_addr)) {
+	if (ecm_ip_addr_is_multicast(ip_dest_addr)  && (skb->pkt_type == PACKET_MULTICAST)) {
 		DEBUG_TRACE("Multicast, Processing: %p\n", skb);
 		return ecm_nss_multicast_ipv4_connection_process(out_dev,
 				in_dev,
