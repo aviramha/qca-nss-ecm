@@ -802,7 +802,6 @@ static void __exit ecm_pcc_test_exit(void)
 module_init(ecm_pcc_test_init)
 module_exit(ecm_pcc_test_exit)
 
-MODULE_AUTHOR("Qualcomm Atheros, Inc.");
 MODULE_DESCRIPTION("ECM PCC Test");
 #ifdef MODULE_LICENSE
 MODULE_LICENSE("Dual BSD/GPL");
