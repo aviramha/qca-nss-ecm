@@ -5335,32 +5335,35 @@ static int ecm_interface_netdev_notifier_callback(struct notifier_block *this, u
  * ecm_interface_node_connections_decelerate()
  *	Decelerate the connections on this node.
  */
-static void ecm_interface_node_connections_decelerate(uint8_t *mac)
+void ecm_interface_node_connections_decelerate(uint8_t *mac)
 {
-	struct ecm_db_node_instance *node = NULL;
+	struct ecm_db_node_instance *ni = NULL;
 
 	if (unlikely(!mac)) {
 		DEBUG_WARN("mac address is null\n");
 		return;
 	}
 
-	/*
-	 * find node instance corresponding to mac address
-	 */
-	node = ecm_db_node_find_and_ref(mac);
+	ni = ecm_db_node_chain_get_and_ref_first(mac);
+	while (ni) {
+		struct ecm_db_node_instance *nin;
 
-	if (unlikely(!node)) {
-		DEBUG_WARN("node address is null\n");
-		return;
+		if (ecm_db_node_is_mac_addr_equal(ni, mac)) {
+			ecm_db_traverse_node_from_connection_list_and_decelerate(ni);
+			ecm_db_traverse_node_to_connection_list_and_decelerate(ni);
+			ecm_db_traverse_node_from_nat_connection_list_and_decelerate(ni);
+			ecm_db_traverse_node_to_nat_connection_list_and_decelerate(ni);
+		}
+
+		/*
+		 * Get next node in the chain
+		 */
+		nin = ecm_db_node_chain_get_and_ref_next(ni);
+		ecm_db_node_deref(ni);
+		ni = nin;
 	}
-
-	ecm_db_traverse_node_from_connection_list_and_decelerate(node);
-	ecm_db_traverse_node_to_connection_list_and_decelerate(node);
-	ecm_db_traverse_node_from_nat_connection_list_and_decelerate(node);
-	ecm_db_traverse_node_to_nat_connection_list_and_decelerate(node);
-
-	ecm_db_node_deref(node);
 }
+EXPORT_SYMBOL(ecm_interface_node_connections_decelerate);
 
 /*
  * struct notifier_block ecm_interface_netdev_notifier

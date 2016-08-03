@@ -199,6 +199,7 @@ struct ecm_db_node_instance *ecm_nss_ipv4_node_establish_and_ref(struct ecm_fron
 #if defined(ECM_INTERFACE_MAP_T_ENABLE)
 	struct net_device *in;
 #endif
+
 	DEBUG_INFO("Establish node for " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(addr));
 
 	/*
@@ -416,21 +417,22 @@ done:
 	}
 
 	/*
-	 * Locate the node
-	 */
-	ni = ecm_db_node_find_and_ref(node_addr);
-	if (ni) {
-		DEBUG_TRACE("%p: node established\n", ni);
-		return ni;
-	}
-
-	/*
-	 * No node - establish iface
+	 *  Establish iface
 	 */
 	ii = ecm_interface_establish_and_ref(feci, dev, skb);
 	if (!ii) {
 		DEBUG_WARN("Failed to establish iface\n");
 		return NULL;
+	}
+
+
+	/*
+	 * Locate the node
+	 */
+	ni = ecm_db_node_find_and_ref(node_addr, ii);
+	if (ni) {
+		DEBUG_TRACE("%p: node established\n", ni);
+		return ni;
 	}
 
 	/*
@@ -447,7 +449,7 @@ done:
 	 * Add node into the database, atomically to avoid races creating the same thing
 	 */
 	spin_lock_bh(&ecm_nss_ipv4_lock);
-	ni = ecm_db_node_find_and_ref(node_addr);
+	ni = ecm_db_node_find_and_ref(node_addr, ii);
 	if (ni) {
 		spin_unlock_bh(&ecm_nss_ipv4_lock);
 		ecm_db_node_deref(nni);

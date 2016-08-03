@@ -2222,21 +2222,21 @@ static struct ecm_db_node_instance *ecm_nss_multicast_ipv6_node_establish_and_re
 	}
 
 	/*
-	 * Locate the node
-	 */
-	ni = ecm_db_node_find_and_ref(node_addr);
-	if (ni) {
-		DEBUG_TRACE("%p: node established\n", ni);
-		return ni;
-	}
-
-	/*
-	 * No node - establish iface
+	 * Establish iface
 	 */
 	ii = ecm_interface_establish_and_ref(feci, dev, skb);
 	if (!ii) {
 		DEBUG_WARN("Failed to establish iface\n");
 		return NULL;
+	}
+
+	/*
+	 * Locate the node
+	 */
+	ni = ecm_db_node_find_and_ref(node_addr, ii);
+	if (ni) {
+		DEBUG_TRACE("%p: node established\n", ni);
+		return ni;
 	}
 
 	/*
@@ -2253,7 +2253,7 @@ static struct ecm_db_node_instance *ecm_nss_multicast_ipv6_node_establish_and_re
 	 * Add node into the database, atomically to avoid races creating the same thing
 	 */
 	spin_lock_bh(&ecm_nss_ipv6_lock);
-	ni = ecm_db_node_find_and_ref(node_addr);
+	ni = ecm_db_node_find_and_ref(node_addr, ii);
 	if (ni) {
 		spin_unlock_bh(&ecm_nss_ipv6_lock);
 		ecm_db_node_deref(nni);

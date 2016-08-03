@@ -333,30 +333,9 @@ static void ecm_nss_bond_notifier_bond_delete_by_slave(struct net_device *slave_
  */
 static void ecm_nss_bond_notifier_bond_delete_by_mac(uint8_t *mac)
 {
-	struct ecm_db_node_instance *ni;
+	DEBUG_INFO("Bond notifier for node %pM\n", mac);
 
-	if (unlikely(!mac)) {
-		DEBUG_WARN("mac address passed to ecm_nss_bond_notifier_bond_delete_by_mac is null \n");
-		return;
-	}
-
-	/*
-	 * find node instance corresponding to mac address
-	 */
-	ni = ecm_db_node_find_and_ref(mac);
-	if (unlikely(!ni)) {
-		DEBUG_WARN("node address is null\n");
-		return;
-	}
-
-	DEBUG_INFO("FDB updated for node %pM\n", mac);
-	ecm_db_traverse_node_from_connection_list_and_decelerate(ni);
-	ecm_db_traverse_node_to_connection_list_and_decelerate(ni);
-	ecm_db_traverse_node_from_nat_connection_list_and_decelerate(ni);
-	ecm_db_traverse_node_to_nat_connection_list_and_decelerate(ni);
-
-	ecm_db_node_deref(ni);
-	return;
+	ecm_interface_node_connections_decelerate(mac);
 }
 
 /*

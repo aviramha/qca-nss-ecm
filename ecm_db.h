@@ -178,7 +178,7 @@ struct ecm_db_iface_instance *ecm_db_iface_find_and_ref_sit(ip_addr_t saddr, ip_
 #ifdef ECM_INTERFACE_TUNIPIP6_ENABLE
 struct ecm_db_iface_instance *ecm_db_iface_find_and_ref_tunipip6(ip_addr_t saddr, ip_addr_t daddr);
 #endif
-struct ecm_db_node_instance *ecm_db_node_find_and_ref(uint8_t *address);
+struct ecm_db_node_instance *ecm_db_node_find_and_ref(uint8_t *address, struct ecm_db_iface_instance *ii);
 
 void ecm_db_connection_from_interfaces_reset(struct ecm_db_connection_instance *ci, struct ecm_db_iface_instance *interfaces[], int32_t new_first);
 void ecm_db_connection_to_interfaces_reset(struct ecm_db_connection_instance *ci, struct ecm_db_iface_instance *interfaces[], int32_t new_first);
@@ -215,8 +215,11 @@ struct ecm_db_mapping_instance *ecm_db_mapping_get_and_ref_next(struct ecm_db_ma
 struct ecm_db_host_instance *ecm_db_hosts_get_and_ref_first(void);
 struct ecm_db_host_instance *ecm_db_host_get_and_ref_next(struct ecm_db_host_instance *hi);
 
+bool ecm_db_node_is_mac_addr_equal(struct ecm_db_node_instance *ni, uint8_t *address);
 struct ecm_db_node_instance *ecm_db_nodes_get_and_ref_first(void);
 struct ecm_db_node_instance *ecm_db_node_get_and_ref_next(struct ecm_db_node_instance *ni);
+struct ecm_db_node_instance *ecm_db_node_chain_get_and_ref_first(uint8_t *address);
+struct ecm_db_node_instance *ecm_db_node_chain_get_and_ref_next(struct ecm_db_node_instance *ni);
 
 struct ecm_db_iface_instance *ecm_db_interfaces_get_and_ref_first(void);
 struct ecm_db_iface_instance *ecm_db_interface_get_and_ref_next(struct ecm_db_iface_instance *ii);
@@ -247,9 +250,6 @@ struct ecm_db_connection_instance *ecm_db_connection_iface_nat_to_get_and_ref_ne
 
 struct ecm_db_node_instance *ecm_db_iface_nodes_get_and_ref_first(struct ecm_db_iface_instance *ii);
 #endif
-
-struct ecm_db_node_instance *ecm_db_node_get_and_ref_next(struct ecm_db_node_instance *ni);
-struct ecm_db_host_instance *ecm_db_host_get_and_ref_next(struct ecm_db_host_instance *hi);
 
 void ecm_db_connection_classifier_assign(struct ecm_db_connection_instance *ci, struct ecm_classifier_instance *new_ca);
 int ecm_db_connection_classifier_assignments_get_and_ref(struct ecm_db_connection_instance *ci, struct ecm_classifier_instance *assignments[]);

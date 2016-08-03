@@ -4198,15 +4198,31 @@ struct ecm_db_host_instance *ecm_db_host_find_and_ref(ip_addr_t address)
 EXPORT_SYMBOL(ecm_db_host_find_and_ref);
 
 /*
+ * ecm_db_node_is_mac_addr_equal()
+ *	Compares the node's mac address with the given mac address.
+ */
+bool ecm_db_node_is_mac_addr_equal(struct ecm_db_node_instance *ni, uint8_t *address)
+{
+	DEBUG_CHECK_MAGIC(ni, ECM_DB_NODE_INSTANCE_MAGIC, "%p: magic failed", ni);
+
+	if (ecm_mac_addr_equal(ni->address, address)) {
+		return false;
+	}
+
+	return true;
+}
+EXPORT_SYMBOL(ecm_db_node_is_mac_addr_equal);
+
+/*
  * ecm_db_node_find_and_ref()
  *	Lookup and return a node reference if any
  */
-struct ecm_db_node_instance *ecm_db_node_find_and_ref(uint8_t *address)
+struct ecm_db_node_instance *ecm_db_node_find_and_ref(uint8_t *address, struct ecm_db_iface_instance *ii)
 {
 	ecm_db_node_hash_t hash_index;
 	struct ecm_db_node_instance *ni;
 
-	DEBUG_TRACE("Lookup node with addr %pM\n", address);
+	DEBUG_TRACE("Lookup node with addr %pMi and iface %p\n", address, ii);
 
 	/*
 	 * Compute the hash chain index and prepare to walk the chain
@@ -4224,6 +4240,11 @@ struct ecm_db_node_instance *ecm_db_node_find_and_ref(uint8_t *address)
 			continue;
 		}
 
+		if (ni->iface != ii) {
+			ni = ni->hash_next;
+			continue;
+		}
+
 		_ecm_db_node_ref(ni);
 		spin_unlock_bh(&ecm_db_lock);
 		DEBUG_TRACE("node found %p\n", ni);
@@ -4234,6 +4255,52 @@ struct ecm_db_node_instance *ecm_db_node_find_and_ref(uint8_t *address)
 	return NULL;
 }
 EXPORT_SYMBOL(ecm_db_node_find_and_ref);
+
+/*
+ * ecm_db_node_chain_get_and_ref_first()
+ *	Gets and refs the first node in the chain of that mac address.
+ */
+struct ecm_db_node_instance *ecm_db_node_chain_get_and_ref_first(uint8_t *address)
+{
+	ecm_db_node_hash_t hash_index;
+	struct ecm_db_node_instance *ni;
+
+	DEBUG_TRACE("Get the first node with addr %pMi in the chain\n", address);
+
+	/*
+	 * Compute the hash chain index.
+	 */
+	hash_index = ecm_db_node_generate_hash_index(address);
+
+	spin_lock_bh(&ecm_db_lock);
+	ni = ecm_db_node_table[hash_index];
+	if (ni) {
+		_ecm_db_node_ref(ni);
+	}
+	spin_unlock_bh(&ecm_db_lock);
+
+	return ni;
+}
+EXPORT_SYMBOL(ecm_db_node_chain_get_and_ref_first);
+
+/*
+ * ecm_db_node_chain_get_and_ref_next()
+ *	Gets and refs the next node in the chain..
+ */
+struct ecm_db_node_instance *ecm_db_node_chain_get_and_ref_next(struct ecm_db_node_instance *ni)
+{
+	struct ecm_db_node_instance *nin;
+	DEBUG_CHECK_MAGIC(ni, ECM_DB_NODE_INSTANCE_MAGIC, "%p: magic failed", ni);
+
+	spin_lock_bh(&ecm_db_lock);
+	nin = ni->hash_next;
+	if (nin) {
+		_ecm_db_node_ref(nin);
+	}
+	spin_unlock_bh(&ecm_db_lock);
+	return nin;
+}
+EXPORT_SYMBOL(ecm_db_node_chain_get_and_ref_next);
 
 /*
  * ecm_db_iface_ethernet_address_get()
