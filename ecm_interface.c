@@ -3577,31 +3577,20 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 		given_dest_dev, dest_dev, is_routed);
 
 	if (bridge) {
-
 		struct net_device *new_dest_dev;
+		new_dest_dev = br_port_dev_get(bridge, dest_node_addr, skb, serial);
+		if (new_dest_dev) {
+			dev_put(dest_dev);
+			if (new_dest_dev != given_dest_dev) {
+				DEBUG_INFO("Adjusted port for %pM is %s (given was %s)\n",
+					dest_node_addr, new_dest_dev->name,
+					given_dest_dev->name);
 
-		next_dest_node_addr_valid = ecm_interface_get_next_node_mac_address(
-			dest_addr, bridge, ip_version, next_dest_node_addr);
-		if (next_dest_node_addr_valid) {
-
-			new_dest_dev = br_port_dev_get(bridge,
-							next_dest_node_addr,
-							skb, serial);
-
-			if (new_dest_dev) {
-				dev_put(dest_dev);
-				if (new_dest_dev != given_dest_dev) {
-					DEBUG_INFO("Adjusted port for %pM is %s (given was %s)\n",
-						next_dest_node_addr, new_dest_dev->name,
-						given_dest_dev->name);
-
-					dest_dev = new_dest_dev;
-					dest_dev_name = dest_dev->name;
-					dest_dev_type = dest_dev->type;
-				}
+				dest_dev = new_dest_dev;
+				dest_dev_name = dest_dev->name;
+				dest_dev_type = dest_dev->type;
 			}
 		}
-
 		dev_put(bridge);
 	}
 
@@ -4353,31 +4342,20 @@ int32_t ecm_interface_multicast_from_heirarchy_construct(struct ecm_front_end_co
 		given_dest_dev, dest_dev, is_routed);
 
 	if (bridge) {
-
 		struct net_device *new_dest_dev;
+		new_dest_dev = br_port_dev_get(bridge, dest_node_addr, skb, serial);
+		if (new_dest_dev) {
+			dev_put(dest_dev);
+			if (new_dest_dev != given_dest_dev) {
+				DEBUG_INFO("Adjusted port for %pM is %s (given was %s)\n",
+					dest_node_addr, new_dest_dev->name,
+					given_dest_dev->name);
 
-		next_dest_node_addr_valid = ecm_interface_multicast_get_next_node_mac_address(
-			dest_addr, bridge, ip_version, next_dest_node_addr);
-		if (next_dest_node_addr_valid) {
-
-			new_dest_dev = br_port_dev_get(bridge,
-							next_dest_node_addr,
-							skb, serial);
-
-			if (new_dest_dev) {
-				dev_put(dest_dev);
-				if (new_dest_dev != given_dest_dev) {
-					DEBUG_INFO("Adjusted port for %pM is %s (given was %s)\n",
-						next_dest_node_addr, new_dest_dev->name,
-						given_dest_dev->name);
-
-					dest_dev = new_dest_dev;
-					dest_dev_name = dest_dev->name;
-					dest_dev_type = dest_dev->type;
-				}
+				dest_dev = new_dest_dev;
+				dest_dev_name = dest_dev->name;
+				dest_dev_type = dest_dev->type;
 			}
 		}
-
 		dev_put(bridge);
 	}
 
