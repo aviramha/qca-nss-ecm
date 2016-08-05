@@ -1041,6 +1041,16 @@ static unsigned int ecm_nss_ipv4_ip_process(struct net_device *out_dev, struct n
 	}
 
 	/*
+	 * If it's a PPTP GRE/GRE pass-through flow then check if out_dev or
+	 * in_dev are not a PPTP device. If ecm_interface_is_pptp() return
+	 * false then don't accelerate it.
+	 */
+	if ((ip_hdr.protocol == IPPROTO_GRE) && !ecm_interface_is_pptp(skb, out_dev)) {
+		DEBUG_TRACE("PPTP GRE pass through flow\n");
+		return NF_ACCEPT;
+	}
+
+	/*
 	 * Extract information, if we have conntrack then use that info as far as we can.
 	 */
         ct = nf_ct_get(skb, &ctinfo);
@@ -1490,7 +1500,7 @@ static unsigned int ecm_nss_ipv4_post_routing_hook(const struct nf_hook_ops *ops
 	/*
 	 * skip pptp because we don't accelerate them
 	 */
-	if (ecm_interface_skip_pptp(skb, out)) {
+	if (ecm_interface_is_pptp(skb, out)) {
 		return NF_ACCEPT;
 	}
 #endif
@@ -1498,15 +1508,15 @@ static unsigned int ecm_nss_ipv4_post_routing_hook(const struct nf_hook_ops *ops
 	/*
 	 * skip l2tp v2 and v3, because we don't accelerate them
 	 */
-	if (ecm_interface_skip_l2tp_packet_by_version(skb, out, 2) ||
-		ecm_interface_skip_l2tp_packet_by_version(skb, out, 3)) {
+	if (ecm_interface_is_l2tp_packet_by_version(skb, out, 2) ||
+		ecm_interface_is_l2tp_packet_by_version(skb, out, 3)) {
 		return NF_ACCEPT;
 	}
 #else
 	/*
 	 * skip l2tpv3 because we don't accelerate them
 	 */
-	if (ecm_interface_skip_l2tp_packet_by_version(skb, out, 3)) {
+	if (ecm_interface_is_l2tp_packet_by_version(skb, out, 3)) {
 		return NF_ACCEPT;
 	}
 #endif
@@ -1632,7 +1642,7 @@ static unsigned int ecm_nss_ipv4_bridge_post_routing_hook(const struct nf_hook_o
 	/*
 	 * skip l2tp/pptp because we don't accelerate them
 	 */
-	if (ecm_interface_skip_l2tp_pptp(skb, out)) {
+	if (ecm_interface_is_l2tp_pptp(skb, out)) {
 		return NF_ACCEPT;
 	}
 #endif

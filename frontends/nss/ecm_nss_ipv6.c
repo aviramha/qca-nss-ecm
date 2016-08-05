@@ -1187,7 +1187,7 @@ static unsigned int ecm_nss_ipv6_post_routing_hook(const struct nf_hook_ops *ops
 	/*
 	 * skip l2tpv3 because we don't accelerate them
 	 */
-	if (ecm_interface_skip_l2tp_packet_by_version(skb, out, 3)) {
+	if (ecm_interface_is_l2tp_packet_by_version(skb, out, 3)) {
 		return NF_ACCEPT;
 	}
 
@@ -1195,14 +1195,14 @@ static unsigned int ecm_nss_ipv6_post_routing_hook(const struct nf_hook_ops *ops
 	 * Skip PPTP beacuse we don't support acceleration for
 	 * IPv6 inner header over PPTP
 	 */
-	if (ecm_interface_skip_pptp(skb, out)) {
+	if (ecm_interface_is_pptp(skb, out)) {
 		return NF_ACCEPT;
 	}
 #else
 	/*
 	 * skip l2tp/pptp because we don't accelerate them
 	 */
-	if (ecm_interface_skip_l2tp_pptp(skb, out)) {
+	if (ecm_interface_is_l2tp_pptp(skb, out)) {
 		return NF_ACCEPT;
 	}
 #endif
@@ -1327,7 +1327,7 @@ static unsigned int ecm_nss_ipv6_bridge_post_routing_hook(const struct nf_hook_o
 	/*
 	 * skip l2tp/pptp because we don't accelerate them
 	 */
-	if (ecm_interface_skip_l2tp_pptp(skb, out)) {
+	if (ecm_interface_is_l2tp_pptp(skb, out)) {
 		return NF_ACCEPT;
 	}
 #endif

@@ -1036,15 +1036,14 @@ struct neighbour *ecm_interface_ipv6_neigh_get(ip_addr_t addr)
 }
 #endif
 
-#ifdef ECM_INTERFACE_PPP_ENABLE
 /*
- * ecm_interface_skip_pptp()
+ * ecm_interface_is_pptp()
  *	skip pptp tunnel encapsulated traffic
  *
  * ECM does not handle PPTP,
  * this function detects packets of that type so they can be skipped over to improve their throughput.
  */
-bool ecm_interface_skip_pptp(struct sk_buff *skb, const struct net_device *out)
+bool ecm_interface_is_pptp(struct sk_buff *skb, const struct net_device *out)
 {
 	struct ppp_channel *ppp_chan[1];
 	int px_proto;
@@ -1097,14 +1096,15 @@ bool ecm_interface_skip_pptp(struct sk_buff *skb, const struct net_device *out)
 	return false;
 }
 
+#ifdef ECM_INTERFACE_PPP_ENABLE
 /*
- * ecm_interface_skip_l2tp_packet_by_version()
+ * ecm_interface_is_l2tp_packet_by_version()
  *	Check version of l2tp tunnel encapsulated traffic
  *
  * ECM does not handle l2tp,
  * this function detects packets of that type so they can be skipped over to improve their throughput.
  */
-bool ecm_interface_skip_l2tp_packet_by_version(struct sk_buff *skb, const struct net_device *out, int ver)
+bool ecm_interface_is_l2tp_packet_by_version(struct sk_buff *skb, const struct net_device *out, int ver)
 {
 	struct ppp_channel *ppp_chan[1];
 	int px_proto;
@@ -1173,13 +1173,13 @@ bool ecm_interface_skip_l2tp_packet_by_version(struct sk_buff *skb, const struct
 }
 
 /*
- * ecm_interface_skip_l2tp_pptp()
+ * ecm_interface_is_l2tp_pptp()
  *	skip l2tp/pptp tunnel encapsulated traffic
  *
  * ECM does not handle L2TP or PPTP encapsulated packets,
  * this function detects packets of that type so they can be skipped over to improve their throughput.
  */
-bool ecm_interface_skip_l2tp_pptp(struct sk_buff *skb, const struct net_device *out)
+bool ecm_interface_is_l2tp_pptp(struct sk_buff *skb, const struct net_device *out)
 {
 	struct ppp_channel *ppp_chan[1];
 	int px_proto;

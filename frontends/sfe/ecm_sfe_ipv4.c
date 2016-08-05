@@ -1359,7 +1359,7 @@ static unsigned int ecm_sfe_ipv4_post_routing_hook(const struct nf_hook_ops *ops
 	/*
 	 * skip l2tp/pptp because we don't accelerate them
 	 */
-	if (ecm_interface_skip_l2tp_pptp(skb, out)) {
+	if (ecm_interface_is_l2tp_pptp(skb, out)) {
 		return NF_ACCEPT;
 	}
 #endif

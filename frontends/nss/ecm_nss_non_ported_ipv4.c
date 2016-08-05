@@ -1840,7 +1840,11 @@ unsigned int ecm_nss_non_ported_ipv4_process(struct net_device *out_dev, struct 
 	 * Look up a connection.
 	 */
 	protocol = (int)orig_tuple->dst.protonum;
+#ifdef ECM_INTERFACE_PPTP_ENABLE
 	if ((protocol == IPPROTO_IPV6) || (protocol == IPPROTO_ESP || (protocol == IPPROTO_GRE))) {
+#else
+	if ((protocol == IPPROTO_IPV6) || (protocol == IPPROTO_ESP)) {
+#endif
 		src_port = 0;
 		src_port_nat = 0;
 		dest_port = 0;
