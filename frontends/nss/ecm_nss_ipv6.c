@@ -155,6 +155,7 @@ struct workqueue_struct *ecm_nss_ipv6_workqueue;
 struct delayed_work ecm_nss_ipv6_work;
 struct nss_ipv6_msg *ecm_nss_ipv6_sync_req_msg;
 static unsigned long int ecm_nss_ipv6_next_req_time;
+static unsigned long int ecm_nss_ipv6_roll_check_jiffies;
 static unsigned long int ecm_nss_ipv6_stats_request_success = 0;	/* Number of success stats request */
 static unsigned long int ecm_nss_ipv6_stats_request_fail = 0;		/* Number of failed stats request */
 static unsigned long int ecm_nss_ipv6_stats_request_nack = 0;		/* Number of NACK'd stats request */
@@ -1855,10 +1856,16 @@ static void ecm_nss_ipv6_stats_sync_req_work(struct work_struct *work)
 	 */
 	if (nicsm_req->index == 0) {
 		current_jiffies = jiffies;
+
+		if (time_is_after_jiffies(ecm_nss_ipv6_roll_check_jiffies))  {
+			ecm_nss_ipv6_next_req_time = 0;
+		}
+
 		if (ecm_nss_ipv6_next_req_time > current_jiffies) {
 			msleep(jiffies_to_msecs(ecm_nss_ipv6_next_req_time - current_jiffies));
 		}
-		ecm_nss_ipv6_next_req_time = jiffies + ECM_NSS_IPV6_STATS_SYNC_PERIOD;
+		ecm_nss_ipv6_roll_check_jiffies = jiffies;
+		ecm_nss_ipv6_next_req_time = ecm_nss_ipv6_roll_check_jiffies + ECM_NSS_IPV6_STATS_SYNC_PERIOD;
 	}
 
 	while (retry) {
