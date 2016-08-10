@@ -1836,6 +1836,13 @@ int ecm_sfe_ipv6_init(struct dentry *dentry)
 		goto task_cleanup;
 	}
 #endif
+	/*
+	 * Register this module with the Linux SFE Network driver.
+	 * Notify manager should be registered before the netfilter hooks. Because there
+	 * is a possibility that the ECM can try to send acceleration messages to the
+	 * acceleration engine without having an acceleration engine manager.
+	 */
+	ecm_sfe_ipv6_drv_mgr = sfe_drv_ipv6_notify_register(ecm_sfe_ipv6_stats_sync_callback, NULL);
 
 	/*
 	 * Register netfilter hooks
@@ -1843,18 +1850,13 @@ int ecm_sfe_ipv6_init(struct dentry *dentry)
 	result = nf_register_hooks(ecm_sfe_ipv6_netfilter_hooks, ARRAY_SIZE(ecm_sfe_ipv6_netfilter_hooks));
 	if (result < 0) {
 		DEBUG_ERROR("Can't register netfilter hooks.\n");
+		sfe_drv_ipv6_notify_unregister();
 		goto task_cleanup;
 	}
 
 #ifdef ECM_MULTICAST_ENABLE
 	ecm_sfe_multicast_ipv6_init();
 #endif
-
-	/*
-	 * Register this module with the Linux SFE Network driver
-	 */
-	ecm_sfe_ipv6_drv_mgr = sfe_drv_ipv6_notify_register(ecm_sfe_ipv6_stats_sync_callback, NULL);
-
 	return 0;
 
 task_cleanup:

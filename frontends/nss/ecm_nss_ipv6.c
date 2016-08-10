@@ -2397,6 +2397,13 @@ int ecm_nss_ipv6_init(struct dentry *dentry)
 		goto task_cleanup;
 	}
 #endif
+	/*
+	 * Register this module with the Linux NSS Network driver.
+	 * Notify manager should be registered before the netfilter hooks. Because there
+	 * is a possibility that the ECM can try to send acceleration messages to the
+	 * acceleration engine without having an acceleration engine manager.
+	 */
+	ecm_nss_ipv6_nss_ipv6_mgr = nss_ipv6_notify_register(ecm_nss_ipv6_net_dev_callback, NULL);
 
 	/*
 	 * Register netfilter hooks
@@ -2404,17 +2411,13 @@ int ecm_nss_ipv6_init(struct dentry *dentry)
 	result = nf_register_hooks(ecm_nss_ipv6_netfilter_hooks, ARRAY_SIZE(ecm_nss_ipv6_netfilter_hooks));
 	if (result < 0) {
 		DEBUG_ERROR("Can't register netfilter hooks.\n");
+		nss_ipv6_notify_unregister();
 		goto task_cleanup;
 	}
 
 #ifdef ECM_MULTICAST_ENABLE
 	ecm_nss_multicast_ipv6_init();
 #endif
-
-	/*
-	 * Register this module with the Linux NSS Network driver
-	 */
-	ecm_nss_ipv6_nss_ipv6_mgr = nss_ipv6_notify_register(ecm_nss_ipv6_net_dev_callback, NULL);
 
 	if (!ecm_nss_ipv6_sync_queue_init()) {
 		DEBUG_ERROR("Failed to create ecm ipv6 connection sync workqueue\n");
