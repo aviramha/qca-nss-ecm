@@ -19,7 +19,7 @@
  *	An ecm route supports either v4 or v6 routing information
  */
 struct ecm_interface_route {
-	struct dst_entry *dst;			/* Both ipv4 and v6 have a common dst entry */
+	struct dst_entry *dst;			/* Both ipv4 and v6 have a common dst entry. It is an overlay pointer of rtv4 or rtv6 */
 	union {
 		struct rtable *rtv4;		/* IPv4 route */
 		struct rt6_info *rtv6;		/* IPv6 route */

@@ -400,10 +400,12 @@ static bool ecm_interface_find_gateway_ipv6(ip_addr_t addr, ip_addr_t gw_addr)
 	 */
 	rt = ecm_rt.rt.rtv6;
 	if (ECM_IP_ADDR_MATCH(rt->rt6i_dst.addr.in6_u.u6_addr32, rt->rt6i_gateway.in6_u.u6_addr32) && !(rt->rt6i_flags & RTF_GATEWAY)) {
+		ecm_interface_route_release(&ecm_rt);
 		return false;
 	}
 
 	ECM_NIN6_ADDR_TO_IP_ADDR(gw_addr, rt->rt6i_gateway)
+	ecm_interface_route_release(&ecm_rt);
 	return true;
 }
 #endif
@@ -436,10 +438,12 @@ static bool ecm_interface_find_gateway_ipv4(ip_addr_t addr, ip_addr_t gw_addr)
 #else
 	if (!rt->rt_uses_gateway && !(rt->rt_flags & RTF_GATEWAY)) {
 #endif
+		ecm_interface_route_release(&ecm_rt);
 		return false;
 	}
 
 	ECM_NIN4_ADDR_TO_IP_ADDR(gw_addr, rt->rt_gateway)
+	ecm_interface_route_release(&ecm_rt);
 	return true;
 }
 
