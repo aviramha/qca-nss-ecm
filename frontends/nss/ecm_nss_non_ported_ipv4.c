@@ -1927,30 +1927,6 @@ unsigned int ecm_nss_non_ported_ipv4_process(struct net_device *out_dev, struct 
 		}
 
 		/*
-		 * Does this connection have a conntrack entry?
-		 */
-		if (ct) {
-			unsigned int conn_count;
-
-			/*
-			 * If we have exceeded the connection limit (according to conntrack) then abort
-			 * NOTE: Conntrack, when at its limit, will destroy a connection to make way for a new.
-			 * Conntrack won't exceed its limit but ECM can due to it needing to hold connections while
-			 * acceleration commands are in-flight.
-			 * This means that ECM can 'fall behind' somewhat with the connection state wrt conntrack connection state.
-			 * This is not seen as an issue since conntrack will have issued us with a destroy event for the flushed connection(s)
-			 * and we will eventually catch up.
-			 * Since ECM is capable of handling connections mid-flow ECM will pick up where it can.
-			 */
-			conn_count = (unsigned int)ecm_db_connection_count_get();
-			if (conn_count >= nf_conntrack_max) {
-				ecm_front_end_ipv4_interface_construct_netdev_put(&efeici);
-				DEBUG_WARN("ECM Connection count limit reached: db: %u, ct: %u\n", conn_count, nf_conntrack_max);
-				return NF_ACCEPT;
-			}
-		}
-
-		/*
 		 * Now allocate the new connection
 		 */
 		nci = ecm_db_connection_alloc();
