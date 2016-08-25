@@ -14,6 +14,10 @@
  **************************************************************************
  */
 
+#include <linux/version.h>
+#include <linux/module.h>
+#include <linux/of.h>
+
 /*
  * Bridge device macros
  */
@@ -29,6 +33,23 @@
 #define ecm_front_end_is_lag_slave(dev)	((dev->flags & IFF_SLAVE)	\
 							 && (dev->priv_flags & IFF_BONDING))
 #endif
+
+/*
+ * ECM kernel module parameter "front_end_selection" is used to determine
+ * which front end should be selected. Its possible values are 0, 1 and 2.
+ * They are mapped to following definition.
+ * ECM_FRONT_END_TYPE_AUTO: select NSS front end if hardware support it,
+ *			    otherwise select SFE front end.
+ * ECM_FRONT_END_TYPE_NSS: select NSS front end if hardware support it,
+ *			   otherwise abort initailization.
+ * ECM_FRONT_END_TYPE_SFE: select SFE front end.
+ */
+enum ecm_front_end_type {
+	ECM_FRONT_END_TYPE_AUTO,
+	ECM_FRONT_END_TYPE_NSS,
+	ECM_FRONT_END_TYPE_SFE,
+	ECM_FRONT_END_TYPE_NOT_SUPPORTED
+};
 
 /*
  * enum ecm_front_end_acceleration_modes
@@ -173,3 +194,42 @@ extern bool ecm_front_end_ipv4_interface_construct_set_and_hold(struct sk_buff *
 							ip_addr_t ip_dest_addr, ip_addr_t ip_dest_addr_nat,
 							struct ecm_front_end_interface_construct_instance *efeici);
 
+/*
+ * Detect which front end to run
+ *
+ * User can select front end explicitly by passing 1(nss) or 2(sfe)
+ * to kernel module parameter "front_end_selection". Or let ECM make
+ * the decision by passing 0(auto). "auto" is also the default mode if
+ * user didn't specify parameter "front_end_selection".
+ *
+ * In automatic selection mode, we prefer to select NSS front end if
+ * hardware support it, then SFE front end.
+ *
+ * We check device tree to see if NSS is supported by hardware.
+ * Currenly all ipq8064, ipq8062 and ipq807x platforms support NSS.
+ * Since SFE is a pure software acceleration engine, so all platforms
+ * support it.
+ */
+static inline enum ecm_front_end_type ecm_front_end_type_get(void)
+{
+#ifdef CONFIG_OF
+	bool nss_supported = of_machine_is_compatible("qcom,ipq8064") ||
+				of_machine_is_compatible("qcom,ipq8062") ||
+				of_machine_is_compatible("qcom,ipq807x");
+#else
+	bool nss_supported = true;
+#endif
+	extern int front_end_selection;
+
+	if (nss_supported && ((front_end_selection == ECM_FRONT_END_TYPE_AUTO) ||
+			      (front_end_selection == ECM_FRONT_END_TYPE_NSS))) {
+		return ECM_FRONT_END_TYPE_NSS;
+	}
+
+	if ((front_end_selection == ECM_FRONT_END_TYPE_AUTO) ||
+	    (front_end_selection == ECM_FRONT_END_TYPE_SFE)) {
+		return ECM_FRONT_END_TYPE_SFE;
+	}
+
+	return ECM_FRONT_END_TYPE_NOT_SUPPORTED;
+}

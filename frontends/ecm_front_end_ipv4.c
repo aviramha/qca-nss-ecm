@@ -362,24 +362,15 @@ int ecm_front_end_ipv4_init(struct dentry *dentry)
 		return -1;
 	}
 
-	/*
-	 * If the device tree is used, check which accel engine can be used.
-	 * For ipq8064 platform, we will use NSS.
-	 */
-#ifdef CONFIG_OF
-	/*
-	 * Check the other platforms and use the correct APIs for those platforms.
-	 */
-	if (!of_machine_is_compatible("qcom,ipq8064") &&
-		!of_machine_is_compatible("qcom,ipq8062") &&
-		!of_machine_is_compatible("qcom,ipq807x")) {
-		return ecm_sfe_ipv4_init(dentry);
-	} else {
+	switch (ecm_front_end_type_get()) {
+	case ECM_FRONT_END_TYPE_NSS:
 		return ecm_nss_ipv4_init(dentry);
+	case ECM_FRONT_END_TYPE_SFE:
+		return ecm_sfe_ipv4_init(dentry);
+	default:
+		DEBUG_ERROR("Failed to init ipv4 front end\n");
+		return -1;
 	}
-#else
-	return ecm_nss_ipv4_init(dentry);
-#endif
 }
 
 /*
@@ -387,23 +378,16 @@ int ecm_front_end_ipv4_init(struct dentry *dentry)
  */
 void ecm_front_end_ipv4_exit(void)
 {
-	/*
-	 * If the device tree is used, check which accel engine will be exited.
-	 * For ipq8064 platforms, we will exit NSS.
-	 */
-#ifdef CONFIG_OF
-	/*
-	 * Check the other platforms and use the correct APIs for those platforms.
-	 */
-	if (!of_machine_is_compatible("qcom,ipq8064") &&
-		!of_machine_is_compatible("qcom,ipq8062") &&
-		!of_machine_is_compatible("qcom,ipq807x")) {
-		ecm_sfe_ipv4_exit();
-	} else {
+	switch (ecm_front_end_type_get()) {
+	case ECM_FRONT_END_TYPE_NSS:
 		ecm_nss_ipv4_exit();
+		break;
+	case ECM_FRONT_END_TYPE_SFE:
+		ecm_sfe_ipv4_exit();
+		break;
+	default:
+		DEBUG_ERROR("Failed to exit from front end\n");
+		break;
 	}
-#else
-	ecm_nss_ipv4_exit();
-#endif
 }
 

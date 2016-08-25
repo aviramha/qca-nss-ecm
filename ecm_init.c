@@ -46,6 +46,10 @@
 #include "ecm_front_end_common.h"
 #include "ecm_conntrack_notifier.h"
 
+int front_end_selection;
+module_param(front_end_selection, int, 0);
+MODULE_PARM_DESC(front_end_selection, "Select front end for ECM");
+
 struct dentry *ecm_dentry;	/* Dentry object for top level ecm debugfs directory */
 
 extern int ecm_db_init(struct dentry *dentry);

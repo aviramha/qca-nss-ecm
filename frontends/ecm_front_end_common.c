@@ -52,21 +52,9 @@
  */
 void ecm_front_end_bond_notifier_stop(int num)
 {
-	/*
-	 * If the device tree is used, check which accel engine's bond notifier
-	 * will be stopped.
-	 * For ipq8064 platforms, we will stop NSS version.
-	 */
-#ifdef CONFIG_OF
-	/*
-	 * Check the other platforms and use the correct APIs for those platforms.
-	 */
-	if (!of_machine_is_compatible("qcom,ipq8064") &&
-		!of_machine_is_compatible("qcom,ipq8062") &&
-		!of_machine_is_compatible("qcom,ipq807x"))
-		return;
-#endif
-	ecm_nss_bond_notifier_stop(num);
+	if (ECM_FRONT_END_TYPE_NSS == ecm_front_end_type_get()) {
+		ecm_nss_bond_notifier_stop(num);
+	}
 }
 
 /*
@@ -74,21 +62,11 @@ void ecm_front_end_bond_notifier_stop(int num)
  */
 int ecm_front_end_bond_notifier_init(struct dentry *dentry)
 {
-	/*
-	 * If the device tree is used, check which accel engine's bond notifier
-	 * can be used.
-	 * For ipq8064 platform, we will use NSS.
-	 */
-#ifdef CONFIG_OF
-	/*
-	 * Check the other platforms and use the correct APIs for those platforms.
-	 */
-	if (!of_machine_is_compatible("qcom,ipq8064") &&
-		!of_machine_is_compatible("qcom,ipq8062") &&
-		!of_machine_is_compatible("qcom,ipq807x"))
-		return 0;
-#endif
-	return ecm_nss_bond_notifier_init(dentry);
+	if (ECM_FRONT_END_TYPE_NSS == ecm_front_end_type_get()) {
+		return ecm_nss_bond_notifier_init(dentry);
+	}
+
+	return 0;
 }
 
 /*
@@ -96,21 +74,9 @@ int ecm_front_end_bond_notifier_init(struct dentry *dentry)
  */
 void ecm_front_end_bond_notifier_exit(void)
 {
-	/*
-	 * If the device tree is used, check which accel engine's conntack notifier
-	 * will be exited.
-	 * For ipq8064 platforms, we will exit NSS.
-	 */
-#ifdef CONFIG_OF
-	/*
-	 * Check the other platforms and use the correct APIs for those platforms.
-	 */
-	if (!of_machine_is_compatible("qcom,ipq8064") &&
-		!of_machine_is_compatible("qcom,ipq8062") &&
-		!of_machine_is_compatible("qcom,ipq807x"))
-		return;
-#endif
-	ecm_nss_bond_notifier_exit();
+	if (ECM_FRONT_END_TYPE_NSS == ecm_front_end_type_get()) {
+		ecm_nss_bond_notifier_exit();
+	}
 }
 #endif
 
