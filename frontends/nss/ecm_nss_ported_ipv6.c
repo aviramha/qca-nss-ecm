@@ -76,6 +76,7 @@
 #include "ecm_tracker.h"
 #include "ecm_classifier.h"
 #include "ecm_front_end_types.h"
+#include "ecm_front_end_common.h"
 #include "ecm_tracker_datagram.h"
 #include "ecm_tracker_udp.h"
 #include "ecm_tracker_tcp.h"
@@ -880,24 +881,28 @@ static void ecm_nss_ported_ipv6_connection_accelerate(struct ecm_front_end_conne
 			DEBUG_TRACE("%p: TCP Accel no ct from conn %p to get window data\n", npci, feci->ci);
 			nircm->rule_flags |= NSS_IPV6_RULE_CREATE_FLAG_NO_SEQ_CHECK;
 		} else {
-			spin_lock_bh(&ct->lock);
-			DEBUG_TRACE("%p: TCP Accel Get window data from ct %p for conn %p\n", npci, ct, feci->ci);
+			int flow_dir;
+			int return_dir;
 
-			nircm->tcp_rule.flow_window_scale = ct->proto.tcp.seen[0].td_scale;
-			nircm->tcp_rule.flow_max_window = ct->proto.tcp.seen[0].td_maxwin;
-			nircm->tcp_rule.flow_end = ct->proto.tcp.seen[0].td_end;
-			nircm->tcp_rule.flow_max_end = ct->proto.tcp.seen[0].td_maxend;
-			nircm->tcp_rule.return_window_scale = ct->proto.tcp.seen[1].td_scale;
-			nircm->tcp_rule.return_max_window = ct->proto.tcp.seen[1].td_maxwin;
-			nircm->tcp_rule.return_end = ct->proto.tcp.seen[1].td_end;
-			nircm->tcp_rule.return_max_end = ct->proto.tcp.seen[1].td_maxend;
+			ecm_front_end_flow_and_return_directions_get(ct, src_ip, 6, &flow_dir, &return_dir);
+
+			DEBUG_TRACE("%p: TCP Accel Get window data from ct %p for conn %p\n", npci, ct, feci->ci);
+			spin_lock_bh(&ct->lock);
+			nircm->tcp_rule.flow_window_scale = ct->proto.tcp.seen[flow_dir].td_scale;
+			nircm->tcp_rule.flow_max_window = ct->proto.tcp.seen[flow_dir].td_maxwin;
+			nircm->tcp_rule.flow_end = ct->proto.tcp.seen[flow_dir].td_end;
+			nircm->tcp_rule.flow_max_end = ct->proto.tcp.seen[flow_dir].td_maxend;
+			nircm->tcp_rule.return_window_scale = ct->proto.tcp.seen[return_dir].td_scale;
+			nircm->tcp_rule.return_max_window = ct->proto.tcp.seen[return_dir].td_maxwin;
+			nircm->tcp_rule.return_end = ct->proto.tcp.seen[return_dir].td_end;
+			nircm->tcp_rule.return_max_end = ct->proto.tcp.seen[return_dir].td_maxend;
 #ifdef ECM_OPENWRT_SUPPORT
 			if (nf_ct_tcp_be_liberal || nf_ct_tcp_no_window_check
 #else
 			if (nf_ct_tcp_be_liberal
 #endif
-					|| (ct->proto.tcp.seen[0].flags & IP_CT_TCP_FLAG_BE_LIBERAL)
-					|| (ct->proto.tcp.seen[1].flags & IP_CT_TCP_FLAG_BE_LIBERAL)) {
+					|| (ct->proto.tcp.seen[flow_dir].flags & IP_CT_TCP_FLAG_BE_LIBERAL)
+					|| (ct->proto.tcp.seen[return_dir].flags & IP_CT_TCP_FLAG_BE_LIBERAL)) {
 				nircm->rule_flags |= NSS_IPV6_RULE_CREATE_FLAG_NO_SEQ_CHECK;
 			}
 			spin_unlock_bh(&ct->lock);

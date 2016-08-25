@@ -1413,6 +1413,8 @@ static void ecm_sfe_ipv4_stats_sync_callback(void *app_data, struct sfe_ipv4_msg
 	int aci_index;
 	int assignment_count;
 	struct ecm_classifier_rule_sync class_sync;
+	int flow_dir;
+	int return_dir;
 
 	/*
 	 * Only respond to sync messages
@@ -1679,6 +1681,8 @@ sync_conntrack:
 	NF_CT_ASSERT(ct->timeout.data == (unsigned long)ct);
 	DEBUG_TRACE("%p: SFE Sync: conntrack connection\n", ct);
 
+	ecm_front_end_flow_and_return_directions_get(ct, flow_ip, 4, &flow_dir, &return_dir);
+
 	/*
 	 * Only update if this is not a fixed timeout
 	 */
@@ -1706,34 +1710,34 @@ sync_conntrack:
 #endif
 	if (acct) {
 		spin_lock_bh(&ct->lock);
-		atomic64_add(sync->flow_rx_packet_count, &acct[IP_CT_DIR_ORIGINAL].packets);
-		atomic64_add(sync->flow_rx_byte_count, &acct[IP_CT_DIR_ORIGINAL].bytes);
+		atomic64_add(sync->flow_rx_packet_count, &acct[flow_dir].packets);
+		atomic64_add(sync->flow_rx_byte_count, &acct[flow_dir].bytes);
 
-		atomic64_add(sync->return_rx_packet_count, &acct[IP_CT_DIR_REPLY].packets);
-		atomic64_add(sync->return_rx_byte_count, &acct[IP_CT_DIR_REPLY].bytes);
+		atomic64_add(sync->return_rx_packet_count, &acct[return_dir].packets);
+		atomic64_add(sync->return_rx_byte_count, &acct[return_dir].bytes);
 		spin_unlock_bh(&ct->lock);
 	}
 
 	switch (sync->protocol) {
 	case IPPROTO_TCP:
 		spin_lock_bh(&ct->lock);
-		if (ct->proto.tcp.seen[0].td_maxwin < sync->flow_max_window) {
-			ct->proto.tcp.seen[0].td_maxwin = sync->flow_max_window;
+		if (ct->proto.tcp.seen[flow_dir].td_maxwin < sync->flow_max_window) {
+			ct->proto.tcp.seen[flow_dir].td_maxwin = sync->flow_max_window;
 		}
-		if ((int32_t)(ct->proto.tcp.seen[0].td_end - sync->flow_end) < 0) {
-			ct->proto.tcp.seen[0].td_end = sync->flow_end;
+		if ((int32_t)(ct->proto.tcp.seen[flow_dir].td_end - sync->flow_end) < 0) {
+			ct->proto.tcp.seen[flow_dir].td_end = sync->flow_end;
 		}
-		if ((int32_t)(ct->proto.tcp.seen[0].td_maxend - sync->flow_max_end) < 0) {
-			ct->proto.tcp.seen[0].td_maxend = sync->flow_max_end;
+		if ((int32_t)(ct->proto.tcp.seen[flow_dir].td_maxend - sync->flow_max_end) < 0) {
+			ct->proto.tcp.seen[flow_dir].td_maxend = sync->flow_max_end;
 		}
-		if (ct->proto.tcp.seen[1].td_maxwin < sync->return_max_window) {
-			ct->proto.tcp.seen[1].td_maxwin = sync->return_max_window;
+		if (ct->proto.tcp.seen[return_dir].td_maxwin < sync->return_max_window) {
+			ct->proto.tcp.seen[return_dir].td_maxwin = sync->return_max_window;
 		}
-		if ((int32_t)(ct->proto.tcp.seen[1].td_end - sync->return_end) < 0) {
-			ct->proto.tcp.seen[1].td_end = sync->return_end;
+		if ((int32_t)(ct->proto.tcp.seen[return_dir].td_end - sync->return_end) < 0) {
+			ct->proto.tcp.seen[return_dir].td_end = sync->return_end;
 		}
-		if ((int32_t)(ct->proto.tcp.seen[1].td_maxend - sync->return_max_end) < 0) {
-			ct->proto.tcp.seen[1].td_maxend = sync->return_max_end;
+		if ((int32_t)(ct->proto.tcp.seen[return_dir].td_maxend - sync->return_max_end) < 0) {
+			ct->proto.tcp.seen[return_dir].td_maxend = sync->return_max_end;
 		}
 		spin_unlock_bh(&ct->lock);
 		break;
