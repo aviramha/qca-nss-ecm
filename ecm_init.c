@@ -292,7 +292,6 @@ static void __exit ecm_exit(void)
 module_init(ecm_init)
 module_exit(ecm_exit)
 
-MODULE_AUTHOR("Qualcomm Atheros, Inc.");
 MODULE_DESCRIPTION("ECM Core");
 #ifdef MODULE_LICENSE
 MODULE_LICENSE("Dual BSD/GPL");
