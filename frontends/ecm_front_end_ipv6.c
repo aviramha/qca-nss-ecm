@@ -49,6 +49,11 @@
 #include "ecm_front_end_ipv6.h"
 
 /*
+ * General operational control
+ */
+int ecm_front_end_ipv6_stopped = 0;	/* When non-zero further traffic will not be processed */
+
+/*
  * ecm_front_end_ipv6_interface_construct_ip_addr_set()
  *	Sets the IP addresses.
  *
@@ -199,24 +204,7 @@ bool ecm_front_end_ipv6_interface_construct_set_and_hold(struct sk_buff *skb, ec
  */
 void ecm_front_end_ipv6_stop(int num)
 {
-	/*
-	 * If the device tree is used, check which accel engine will be stopped.
-	 * For ipq8064 platforms, we will stop NSS.
-	 */
-#ifdef CONFIG_OF
-	/*
-	 * Check the other platforms and use the correct APIs for those platforms.
-	 */
-	if (!of_machine_is_compatible("qcom,ipq8064") &&
-		!of_machine_is_compatible("qcom,ipq8062") &&
-		!of_machine_is_compatible("qcom,ipq807x")) {
-		ecm_sfe_ipv6_stop(num);
-	} else {
-		ecm_nss_ipv6_stop(num);
-	}
-#else
-	ecm_nss_ipv6_stop(num);
-#endif
+	ecm_front_end_ipv6_stopped = num;
 }
 
 /*
@@ -224,6 +212,12 @@ void ecm_front_end_ipv6_stop(int num)
  */
 int ecm_front_end_ipv6_init(struct dentry *dentry)
 {
+	if (!debugfs_create_u32("front_end_ipv6_stop", S_IRUGO | S_IWUSR, dentry,
+					(u32 *)&ecm_front_end_ipv6_stopped)) {
+		DEBUG_ERROR("Failed to create ecm front end ipv6 stop file in debugfs\n");
+		return -1;
+	}
+
 	/*
 	 * If the device tree is used, check which accel engine can be used.
 	 * For ipq8064 platform, we will use NSS.

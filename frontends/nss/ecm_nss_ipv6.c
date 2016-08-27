@@ -94,7 +94,6 @@
 #include "ecm_classifier_nl.h"
 #endif
 #include "ecm_interface.h"
-#include "ecm_nss_ipv6.h"
 #include "ecm_nss_common.h"
 #include "ecm_nss_ported_ipv6.h"
 #ifdef ECM_MULTICAST_ENABLE
@@ -103,8 +102,8 @@
 #ifdef ECM_NON_PORTED_SUPPORT_ENABLE
 #include "ecm_nss_non_ported_ipv6.h"
 #endif
-
 #include "ecm_front_end_common.h"
+#include "ecm_front_end_ipv6.h"
 
 #define ECM_NSS_IPV6_STATS_SYNC_PERIOD msecs_to_jiffies(1000)
 #define ECM_NSS_IPV6_STATS_SYNC_UDELAY 4000	/* Delay for 4ms */
@@ -164,11 +163,6 @@ static unsigned long ecm_nss_ipv6_decel_cmd_time_avg_set = 1;	/* How many sample
  * Debugfs dentry object.
  */
 static struct dentry *ecm_nss_ipv6_dentry;
-
-/*
- * General operational control
- */
-static int ecm_nss_ipv6_stopped = 0;			/* When non-zero further traffic will not be processed */
 
 /*
  * ecm_nss_ipv6_node_establish_and_ref()
@@ -1009,7 +1003,7 @@ static unsigned int ecm_nss_ipv6_post_routing_hook(const struct nf_hook_ops *ops
 	 * If operations have stopped then do not process packets
 	 */
 	spin_lock_bh(&ecm_nss_ipv6_lock);
-	if (unlikely(ecm_nss_ipv6_stopped)) {
+	if (unlikely(ecm_front_end_ipv6_stopped)) {
 		spin_unlock_bh(&ecm_nss_ipv6_lock);
 		DEBUG_TRACE("Front end stopped\n");
 		return NF_ACCEPT;
@@ -1160,7 +1154,7 @@ static unsigned int ecm_nss_ipv6_bridge_post_routing_hook(const struct nf_hook_o
 	 * If operations have stopped then do not process packets
 	 */
 	spin_lock_bh(&ecm_nss_ipv6_lock);
-	if (unlikely(ecm_nss_ipv6_stopped)) {
+	if (unlikely(ecm_front_end_ipv6_stopped)) {
 		spin_unlock_bh(&ecm_nss_ipv6_lock);
 		DEBUG_TRACE("Front end stopped\n");
 		return NF_ACCEPT;
@@ -1801,130 +1795,6 @@ static struct nf_hook_ops ecm_nss_ipv6_netfilter_hooks[] __read_mostly = {
 };
 
 /*
- * ecm_nss_ipv6_conntrack_event_destroy()
- *	Handles conntrack destroy events
- */
-static void ecm_nss_ipv6_conntrack_event_destroy(struct nf_conn *ct)
-{
-	struct ecm_db_connection_instance *ci;
-	struct ecm_front_end_connection_instance *feci;
-
-	DEBUG_INFO("Destroy event for ct: %p\n", ct);
-
-	ci = ecm_db_connection_ipv6_from_ct_get_and_ref(ct);
-	if (!ci) {
-		DEBUG_TRACE("%p: not found\n", ct);
-		return;
-	}
-	DEBUG_INFO("%p: Connection defunct %p\n", ct, ci);
-
-	/*
-	 * If this connection is accelerated then we need to issue a destroy command
-	 */
-	feci = ecm_db_connection_front_end_get_and_ref(ci);
-	feci->decelerate(feci);
-	feci->deref(feci);
-
-	/*
-	 * Force destruction of the connection my making it defunct
-	 */
-	ecm_db_connection_make_defunct(ci);
-	ecm_db_connection_deref(ci);
-}
-
-#if defined(CONFIG_NF_CONNTRACK_MARK)
-/*
- * ecm_nss_ipv6_conntrack_event_mark()
- *	Handles conntrack mark events
- */
-static void ecm_nss_ipv6_conntrack_event_mark(struct nf_conn *ct)
-{
-	struct ecm_db_connection_instance *ci;
-	struct ecm_classifier_instance *__attribute__((unused))cls;
-
-	DEBUG_INFO("Mark event for ct: %p\n", ct);
-
-	/*
-	 * Ignore transitions to zero
-	 */
-	if (ct->mark == 0) {
-		return;
-	}
-
-	ci = ecm_db_connection_ipv6_from_ct_get_and_ref(ct);
-	if (!ci) {
-		DEBUG_TRACE("%p: not found\n", ct);
-		return;
-	}
-
-#ifdef ECM_CLASSIFIER_NL_ENABLE
-	/*
-	 * As of now, only the Netlink classifier is interested in conmark changes
-	 * GGG TODO Add a classifier method to propagate this information to any and all types of classifier.
-	 */
-	cls = ecm_db_connection_assigned_classifier_find_and_ref(ci, ECM_CLASSIFIER_TYPE_NL);
-	if (cls) {
-		ecm_classifier_nl_process_mark((struct ecm_classifier_nl_instance *)cls, ct->mark);
-		cls->deref(cls);
-	}
-#endif
-	/*
-	 * All done
-	 */
-	ecm_db_connection_deref(ci);
-}
-#endif
-
-/*
- * ecm_nss_ipv6_conntrack_event()
- *	Callback event invoked when conntrack connection state changes, currently we handle destroy events to quickly release state
- */
-int ecm_nss_ipv6_conntrack_event(unsigned long events, struct nf_conn *ct)
-{
-	/*
-	 * If operations have stopped then do not process event
-	 */
-	spin_lock_bh(&ecm_nss_ipv6_lock);
-	if (unlikely(ecm_nss_ipv6_stopped)) {
-		DEBUG_WARN("Ignoring event - stopped\n");
-		spin_unlock_bh(&ecm_nss_ipv6_lock);
-		return NOTIFY_DONE;
-	}
-	spin_unlock_bh(&ecm_nss_ipv6_lock);
-
-	if (!ct) {
-		DEBUG_WARN("Error: no ct\n");
-		return NOTIFY_DONE;
-	}
-
-	/*
-	 * handle destroy events
-	 */
-	if (events & (1 << IPCT_DESTROY)) {
-		DEBUG_TRACE("%p: Event is destroy\n", ct);
-		ecm_nss_ipv6_conntrack_event_destroy(ct);
-	}
-
-#if defined(CONFIG_NF_CONNTRACK_MARK)
-	/*
-	 * handle mark change events
-	 */
-	if (events & (1 << IPCT_MARK)) {
-		DEBUG_TRACE("%p: Event is mark\n", ct);
-		ecm_nss_ipv6_conntrack_event_mark(ct);
-	}
-#endif
-	return NOTIFY_DONE;
-}
-EXPORT_SYMBOL(ecm_nss_ipv6_conntrack_event);
-
-void ecm_nss_ipv6_stop(int num)
-{
-	ecm_nss_ipv6_stopped = num;
-}
-EXPORT_SYMBOL(ecm_nss_ipv6_stop);
-
-/*
  * ecm_nss_ipv6_get_accel_limit_mode()
  */
 static int ecm_nss_ipv6_get_accel_limit_mode(void *data, u64 *val)
@@ -2183,12 +2053,6 @@ int ecm_nss_ipv6_init(struct dentry *dentry)
 	if (!ecm_nss_ipv6_dentry) {
 		DEBUG_ERROR("Failed to create ecm nss ipv6 directory in debugfs\n");
 		return result;
-	}
-
-	if (!debugfs_create_u32("stop", S_IRUGO | S_IWUSR, ecm_nss_ipv6_dentry,
-					(u32 *)&ecm_nss_ipv6_stopped)) {
-		DEBUG_ERROR("Failed to create ecm nss ipv6 stop file in debugfs\n");
-		goto task_cleanup;
 	}
 
 	if (!debugfs_create_u32("no_action_limit_default", S_IRUGO | S_IWUSR, ecm_nss_ipv6_dentry,

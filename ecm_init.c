@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2014-2015, The Linux Foundation.  All rights reserved.
+ * Copyright (c) 2014-2016, The Linux Foundation.  All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -44,6 +44,7 @@
 #include "ecm_front_end_ipv6.h"
 #endif
 #include "ecm_front_end_common.h"
+#include "ecm_conntrack_notifier.h"
 
 struct dentry *ecm_dentry;	/* Dentry object for top level ecm debugfs directory */
 
@@ -159,7 +160,7 @@ static int __init ecm_init(void)
 	}
 #endif
 
-	ret = ecm_front_end_conntrack_notifier_init(ecm_dentry);
+	ret = ecm_conntrack_notifier_init(ecm_dentry);
 	if (0 != ret) {
 		goto err_ct;
 	}
@@ -176,7 +177,7 @@ static int __init ecm_init(void)
 
 #ifdef ECM_STATE_OUTPUT_ENABLE
 err_state:
-	ecm_front_end_conntrack_notifier_exit();
+	ecm_conntrack_notifier_exit();
 #endif
 err_ct:
 #ifdef ECM_IPV6_ENABLE
@@ -226,7 +227,7 @@ static void __exit ecm_exit(void)
 
 	/* call stop on anything that requires a prepare-to-exit signal */
 	DEBUG_INFO("stop conntrack notifier\n");
-	ecm_front_end_conntrack_notifier_stop(1);
+	ecm_conntrack_notifier_stop(1);
 	DEBUG_INFO("stop front_end_ipv4\n");
 	ecm_front_end_ipv4_stop(1);
 #ifdef ECM_IPV6_ENABLE
@@ -246,7 +247,7 @@ static void __exit ecm_exit(void)
 	ecm_state_exit();
 #endif
 	DEBUG_INFO("exit conntrack notifier\n");
-	ecm_front_end_conntrack_notifier_exit();
+	ecm_conntrack_notifier_exit();
 	DEBUG_INFO("exit front_end_ipv4\n");
 	ecm_front_end_ipv4_exit();
 #ifdef ECM_IPV6_ENABLE

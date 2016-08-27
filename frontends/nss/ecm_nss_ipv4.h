@@ -177,5 +177,4 @@ extern struct ecm_db_node_instance *ecm_nss_ipv4_node_establish_and_ref(struct e
 extern struct ecm_db_host_instance *ecm_nss_ipv4_host_establish_and_ref(ip_addr_t addr);
 extern struct ecm_db_mapping_instance *ecm_nss_ipv4_mapping_establish_and_ref(ip_addr_t addr, int port);
 extern int ecm_nss_ipv4_init(struct dentry *dentry);
-extern void ecm_nss_ipv4_stop(int);
 extern void ecm_nss_ipv4_exit(void);

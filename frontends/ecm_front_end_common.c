@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2015 The Linux Foundation.  All rights reserved.
+ * Copyright (c) 2015, 2016, The Linux Foundation.  All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -46,86 +46,7 @@
 #include "ecm_db.h"
 #include "ecm_front_end_common.h"
 
-/*
- * ecm_front_end_conntrack_notifier_stop()
- */
-void ecm_front_end_conntrack_notifier_stop(int num)
-{
-	/*
-	 * If the device tree is used, check which accel engine's conntrack notifier
-	 * will be stopped.
-	 * For ipq8064 platforms, we will stop NSS version.
-	 */
-#ifdef CONFIG_OF
-	/*
-	 * Check the other platforms and use the correct APIs for those platforms.
-	 */
-	if (!of_machine_is_compatible("qcom,ipq8064") &&
-		!of_machine_is_compatible("qcom,ipq8062") &&
-		!of_machine_is_compatible("qcom,ipq807x")) {
-		ecm_sfe_conntrack_notifier_stop(num);
-	} else {
-		ecm_nss_conntrack_notifier_stop(num);
-	}
-#else
-	ecm_nss_conntrack_notifier_stop(num);
-#endif
-}
-
-/*
- * ecm_front_end_conntrack_notifier_init()
- */
-int ecm_front_end_conntrack_notifier_init(struct dentry *dentry)
-{
-	/*
-	 * If the device tree is used, check which accel engine's conntrack notifier
-	 * can be used.
-	 * For ipq8064 platform, we will use NSS.
-	 */
-#ifdef CONFIG_OF
-	/*
-	 * Check the other platforms and use the correct APIs for those platforms.
-	 */
-	if (!of_machine_is_compatible("qcom,ipq8064") &&
-		!of_machine_is_compatible("qcom,ipq8062") &&
-		!of_machine_is_compatible("qcom,ipq807x")) {
-		return ecm_sfe_conntrack_notifier_init(dentry);
-	} else {
-		return ecm_nss_conntrack_notifier_init(dentry);
-	}
-#else
-	return ecm_nss_conntrack_notifier_init(dentry);
-#endif
-}
-
-/*
- * ecm_front_end_conntrack_notifier_exit()
- */
-void ecm_front_end_conntrack_notifier_exit(void)
-{
-	/*
-	 * If the device tree is used, check which accel engine's conntack notifier
-	 * will be exited.
-	 * For ipq8064 platforms, we will exit NSS.
-	 */
-#ifdef CONFIG_OF
-	/*
-	 * Check the other platforms and use the correct APIs for those platforms.
-	 */
-	if (!of_machine_is_compatible("qcom,ipq8064") &&
-		!of_machine_is_compatible("qcom,ipq8062") &&
-		!of_machine_is_compatible("qcom,ipq807x")) {
-		ecm_sfe_conntrack_notifier_exit();
-	} else {
-		ecm_nss_conntrack_notifier_exit();
-	}
-#else
-	ecm_nss_conntrack_notifier_exit();
-#endif
-}
-
 #ifdef ECM_INTERFACE_BOND_ENABLE
-
 /*
  * ecm_front_end_bond_notifier_stop()
  */
@@ -191,7 +112,6 @@ void ecm_front_end_bond_notifier_exit(void)
 #endif
 	ecm_nss_bond_notifier_exit();
 }
-
 #endif
 
 
