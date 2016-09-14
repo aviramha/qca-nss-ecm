@@ -2236,6 +2236,7 @@ static struct ecm_db_node_instance *ecm_nss_multicast_ipv6_node_establish_and_re
 	ni = ecm_db_node_find_and_ref(node_addr, ii);
 	if (ni) {
 		DEBUG_TRACE("%p: node established\n", ni);
+		ecm_db_iface_deref(ii);
 		return ni;
 	}
 
