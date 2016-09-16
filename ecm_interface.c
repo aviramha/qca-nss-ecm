@@ -3252,6 +3252,12 @@ static bool ecm_interface_get_next_node_mac_address(
 			if (ecm_interface_find_gateway(dest_addr, gw_addr)) {
 				on_link = false;
 			}
+
+			if (ecm_interface_mac_addr_get_no_route(dest_dev, gw_addr, mac_addr)) {
+				DEBUG_TRACE("Found the mac address for gateway\n");
+				return true;
+			}
+
 			ecm_interface_send_arp_request(dest_dev, dest_addr, on_link, gw_addr);
 		}
 #ifdef ECM_IPV6_ENABLE
