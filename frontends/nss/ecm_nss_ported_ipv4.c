@@ -2034,16 +2034,6 @@ unsigned int ecm_nss_ported_ipv4_process(struct net_device *out_dev, struct net_
 		}
 		spin_unlock_bh(&ecm_nss_ipv4_lock);
 
-		if (!ecm_front_end_ipv4_interface_construct_set_and_hold(skb, sender, ecm_dir, is_routed,
-							in_dev, out_dev,
-							ip_src_addr, ip_src_addr_nat,
-							ip_dest_addr, ip_dest_addr_nat,
-							&efeici)) {
-
-			DEBUG_WARN("ECM front end ipv4 interface construct set failed for routed traffic\n");
-			return NF_ACCEPT;
-		}
-
 		/*
 		 * Does this connection have a conntrack entry?
 		 */
@@ -2056,7 +2046,6 @@ unsigned int ecm_nss_ported_ipv4_process(struct net_device *out_dev, struct net_
 				if (ct->proto.tcp.state >= TCP_CONNTRACK_FIN_WAIT && ct->proto.tcp.state <= TCP_CONNTRACK_CLOSE) {
 					spin_unlock_bh(&ct->lock);
 					DEBUG_TRACE("%p: Connection in termination state %#X\n", ct, ct->proto.tcp.state);
-					ecm_front_end_ipv4_interface_construct_netdev_put(&efeici);
 					return NF_ACCEPT;
 				}
 				spin_unlock_bh(&ct->lock);
@@ -2068,7 +2057,6 @@ unsigned int ecm_nss_ported_ipv4_process(struct net_device *out_dev, struct net_
 		 */
 		nci = ecm_db_connection_alloc();
 		if (!nci) {
-			ecm_front_end_ipv4_interface_construct_netdev_put(&efeici);
 			DEBUG_WARN("Failed to allocate connection\n");
 			return NF_ACCEPT;
 		}
@@ -2079,8 +2067,19 @@ unsigned int ecm_nss_ported_ipv4_process(struct net_device *out_dev, struct net_
 		feci = (struct ecm_front_end_connection_instance *)ecm_nss_ported_ipv4_connection_instance_alloc(nci, protocol, can_accel);
 		if (!feci) {
 			ecm_db_connection_deref(nci);
-			ecm_front_end_ipv4_interface_construct_netdev_put(&efeici);
 			DEBUG_WARN("Failed to allocate front end\n");
+			return NF_ACCEPT;
+		}
+
+		if (!ecm_front_end_ipv4_interface_construct_set_and_hold(skb, sender, ecm_dir, is_routed,
+							in_dev, out_dev,
+							ip_src_addr, ip_src_addr_nat,
+							ip_dest_addr, ip_dest_addr_nat,
+							&efeici)) {
+
+			feci->deref(feci);
+			ecm_db_connection_deref(nci);
+			DEBUG_WARN("ECM front end ipv4 interface construct set failed for routed traffic\n");
 			return NF_ACCEPT;
 		}
 

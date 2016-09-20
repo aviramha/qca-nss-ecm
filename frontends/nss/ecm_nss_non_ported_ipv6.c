@@ -1703,20 +1703,11 @@ unsigned int ecm_nss_non_ported_ipv6_process(struct net_device *out_dev,
 		}
 		spin_unlock_bh(&ecm_nss_ipv6_lock);
 
-		if (!ecm_front_end_ipv6_interface_construct_set_and_hold(skb, sender, ecm_dir, is_routed,
-							in_dev, out_dev,
-							ip_src_addr, ip_dest_addr,
-							&efeici)) {
-			DEBUG_WARN("ECM front end ipv6 interface construct set failed\n");
-			return NF_ACCEPT;
-		}
-
 		/*
 		 * Now allocate the new connection
 		 */
 		nci = ecm_db_connection_alloc();
 		if (!nci) {
-			ecm_front_end_ipv6_interface_construct_netdev_put(&efeici);
 			DEBUG_WARN("Failed to allocate connection\n");
 			return NF_ACCEPT;
 		}
@@ -1727,8 +1718,17 @@ unsigned int ecm_nss_non_ported_ipv6_process(struct net_device *out_dev,
 		feci = (struct ecm_front_end_connection_instance *)ecm_nss_non_ported_ipv6_connection_instance_alloc(nci, can_accel);
 		if (!feci) {
 			ecm_db_connection_deref(nci);
-			ecm_front_end_ipv6_interface_construct_netdev_put(&efeici);
 			DEBUG_WARN("Failed to allocate front end\n");
+			return NF_ACCEPT;
+		}
+
+		if (!ecm_front_end_ipv6_interface_construct_set_and_hold(skb, sender, ecm_dir, is_routed,
+							in_dev, out_dev,
+							ip_src_addr, ip_dest_addr,
+							&efeici)) {
+			feci->deref(feci);
+			ecm_db_connection_deref(nci);
+			DEBUG_WARN("ECM front end ipv6 interface construct set failed\n");
 			return NF_ACCEPT;
 		}
 
