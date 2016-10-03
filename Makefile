@@ -114,15 +114,6 @@ ccflags-$(ECM_INTERFACE_PPP_ENABLE) += -DECM_INTERFACE_PPP_ENABLE
 # Define ECM_INTERFACE_MAP_T_ENABLE=y in order
 # to enable support for MAP-T interface.
 # #############################################################################
-MAP_T_CONFIG:=$(shell  grep "CONFIG_PACKAGE_kmod-nat46=y" $(TOPDIR)/.config)
-MAP_T_ENABLED:=CONFIG_PACKAGE_kmod-nat46=y
-
-ECM_INTERFACE_MAP_T_ENABLE=n
-ifeq ($(MAP_T_CONFIG),$(MAP_T_ENABLED))
-ifneq ($(findstring 3.14, $(KERNELVERSION)),)
-ECM_INTERFACE_MAP_T_ENABLE=y
-endif
-endif
 ccflags-$(ECM_INTERFACE_MAP_T_ENABLE) += -DECM_INTERFACE_MAP_T_ENABLE
 
 # #############################################################################
