@@ -298,7 +298,5 @@ module_init(ecm_init)
 module_exit(ecm_exit)
 
 MODULE_DESCRIPTION("ECM Core");
-#ifdef MODULE_LICENSE
 MODULE_LICENSE("Dual BSD/GPL");
-#endif
 
