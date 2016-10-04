@@ -1311,7 +1311,6 @@ static unsigned int ecm_nss_ipv4_post_routing_hook(const struct nf_hook_ops *ops
 	struct net_device *in;
 	bool can_accel = true;
 	unsigned int result;
-	unsigned int conn_count;
 
 	DEBUG_TRACE("%p: Routing: %s\n", out, out->name);
 
@@ -1325,15 +1324,6 @@ static unsigned int ecm_nss_ipv4_post_routing_hook(const struct nf_hook_ops *ops
 		return NF_ACCEPT;
 	}
 	spin_unlock_bh(&ecm_nss_ipv4_lock);
-
-	/*
-	 * If we have exceeded the conntrack connection limit then do not process.
-	 */
-	conn_count = (unsigned int)ecm_db_connection_count_get();
-	if (conn_count >= nf_conntrack_max) {
-		DEBUG_WARN("ECM Connection count limit reached: db: %u, ct: %u\n", conn_count, nf_conntrack_max);
-		return NF_ACCEPT;
-	}
 
 	/*
 	 * Don't process broadcast or multicast
@@ -1464,7 +1454,6 @@ static unsigned int ecm_nss_ipv4_bridge_post_routing_hook(const struct nf_hook_o
 	struct net_device *in;
 	bool can_accel = true;
 	unsigned int result;
-	unsigned int conn_count;
 
 	DEBUG_TRACE("%p: Bridge: %s\n", out, out->name);
 
@@ -1478,15 +1467,6 @@ static unsigned int ecm_nss_ipv4_bridge_post_routing_hook(const struct nf_hook_o
 		return NF_ACCEPT;
 	}
 	spin_unlock_bh(&ecm_nss_ipv4_lock);
-
-	/*
-	 * If we have exceeded the conntrack connection limit then do not process.
-	 */
-	conn_count = (unsigned int)ecm_db_connection_count_get();
-	if (conn_count >= nf_conntrack_max) {
-		DEBUG_WARN("ECM Connection count limit reached: db: %u, ct: %u\n", conn_count, nf_conntrack_max);
-		return NF_ACCEPT;
-	}
 
 	/*
 	 * Don't process broadcast or multicast

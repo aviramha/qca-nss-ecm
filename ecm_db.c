@@ -10800,6 +10800,16 @@ struct ecm_db_connection_instance *ecm_db_connection_alloc(void)
 {
 	struct ecm_db_connection_instance *ci;
 	int __attribute__((unused)) i;
+	unsigned int conn_count;
+
+	/*
+	 * If we have exceeded the conntrack connection limit then do not allocate new instance.
+	 */
+	conn_count = (unsigned int)ecm_db_connection_count_get();
+	if (conn_count >= nf_conntrack_max) {
+		DEBUG_WARN("ECM Connection count limit reached: db: %u, ct: %u\n", conn_count, nf_conntrack_max);
+		return NULL;
+	}
 
 	/*
 	 * Allocate the connection
