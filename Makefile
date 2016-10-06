@@ -147,6 +147,7 @@ ifeq ($(ECM_FRONT_END_NSS_ENABLE), y)
 MCS_CONFIG:=$(shell  grep "CONFIG_PACKAGE_kmod-qca-mcs=y" $(TOPDIR)/.config)
 MCS_ENABLED:=CONFIG_PACKAGE_kmod-qca-mcs=y
 ifeq ($(MCS_CONFIG),$(MCS_ENABLED))
+ECM_MULTICAST_ENABLE=y
 ecm-$(ECM_MULTICAST_ENABLE) += frontends/nss/ecm_nss_multicast_ipv4.o
 ecm-$(ECM_MULTICAST_ENABLE) += frontends/nss/ecm_nss_multicast_ipv6.o
 ccflags-$(ECM_MULTICAST_ENABLE) += -DECM_MULTICAST_ENABLE
