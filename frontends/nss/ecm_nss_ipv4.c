@@ -180,6 +180,7 @@ struct ecm_db_node_instance *ecm_nss_ipv4_node_establish_and_ref(struct ecm_fron
 	ip_addr_t local_ip, remote_ip;
 	struct net_device *local_dev;
 #endif
+
 #if defined(ECM_INTERFACE_MAP_T_ENABLE)
 	struct net_device *in;
 #endif
@@ -248,6 +249,39 @@ struct ecm_db_node_instance *ecm_nss_ipv4_node_establish_and_ref(struct ecm_fron
 			       ECM_IP_ADDR_TO_DOT(local_ip), ECM_IP_ADDR_TO_DOT(remote_ip), ECM_IP_ADDR_TO_DOT(addr));
 
 			local_dev = ecm_interface_dev_find_by_local_addr(local_ip);
+			if (local_dev->type == ARPHRD_PPP) {
+				struct ppp_channel *ppp_chan[1];
+				struct pppoe_opt addressing;
+				int px_proto;
+#ifndef ECM_INTERFACE_PPPOE_ENABLE
+				DEBUG_TRACE("l2tp over netdevice %s unsupported\n", local_dev->name);
+				dev_put(local_dev);
+				return NULL;
+#else
+				if (ppp_hold_channels(local_dev, ppp_chan, 1) != 1) {
+					DEBUG_WARN("l2tpv2 over netdevice %s unsupported; could not hold ppp channels\n", local_dev->name);
+					dev_put(local_dev);
+					return NULL;
+				}
+
+				px_proto = ppp_channel_get_protocol(ppp_chan[0]);
+				if (px_proto != PX_PROTO_OE) {
+					DEBUG_WARN("l2tpv2 over PPP protocol %d unsupported\n", px_proto);
+					ppp_release_channels(ppp_chan, 1);
+					dev_put(local_dev);
+					return NULL;
+				}
+
+				pppoe_channel_addressing_get(ppp_chan[0], &addressing);
+				DEBUG_TRACE("Obtained mac address for %s remote address " ECM_IP_ADDR_OCTAL_FMT "\n", addressing.dev->name, ECM_IP_ADDR_TO_OCTAL(addr));
+				memcpy(node_addr, addressing.dev->dev_addr, ETH_ALEN);
+				dev_put(addressing.dev);
+				ppp_release_channels(ppp_chan, 1);
+				dev_put(local_dev);
+				done = true;
+				break;
+#endif
+			}
 
 			if (!local_dev) {
 				DEBUG_WARN("Failed to find local netdevice of l2tp tunnel for " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(local_ip));
@@ -408,7 +442,6 @@ done:
 		DEBUG_WARN("Failed to establish iface\n");
 		return NULL;
 	}
-
 
 	/*
 	 * Locate the node

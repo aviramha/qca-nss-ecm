@@ -189,6 +189,9 @@ struct ecm_db_node_instance *ecm_nss_ipv6_node_establish_and_ref(struct ecm_fron
 #endif
 #ifdef ECM_INTERFACE_MAP_T_ENABLE
 	struct inet6_dev *ip6_inetdev;
+#endif
+
+#if defined(ECM_INTERFACE_L2TPV2_ENABLE) || defined(ECM_INTERFACE_MAP_T_ENABLE)
 #ifdef ECM_INTERFACE_PPPOE_ENABLE
 	struct ppp_channel *ppp_chan[1];
 	struct pppoe_opt addressing;
@@ -264,6 +267,37 @@ struct ecm_db_node_instance *ecm_nss_ipv6_node_establish_and_ref(struct ecm_fron
 			}
 
 			DEBUG_TRACE("local_dev found is %s\n", local_dev->name);
+
+			if (local_dev->type == ARPHRD_PPP) {
+#ifndef ECM_INTERFACE_PPPOE_ENABLE
+				DEBUG_TRACE("l2tpv2 over pppoe unsupported\n");
+				dev_put(local_dev);
+				return NULL;
+#else
+				if (ppp_hold_channels(local_dev, ppp_chan, 1) != 1) {
+					DEBUG_TRACE("l2tpv2 over netdevice %s unsupported; could not hold ppp channels\n", local_dev->name);
+					dev_put(local_dev);
+					return NULL;
+				}
+
+				px_proto = ppp_channel_get_protocol(ppp_chan[0]);
+				if (px_proto != PX_PROTO_OE) {
+					DEBUG_WARN("l2tpv2 over PPP protocol %d unsupported\n", px_proto);
+					ppp_release_channels(ppp_chan, 1);
+					dev_put(local_dev);
+					return NULL;
+				}
+
+				pppoe_channel_addressing_get(ppp_chan[0], &addressing);
+				DEBUG_TRACE("Obtained mac address for %s remote address " ECM_IP_ADDR_OCTAL_FMT "\n", addressing.dev->name, ECM_IP_ADDR_TO_OCTAL(addr));
+				memcpy(node_addr, addressing.dev->dev_addr, ETH_ALEN);
+				dev_put(addressing.dev);
+				ppp_release_channels(ppp_chan, 1);
+				dev_put(local_dev);
+				done = true;
+				break;
+#endif
+			}
 
 			if (unlikely(!ecm_interface_mac_addr_get_no_route(local_dev, remote_ip, node_addr))) {
 				DEBUG_TRACE("Failed to obtain mac for host " ECM_IP_ADDR_OCTAL_FMT "\n", ECM_IP_ADDR_TO_OCTAL(addr));
