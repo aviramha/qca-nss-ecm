@@ -97,9 +97,9 @@ struct ecm_db_iface_instance *ecm_db_interfaces = NULL;
  * Connection hash table
  */
 #define ECM_DB_CONNECTION_HASH_SLOTS 32768
-static struct ecm_db_connection_instance *ecm_db_connection_table[ECM_DB_CONNECTION_HASH_SLOTS];
+static struct ecm_db_connection_instance **ecm_db_connection_table;
 						/* Slots of the connection hash table */
-static int ecm_db_connection_table_lengths[ECM_DB_CONNECTION_HASH_SLOTS];
+static int *ecm_db_connection_table_lengths;
 						/* Tracks how long each chain is */
 static int ecm_db_connection_count = 0;		/* Number of connections allocated */
 static int ecm_db_connection_serial = 0;	/* Serial number - ensures each connection has a unique serial number.
@@ -113,9 +113,9 @@ typedef uint32_t ecm_db_connection_hash_t;
  * Connection serial number hash table
  */
 #define ECM_DB_CONNECTION_SERIAL_HASH_SLOTS 32768
-static struct ecm_db_connection_instance *ecm_db_connection_serial_table[ECM_DB_CONNECTION_SERIAL_HASH_SLOTS];
+static struct ecm_db_connection_instance **ecm_db_connection_serial_table;
 						/* Slots of the connection serial hash table */
-static int ecm_db_connection_serial_table_lengths[ECM_DB_CONNECTION_SERIAL_HASH_SLOTS];
+static int *ecm_db_connection_serial_table_lengths;
 						/* Tracks how long each chain is */
 typedef uint32_t ecm_db_connection_serial_hash_t;
 
@@ -123,9 +123,9 @@ typedef uint32_t ecm_db_connection_serial_hash_t;
  * Mapping hash table
  */
 #define ECM_DB_MAPPING_HASH_SLOTS 32768
-static struct ecm_db_mapping_instance *ecm_db_mapping_table[ECM_DB_MAPPING_HASH_SLOTS];
+static struct ecm_db_mapping_instance **ecm_db_mapping_table;
 							/* Slots of the mapping hash table */
-static int ecm_db_mapping_table_lengths[ECM_DB_MAPPING_HASH_SLOTS];
+static int *ecm_db_mapping_table_lengths;
 							/* Tracks how long each chain is */
 static int ecm_db_mapping_count = 0;			/* Number of mappings allocated */
 typedef uint32_t ecm_db_mapping_hash_t;
@@ -134,9 +134,9 @@ typedef uint32_t ecm_db_mapping_hash_t;
  * Host hash table
  */
 #define ECM_DB_HOST_HASH_SLOTS 32768
-static struct ecm_db_host_instance *ecm_db_host_table[ECM_DB_HOST_HASH_SLOTS];
+static struct ecm_db_host_instance **ecm_db_host_table;
 							/* Slots of the host hash table */
-static int ecm_db_host_table_lengths[ECM_DB_HOST_HASH_SLOTS];
+static int *ecm_db_host_table_lengths;
 							/* Tracks how long each chain is */
 static int ecm_db_host_count = 0;			/* Number of hosts allocated */
 typedef uint32_t ecm_db_host_hash_t;
@@ -145,9 +145,9 @@ typedef uint32_t ecm_db_host_hash_t;
  * Node hash table
  */
 #define ECM_DB_NODE_HASH_SLOTS 32768
-static struct ecm_db_node_instance *ecm_db_node_table[ECM_DB_NODE_HASH_SLOTS];
+static struct ecm_db_node_instance **ecm_db_node_table;
 							/* Slots of the node hash table */
-static int ecm_db_node_table_lengths[ECM_DB_NODE_HASH_SLOTS];
+static int *ecm_db_node_table_lengths;
 							/* Tracks how long each chain is */
 static int ecm_db_node_count = 0;			/* Number of nodes allocated */
 typedef uint32_t ecm_db_node_hash_t;
@@ -12300,6 +12300,66 @@ int ecm_db_init(struct dentry *dentry)
 		goto init_cleanup;
 	}
 
+	ecm_db_connection_table = vzalloc(sizeof(struct ecm_db_connection_instance *) * ECM_DB_CONNECTION_HASH_SLOTS);
+	if (!ecm_db_connection_table) {
+		DEBUG_ERROR("Failed to allocate virtual memory for ecm_db_connection_table\n");
+		goto init_cleanup;
+	}
+
+	ecm_db_connection_table_lengths = vzalloc(sizeof(int) * ECM_DB_CONNECTION_HASH_SLOTS);
+	if (!ecm_db_connection_table_lengths) {
+		DEBUG_ERROR("Failed to allocate virtual memory for ecm_db_connection_table_lengths\n");
+		goto init_cleanup_1;
+	}
+
+	ecm_db_connection_serial_table = vzalloc(sizeof(struct ecm_db_connection_instance *) * ECM_DB_CONNECTION_SERIAL_HASH_SLOTS);
+	if (!ecm_db_connection_serial_table) {
+		DEBUG_ERROR("Failed to allocate virtual memory for ecm_db_connection_serial_table\n");
+		goto init_cleanup_2;
+	}
+
+	ecm_db_connection_serial_table_lengths = vzalloc(sizeof(int) * ECM_DB_CONNECTION_SERIAL_HASH_SLOTS);
+	if (!ecm_db_connection_serial_table_lengths) {
+		DEBUG_ERROR("Failed to allocate virtual memory for ecm_db_connection_serial_table_lengths\n");
+		goto init_cleanup_3;
+	}
+
+	ecm_db_mapping_table = vzalloc(sizeof(struct ecm_db_mapping_instance *) * ECM_DB_MAPPING_HASH_SLOTS);
+	if (!ecm_db_mapping_table) {
+		DEBUG_ERROR("Failed to allocate virtual memory for ecm_db_mapping_table\n");
+		goto init_cleanup_4;
+	}
+
+	ecm_db_mapping_table_lengths = vzalloc(sizeof(int) * ECM_DB_MAPPING_HASH_SLOTS);
+	if (!ecm_db_mapping_table_lengths) {
+		DEBUG_ERROR("Failed to allocate virtual memory for ecm_db_mapping_table_lengths\n");
+		goto init_cleanup_5;
+	}
+
+	ecm_db_host_table = vzalloc(sizeof(struct ecm_db_host_instance *) * ECM_DB_HOST_HASH_SLOTS);
+	if (!ecm_db_host_table) {
+		DEBUG_ERROR("Failed to allocate virtual memory for ecm_db_host_table\n");
+		goto init_cleanup_6;
+	}
+
+	ecm_db_host_table_lengths = vzalloc(sizeof(int) * ECM_DB_HOST_HASH_SLOTS);
+	if (!ecm_db_host_table_lengths) {
+		DEBUG_ERROR("Failed to allocate virtual memory for ecm_db_host_table_lengths\n");
+		goto init_cleanup_7;
+	}
+
+	ecm_db_node_table = vzalloc(sizeof(struct ecm_db_node_instance *) * ECM_DB_NODE_HASH_SLOTS);
+	if (!ecm_db_node_table) {
+		DEBUG_ERROR("Failed to allocate virtual memory for ecm_db_node_table\n");
+		goto init_cleanup_8;
+	}
+
+	ecm_db_node_table_lengths = vzalloc(sizeof(int) * ECM_DB_NODE_HASH_SLOTS);
+	if (!ecm_db_node_table_lengths) {
+		DEBUG_ERROR("Failed to allocate virtual memory for ecm_db_node_table_lengths\n");
+		goto init_cleanup_9;
+	}
+
 	/*
 	 * Set a timer to manage cleanup of expired connections
 	 */
@@ -12388,8 +12448,25 @@ int ecm_db_init(struct dentry *dentry)
 
 	return 0;
 
+init_cleanup_9:
+	vfree(ecm_db_node_table);
+init_cleanup_8:
+	vfree(ecm_db_host_table_lengths);
+init_cleanup_7:
+	vfree(ecm_db_host_table);
+init_cleanup_6:
+	vfree(ecm_db_mapping_table_lengths);
+init_cleanup_5:
+	vfree(ecm_db_mapping_table);
+init_cleanup_4:
+	vfree(ecm_db_connection_serial_table_lengths);
+init_cleanup_3:
+	vfree(ecm_db_connection_serial_table);
+init_cleanup_2:
+	vfree(ecm_db_connection_table_lengths);
+init_cleanup_1:
+	vfree(ecm_db_connection_table);
 init_cleanup:
-
 	debugfs_remove_recursive(ecm_db_dentry);
 	return -1;
 }
@@ -12416,6 +12493,19 @@ void ecm_db_exit(void)
 	 * indefinately for the lock to be released!
 	 */
 	del_timer_sync(&ecm_db_timer);
+
+	/*
+	 * Free the tables.
+	 */
+	vfree(ecm_db_node_table);
+	vfree(ecm_db_host_table_lengths);
+	vfree(ecm_db_host_table);
+	vfree(ecm_db_mapping_table_lengths);
+	vfree(ecm_db_mapping_table);
+	vfree(ecm_db_connection_serial_table_lengths);
+	vfree(ecm_db_connection_serial_table);
+	vfree(ecm_db_connection_table_lengths);
+	vfree(ecm_db_connection_table);
 
 	/*
 	 * Remove the debugfs files recursively.
