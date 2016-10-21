@@ -165,11 +165,32 @@ ecm_classifier_nl_send_genl_msg(enum ECM_CL_NL_GENL_CMD cmd,
 				struct ecm_cl_nl_genl_attr_tuple *tuple)
 {
 	int ret;
+	int buf_len;
+	int total_len;
 	void *msg_head;
 	struct sk_buff *skb;
 
-	skb = genlmsg_new(sizeof(*tuple) + ecm_cl_nl_genl_family.hdrsize,
-			  GFP_ATOMIC);
+	/*
+	 * Calculate our packet payload size.
+	 * Start with our family header.
+	 */
+	buf_len = ecm_cl_nl_genl_family.hdrsize;
+
+	/*
+	 * Add the nla_total_size of each attribute we're going to nla_put().
+	 */
+	buf_len += nla_total_size(sizeof(*tuple));
+
+	/*
+	 * Lastly we need to add space for the NL message header since
+	 * genlmsg_new only accounts for the GENL header and not the
+	 * outer NL header. To do this, we use a NL helper function which
+	 * calculates the total size of a netlink message given a payload size.
+	 * Note this value does not include the GENL header, but that's
+	 * added automatically by genlmsg_new.
+	 */
+	total_len = nlmsg_total_size(buf_len);
+	skb = genlmsg_new(total_len, GFP_ATOMIC);
 	if (skb == NULL) {
 		DEBUG_WARN("failed to alloc nlmsg\n");
 		return -ENOMEM;
