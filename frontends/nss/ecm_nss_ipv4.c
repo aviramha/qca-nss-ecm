@@ -339,9 +339,25 @@ struct ecm_db_node_instance *ecm_nss_ipv4_node_establish_and_ref(struct ecm_fron
 
 			} else {
 				if (unlikely(!ecm_interface_mac_addr_get_no_route(local_dev, remote_ip, node_addr))) {
-					DEBUG_TRACE("failed to obtain node address for host " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(remote_ip));
-					dev_put(local_dev);
-					return NULL;
+					ip_addr_t gw_addr = ECM_IP_ADDR_NULL;
+
+					if (!ecm_interface_find_gateway(remote_ip, gw_addr)) {
+						DEBUG_TRACE("failed to obtain Gateway address for host " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(remote_ip));
+						dev_put(local_dev);
+						return NULL;
+					}
+
+					if (ECM_IP_ADDR_MATCH(gw_addr, remote_ip)) {
+						DEBUG_TRACE("host ip address match with gw address " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(remote_ip));
+						dev_put(local_dev);
+						return NULL;
+					}
+
+					if (!ecm_interface_mac_addr_get_no_route(local_dev, gw_addr, node_addr)) {
+						DEBUG_TRACE("failed to obtain node address for host " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(gw_addr));
+						dev_put(local_dev);
+						return NULL;
+					}
 				}
 			}
 
