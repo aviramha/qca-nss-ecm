@@ -2104,7 +2104,7 @@ static void ecm_nss_ipv4_stats_sync_req_work(struct work_struct *work)
 		nss_tx_status = nss_ipv4_tx_with_size(ecm_nss_ipv4_nss_ipv4_mgr, ecm_nss_ipv4_sync_req_msg, PAGE_SIZE);
 		if (nss_tx_status == NSS_TX_SUCCESS) {
 			ecm_nss_ipv4_stats_request_success++;
-			goto reschedule;
+			return;
 		}
 		ecm_nss_ipv4_stats_request_fail++;
 		retry--;
