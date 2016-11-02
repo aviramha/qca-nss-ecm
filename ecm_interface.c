@@ -5863,7 +5863,7 @@ static void ecm_interface_wifi_event_thread(void)
 		goto exit1;
 	}
 
-	memset(&saddr, 0, sizeof(struct sockaddr));
+	memset(&saddr, 0, sizeof(saddr));
 	saddr.nl_family = AF_NETLINK;
 	saddr.nl_groups = RTNLGRP_LINK;
 	saddr.nl_pid    = current->pid;
