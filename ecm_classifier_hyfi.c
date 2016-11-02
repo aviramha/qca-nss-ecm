@@ -102,6 +102,7 @@ struct ecm_classifier_hyfi_instance {
 #if (DEBUG_LEVEL > 0)
 	uint16_t magic;
 #endif
+	char bridge_name[IFNAMSIZ]; /* Destination bridge device of this hyfi instance */
 };
 
 /*
@@ -259,7 +260,7 @@ static void ecm_classifier_hyfi_process(struct ecm_classifier_instance *aci, ecm
 	}
 
 	if (enabled && ECM_FRONT_END_ACCELERATION_POSSIBLE(accel_mode) &&
-		hyfi_ecm_bridge_attached()) {
+		hyfi_ecm_bridge_attached(chfi->bridge_name)) {
 		relevance = ECM_CLASSIFIER_RELEVANCE_YES;
 		became_relevant = ecm_db_time_get();
 	}
@@ -496,7 +497,7 @@ static void ecm_classifier_hyfi_sync_to_v4(struct ecm_classifier_instance *aci, 
 		&chfi->flow.da[0], &chfi->flow.sa[0],
 		fwd_bytes, fwd_packets, time_now,
 		&should_keep_on_fdb_update_fwd,
-		&time_elapsed_fwd);
+		&time_elapsed_fwd, chfi->bridge_name);
 	DEBUG_INFO("ret_fwd %d Forward hash: 0x%02x, from_bytes = %lld, from_packets = %lld, "
 		"num_bytes_dropped = %lld, num_packets_dropped = %lld\n",
 		ret_fwd, chfi->flow.hash, from_bytes, from_packets,
@@ -509,7 +510,7 @@ static void ecm_classifier_hyfi_sync_to_v4(struct ecm_classifier_instance *aci, 
 		&chfi->flow.sa[0], &chfi->flow.da[0],
 		rev_bytes, rev_packets, time_now,
 		&should_keep_on_fdb_update_rev,
-		&time_elapsed_rev);
+		&time_elapsed_rev, chfi->bridge_name);
 
 	DEBUG_INFO("ret_rev %d Reverse hash: 0x%02x, to_bytes = %lld, to_packets = %lld, "
 		"num_bytes_dropped = %lld, num_packets_dropped = %lld\n",
@@ -540,7 +541,8 @@ static void ecm_classifier_hyfi_sync_to_v4(struct ecm_classifier_instance *aci, 
 		}
 	}
 
-	if (!hyfi_ecm_port_matches(&chfi->flow, to_system_index, from_system_index)) {
+	if (!hyfi_ecm_port_matches(&chfi->flow, to_system_index,
+			 from_system_index, chfi->bridge_name)) {
 		struct ecm_front_end_connection_instance *feci;
 		unsigned long start_time, end_time;
 
@@ -735,7 +737,7 @@ static bool ecm_classifier_hyfi_should_keep_connection(
 		return false;
 	}
 
-	return hyfi_ecm_should_keep(&chfi->flow, mac);
+	return hyfi_ecm_should_keep(&chfi->flow, mac, chfi->bridge_name);
 }
 
 /*
@@ -745,6 +747,9 @@ static bool ecm_classifier_hyfi_should_keep_connection(
 struct ecm_classifier_hyfi_instance *ecm_classifier_hyfi_instance_alloc(struct ecm_db_connection_instance *ci)
 {
 	struct ecm_classifier_hyfi_instance *chfi;
+	int32_t to_iface_first;
+	struct ecm_db_iface_instance *to_ifaces[ECM_DB_IFACE_HEIRARCHY_MAX];
+	int i;
 
 	/*
 	 * Allocate the instance
@@ -776,6 +781,18 @@ struct ecm_classifier_hyfi_instance *ecm_classifier_hyfi_instance_alloc(struct e
 	chfi->ci_serial = ecm_db_connection_serial_get(ci);
 	chfi->process_response.process_actions = 0;
 	chfi->process_response.relevance = ECM_CLASSIFIER_RELEVANCE_MAYBE;
+
+	/*
+	 * Find and save the bridge name. This will be passed to hyfi module later
+	 */
+	to_iface_first = ecm_db_connection_to_interfaces_get_and_ref(ci, to_ifaces);
+	for (i = to_iface_first; i < ECM_DB_IFACE_HEIRARCHY_MAX; i++) {
+		if (ecm_db_connection_iface_type_get(to_ifaces[i]) == ECM_DB_IFACE_TYPE_BRIDGE) {
+			ecm_db_iface_interface_name_get(to_ifaces[i], chfi->bridge_name);
+			break;
+		}
+	}
+	ecm_db_connection_interfaces_deref(to_ifaces, to_iface_first);
 
 	/*
 	 * Init Hy-Fi state
@@ -857,8 +874,8 @@ static void ecm_classifier_hyfi_connection_removed(void *arg, struct ecm_db_conn
 	/*
 	 * Mark as decelerated
 	 */
-	hyfi_ecm_decelerate(chfi->flow.hash, serial, &chfi->flow.da[0]);
-	hyfi_ecm_decelerate(chfi->flow.reverse_hash, serial, &chfi->flow.sa[0]);
+	hyfi_ecm_decelerate(chfi->flow.hash, serial, &chfi->flow.da[0], chfi->bridge_name);
+	hyfi_ecm_decelerate(chfi->flow.reverse_hash, serial, &chfi->flow.sa[0], chfi->bridge_name);
 
 	aci->deref(aci);
 }
