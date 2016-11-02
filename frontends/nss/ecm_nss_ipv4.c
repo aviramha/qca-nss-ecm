@@ -249,6 +249,13 @@ struct ecm_db_node_instance *ecm_nss_ipv4_node_establish_and_ref(struct ecm_fron
 			       ECM_IP_ADDR_TO_DOT(local_ip), ECM_IP_ADDR_TO_DOT(remote_ip), ECM_IP_ADDR_TO_DOT(addr));
 
 			local_dev = ecm_interface_dev_find_by_local_addr(local_ip);
+			if (!local_dev) {
+				DEBUG_WARN("Failed to find local netdevice of l2tp tunnel for " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(local_ip));
+				return NULL;
+			}
+
+			DEBUG_TRACE("local_dev found is %s\n", local_dev->name);
+
 			if (local_dev->type == ARPHRD_PPP) {
 				struct ppp_channel *ppp_chan[1];
 				struct pppoe_opt addressing;
@@ -282,13 +289,6 @@ struct ecm_db_node_instance *ecm_nss_ipv4_node_establish_and_ref(struct ecm_fron
 				break;
 #endif
 			}
-
-			if (!local_dev) {
-				DEBUG_WARN("Failed to find local netdevice of l2tp tunnel for " ECM_IP_ADDR_DOT_FMT "\n", ECM_IP_ADDR_TO_DOT(local_ip));
-				return NULL;
-			}
-
-			DEBUG_TRACE("local_dev found is %s\n", local_dev->name);
 
 			if (ECM_IP_ADDR_MATCH(local_ip, addr)) {
 				if (unlikely(!ecm_interface_mac_addr_get_no_route(local_dev, local_ip, node_addr))) {
