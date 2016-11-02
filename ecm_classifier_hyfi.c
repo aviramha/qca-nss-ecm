@@ -429,10 +429,13 @@ static void ecm_classifier_hyfi_sync_to_v4(struct ecm_classifier_instance *aci, 
 	uint64_t to_packets_dropped = 0;
 	uint64_t to_bytes_dropped = 0;
 	int32_t ret_fwd, ret_rev;
-	u_int32_t time_now, time_elapsed_fwd, time_elapsed_rev;
+	uint32_t time_now;
+	uint32_t time_elapsed_fwd = 0;
+	uint32_t time_elapsed_rev = 0;
 	uint8_t flow_dest_addr[ETH_ALEN];
 	uint64_t fwd_bytes, rev_bytes, fwd_packets, rev_packets;
-	bool should_keep_on_fdb_update_fwd, should_keep_on_fdb_update_rev;
+	bool should_keep_on_fdb_update_fwd = false;
+	bool should_keep_on_fdb_update_rev = false;
 	int32_t to_system_index;
 	int32_t from_system_index;
 
