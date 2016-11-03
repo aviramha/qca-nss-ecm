@@ -2067,14 +2067,12 @@ static void ecm_nss_ipv4_stats_sync_req_work(struct work_struct *work)
 	/*
 	 * Prepare a nss_ipv4_msg with CONN_STATS_SYNC_MANY request
 	 */
-	struct nss_ipv4_conn_sync_many_msg *nicsm_req;
+	struct nss_ipv4_conn_sync_many_msg *nicsm_req = &ecm_nss_ipv4_sync_req_msg->msg.conn_stats_many;
 	nss_tx_status_t nss_tx_status;
 	int retry = 3;
 	unsigned long int current_jiffies;
 
 	usleep_range(ECM_NSS_IPV4_STATS_SYNC_UDELAY - 100, ECM_NSS_IPV4_STATS_SYNC_UDELAY);
-
-	nicsm_req = &ecm_nss_ipv4_sync_req_msg->msg.conn_stats_many;
 
 	/*
 	 * If index is 0, we are starting a new round, but if we still have time remain
