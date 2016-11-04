@@ -1731,6 +1731,11 @@ static void ecm_nss_ipv6_stats_sync_req_work(struct work_struct *work)
 	int retry = 3;
 	unsigned long int current_jiffies;
 
+	if (ecm_nss_ipv6_accelerated_count == 0) {
+		DEBUG_TRACE("There is no accelerated IPv6 connection\n");
+		goto reschedule;
+	}
+
 	usleep_range(ECM_NSS_IPV6_STATS_SYNC_UDELAY - 100, ECM_NSS_IPV6_STATS_SYNC_UDELAY);
 
 	/*
@@ -1758,7 +1763,7 @@ static void ecm_nss_ipv6_stats_sync_req_work(struct work_struct *work)
 		nss_tx_status = nss_ipv6_tx_with_size(ecm_nss_ipv6_nss_ipv6_mgr, ecm_nss_ipv6_sync_req_msg, PAGE_SIZE);
 		if (nss_tx_status == NSS_TX_SUCCESS) {
 			ecm_nss_ipv6_stats_request_success++;
-			return;
+			goto reschedule;
 		}
 		ecm_nss_ipv6_stats_request_fail++;
 		retry--;
@@ -1766,6 +1771,7 @@ static void ecm_nss_ipv6_stats_sync_req_work(struct work_struct *work)
 		usleep_range(100, 200);
 	}
 
+reschedule:
 	/*
 	 * TX failed after retries, reschedule ourselves with fresh start
 	 */
