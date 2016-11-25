@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2014-2015 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2016 The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -68,8 +68,6 @@
  */
 #define DEBUG_LEVEL ECM_BOND_NOTIFIER_DEBUG_LEVEL
 
-#include <nss_api_if.h>
-
 #include "ecm_types.h"
 #include "ecm_db_types.h"
 #include "ecm_state.h"
@@ -83,9 +81,6 @@
 #include "ecm_classifier_default.h"
 #include "ecm_nss_ipv4.h"
 #include "ecm_interface.h"
-// GGG #include "ecm_front_end_ipv6.h"
-
-#define ECM_BOND_ID_INVALID			0xFFFFFFFF
 
 /*
  * Locking of the classifier - concurrency control
@@ -107,117 +102,6 @@ static int ecm_nss_bond_notifier_stopped = 0;			/* When non-zero further traffic
  *	Bond driver notifier
  */
 static struct bond_cb ecm_nss_bond_notifier_bond_cb;
-
-/*
- * NSS Context for LAG function
- */
-static void *ecm_nss_bond_notifier_nss_context = NULL;		/* Registration for LAG */
-
-/*
- * ecm_nss_bond_notifier_send_lag_state()
- *	Send the currnet LAG state of a physical interface that has changed state in the bonding driver.
- */
-static nss_tx_status_t ecm_nss_bond_notifier_send_lag_state(struct nss_ctx_instance *nss_ctx, struct net_device *slave, enum nss_lag_state_change_ev slave_state)
-{
-	int32_t lagid = 0;
-	int32_t bondid = 0;
-	int32_t slave_ifnum;
-	nss_tx_status_t nss_tx_status;
-	struct nss_lag_msg nm;
-	struct nss_lag_state_change *nlsc = NULL;
-	struct net_device *master = NULL;
-
-	DEBUG_INFO("Send LAG update for: %p (%s)\n", slave, slave->name);
-
-	/*
-	 * Can only handle interfaces known to the nss
-	 */
-	slave_ifnum = nss_cmn_get_interface_number(nss_ctx, slave);
-	if (slave_ifnum < 0) {
-		DEBUG_WARN("Not an NSS interface: %p\n", slave);
-		return NSS_TX_FAILURE_BAD_PARAM;
-	}
-
-	/*
-	 * Figure out the aggregation id of this slave
-	 */
-	memset(&nm, 0, sizeof(nm));
-	master = ecm_interface_get_and_hold_dev_master(slave);
-	if (master == NULL) {
-		DEBUG_WARN("Invalid master for %p (%s)\n", slave, slave->name);
-		return NSS_TX_FAILURE;
-	}
-	bondid = bond_get_id(master);
-	dev_put(master);
-	if (bondid == ECM_BOND_ID_INVALID) {
-		DEBUG_WARN("Invalid LAG group id 0x%x\n", bondid);
-		return NSS_TX_FAILURE;
-	}
-
-	lagid = bondid + NSS_LAG0_INTERFACE_NUM;
-
-	/*
-	 * Construct a message to the NSS to update it
-	 */
-	nss_lag_msg_init(&nm, lagid,
-			 NSS_TX_METADATA_LAG_STATE_CHANGE,
-			 sizeof(struct nss_lag_state_change),
-			 NULL, NULL);
-
-	nlsc = &nm.msg.state;
-
-	nlsc->event = slave_state;
-
-	nlsc->interface = slave_ifnum;
-
-	nss_tx_status = nss_lag_tx(nss_ctx, &nm);
-	if (nss_tx_status != NSS_TX_SUCCESS) {
-		DEBUG_WARN("%p: Send LAG update failed, status: %d\n", slave, nss_tx_status);
-		return NSS_TX_FAILURE;
-	}
-	DEBUG_TRACE("%p: Send LAG update sent\n", slave);
-	return NSS_TX_SUCCESS;
-}
-
-/*
- * ecm_nss_bond_notifier_bond_release()
- *	Callback when a slave device is released from slavedom and no longer a part of a bonded interface.
- */
-static void ecm_nss_bond_notifier_bond_release(struct net_device *slave_dev)
-{
-	/*
-	 * If operations have stopped then do not process event
-	 */
-	DEBUG_INFO("Bond slave release: %p (%s)\n", slave_dev, slave_dev->name);
-	spin_lock_bh(&ecm_nss_bond_notifier_lock);
-	if (unlikely(ecm_nss_bond_notifier_stopped)) {
-		spin_unlock_bh(&ecm_nss_bond_notifier_lock);
-		DEBUG_WARN("Ignoring bond release event - stopped\n");
-		return;
-	}
-	spin_unlock_bh(&ecm_nss_bond_notifier_lock);
-	ecm_nss_bond_notifier_send_lag_state(ecm_nss_bond_notifier_nss_context, slave_dev, NSS_LAG_RELEASE);
-}
-
-/*
- * ecm_nss_bond_notifier_bond_enslave()
- *	Callback when a device is enslaved by a LAG master device
- */
-static void ecm_nss_bond_notifier_bond_enslave(struct net_device *slave_dev)
-{
-	/*
-	 * If operations have stopped then do not process event
-	 */
-	DEBUG_INFO("Bond slave enslave: %p (%s)\n", slave_dev, slave_dev->name);
-	spin_lock_bh(&ecm_nss_bond_notifier_lock);
-	if (unlikely(ecm_nss_bond_notifier_stopped)) {
-		spin_unlock_bh(&ecm_nss_bond_notifier_lock);
-		DEBUG_WARN("Ignoring bond enslave event - stopped\n");
-		return;
-	}
-	spin_unlock_bh(&ecm_nss_bond_notifier_lock);
-	ecm_nss_bond_notifier_send_lag_state(ecm_nss_bond_notifier_nss_context, slave_dev, NSS_LAG_ENSLAVE);
-}
 
 /*
  * ecm_nss_bond_notifier_bond_link_down()
@@ -338,34 +222,6 @@ static void ecm_nss_bond_notifier_bond_delete_by_mac(uint8_t *mac)
 	ecm_interface_node_connections_decelerate(mac);
 }
 
-/*
- * ecm_nss_bond_notifier_lag_event_cb()
- *	Handle LAG event from the NSS driver
- */
-static void ecm_nss_bond_notifier_lag_event_cb(void *if_ctx, struct nss_lag_msg *msg)
-{
-	/*
-	 * If operations have stopped then do not process event
-	 */
-	spin_lock_bh(&ecm_nss_bond_notifier_lock);
-	if (unlikely(ecm_nss_bond_notifier_stopped)) {
-		spin_unlock_bh(&ecm_nss_bond_notifier_lock);
-		DEBUG_WARN("Ignoring LAG event event - stopped\n");
-		return;
-	}
-	spin_unlock_bh(&ecm_nss_bond_notifier_lock);
-
-	/*
-	 * GGG TODO Figure out if there is anything we need to do here, the old CM did nothing..
-	 */
-	switch (msg->cm.type)
-	{
-		default:
-			DEBUG_INFO("Unknown LAG event from NSS: %d", msg->cm.type);
-			break;
-	}
-}
-
 void ecm_nss_bond_notifier_stop(int num)
 {
 	ecm_nss_bond_notifier_stopped = num;
@@ -393,20 +249,10 @@ int ecm_nss_bond_notifier_init(struct dentry *dentry)
 	}
 
 	/*
-	 * Register Link Aggregation interfaces with NSS driver
-	 */
-	ecm_nss_bond_notifier_nss_context = nss_register_lag_if(NSS_LAG0_INTERFACE_NUM, NULL, ecm_nss_bond_notifier_lag_event_cb, NULL);
-	ecm_nss_bond_notifier_nss_context = nss_register_lag_if(NSS_LAG1_INTERFACE_NUM, NULL, ecm_nss_bond_notifier_lag_event_cb, NULL);
-	ecm_nss_bond_notifier_nss_context = nss_register_lag_if(NSS_LAG2_INTERFACE_NUM, NULL, ecm_nss_bond_notifier_lag_event_cb, NULL);
-	ecm_nss_bond_notifier_nss_context = nss_register_lag_if(NSS_LAG3_INTERFACE_NUM, NULL, ecm_nss_bond_notifier_lag_event_cb, NULL);
-
-	/*
 	 * Register Link Aggregation callbacks with the bonding driver
 	 */
 	ecm_nss_bond_notifier_bond_cb.bond_cb_link_up = ecm_nss_bond_notifier_bond_link_up;
 	ecm_nss_bond_notifier_bond_cb.bond_cb_link_down = ecm_nss_bond_notifier_bond_link_down;
-	ecm_nss_bond_notifier_bond_cb.bond_cb_release = ecm_nss_bond_notifier_bond_release;
-	ecm_nss_bond_notifier_bond_cb.bond_cb_enslave = ecm_nss_bond_notifier_bond_enslave;
 	ecm_nss_bond_notifier_bond_cb.bond_cb_delete_by_slave = ecm_nss_bond_notifier_bond_delete_by_slave;
 	ecm_nss_bond_notifier_bond_cb.bond_cb_delete_by_mac = ecm_nss_bond_notifier_bond_delete_by_mac;
 	bond_register_cb(&ecm_nss_bond_notifier_bond_cb);
@@ -426,14 +272,6 @@ void ecm_nss_bond_notifier_exit(void)
 	 * Unregister from the bond driver
 	 */
 	bond_unregister_cb();
-
-	/*
-	 * Unregister Link Aggregation interfaces with NSS driver
-	 */
-	nss_unregister_lag_if(NSS_LAG0_INTERFACE_NUM);
-	nss_unregister_lag_if(NSS_LAG1_INTERFACE_NUM);
-	nss_unregister_lag_if(NSS_LAG2_INTERFACE_NUM);
-	nss_unregister_lag_if(NSS_LAG3_INTERFACE_NUM);
 
 	/*
 	 * Remove the debugfs files recursively.
