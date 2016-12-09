@@ -1049,26 +1049,15 @@ struct neighbour *ecm_interface_ipv6_neigh_get(ip_addr_t addr)
  */
 bool ecm_interface_is_pptp(struct sk_buff *skb, const struct net_device *out)
 {
-	struct ppp_channel *ppp_chan[1];
-	int px_proto;
 	struct net_device *in;
 
+	/*
+	 * skip first pass of l2tp/pptp tunnel encapsulated traffic
+	 */
 	if (out->type == ARPHRD_PPP) {
-		if (ppp_hold_channels((struct net_device *)out, ppp_chan, 1) != 1) {
+		if (out->priv_flags & IFF_PPP_PPTP) {
 			return true;
 		}
-
-		px_proto = ppp_channel_get_protocol(ppp_chan[0]);
-
-		/*
-		 * Skip PPTP packets
-		 */
-		if (px_proto == PX_PROTO_PPTP) {
-			ppp_release_channels(ppp_chan, 1);
-			return true;
-		}
-
-		ppp_release_channels(ppp_chan, 1);
 	}
 
 	in = dev_get_by_index(&init_net, skb->skb_iif);
@@ -1077,23 +1066,10 @@ bool ecm_interface_is_pptp(struct sk_buff *skb, const struct net_device *out)
 	}
 
 	if (in->type == ARPHRD_PPP) {
-		if (__ppp_hold_channels((struct net_device *)in, ppp_chan, 1) != 1) {
+		if (in->priv_flags & IFF_PPP_PPTP) {
 			dev_put(in);
 			return true;
 		}
-
-		px_proto = ppp_channel_get_protocol(ppp_chan[0]);
-
-		/*
-		 * Skip PPTP pkts
-		 */
-		if (px_proto == PX_PROTO_PPTP) {
-			ppp_release_channels(ppp_chan, 1);
-			dev_put(in);
-			return true;
-		}
-
-		ppp_release_channels(ppp_chan, 1);
 	}
 
 	dev_put(in);
@@ -1110,33 +1086,27 @@ bool ecm_interface_is_pptp(struct sk_buff *skb, const struct net_device *out)
  */
 bool ecm_interface_is_l2tp_packet_by_version(struct sk_buff *skb, const struct net_device *out, int ver)
 {
-	struct ppp_channel *ppp_chan[1];
-	int px_proto;
+	uint32_t flag = 0;
 	struct net_device *in;
 
+	switch (ver) {
+	case 2:
+		flag = IFF_PPP_L2TPV2;
+		break;
+	case 3:
+		flag = IFF_PPP_L2TPV3;
+		break;
+	default:
+		break;
+	}
+
+	/*
+	 * skip first pass of l2tp/pptp tunnel encapsulated traffic
+	 */
 	if (out->type == ARPHRD_PPP) {
-		if (ppp_hold_channels((struct net_device *)out, ppp_chan, 1) != 1) {
+		if (out->priv_flags & flag) {
 			return true;
 		}
-
-		px_proto = ppp_channel_get_protocol(ppp_chan[0]);
-
-		/*
-		 * Check for L2TPv3 packets
-		 */
-		if (px_proto == PX_PROTO_OL2TP) {
-			struct pppol2tp_common_addr info;
-			if (pppol2tp_channel_addressing_get(ppp_chan[0], &info)) {
-				ppp_release_channels(ppp_chan, 1);
-				return true;
-			}
-
-			if (info.tunnel_version == ver) {
-				ppp_release_channels(ppp_chan, 1);
-				return true;
-			}
-		}
-		ppp_release_channels(ppp_chan, 1);
 	}
 
 	in = dev_get_by_index(&init_net, skb->skb_iif);
@@ -1145,31 +1115,10 @@ bool ecm_interface_is_l2tp_packet_by_version(struct sk_buff *skb, const struct n
 	}
 
 	if (in->type == ARPHRD_PPP) {
-		if (__ppp_hold_channels((struct net_device *)in, ppp_chan, 1) != 1) {
+		if (in->priv_flags & flag) {
 			dev_put(in);
 			return true;
 		}
-
-		px_proto = ppp_channel_get_protocol(ppp_chan[0]);
-
-		/*
-		 * Check for L2TPv3 pkts
-		 */
-		if (px_proto == PX_PROTO_OL2TP) {
-			struct pppol2tp_common_addr info;
-			if (pppol2tp_channel_addressing_get(ppp_chan[0], &info)) {
-				ppp_release_channels(ppp_chan, 1);
-				dev_put(in);
-				return true;
-			}
-
-			if (info.tunnel_version == ver) {
-				ppp_release_channels(ppp_chan, 1);
-				dev_put(in);
-				return true;
-			}
-		}
-		ppp_release_channels(ppp_chan, 1);
 	}
 
 	dev_put(in);
@@ -1185,36 +1134,34 @@ bool ecm_interface_is_l2tp_packet_by_version(struct sk_buff *skb, const struct n
  */
 bool ecm_interface_is_l2tp_pptp(struct sk_buff *skb, const struct net_device *out)
 {
-	struct ppp_channel *ppp_chan[1];
-	int px_proto;
+	struct net_device *in;
 
 	/*
 	 * skip first pass of l2tp/pptp tunnel encapsulated traffic
 	 */
 	if (out->type == ARPHRD_PPP) {
-		if (ppp_hold_channels((struct net_device *)out, ppp_chan, 1) == 1) {
-			px_proto = ppp_channel_get_protocol(ppp_chan[0]);
-			ppp_release_channels(ppp_chan, 1);
-			return ((px_proto == PX_PROTO_OL2TP) || (px_proto == PX_PROTO_PPTP));
+		if (out->priv_flags & (IFF_PPP_L2TPV2 | IFF_PPP_L2TPV3 |
+				      IFF_PPP_PPTP)) {
+			return true;
 		}
 	}
 
-	/*
-	 * skip second pass of l2tp tunnel encapsulated traffic
-	 */
-	if (!skb->sk) {
-		return false;
-	}
-
-	if (skb->sk->sk_protocol != IPPROTO_UDP) {
-		return false;
-	}
-
-	if (unlikely(udp_sk(skb->sk)->encap_type == UDP_ENCAP_L2TPINUDP)) {
+	in = dev_get_by_index(&init_net, skb->skb_iif);
+	if (!in) {
 		return true;
 	}
 
+	if (in->type == ARPHRD_PPP) {
+		if (in->priv_flags & (IFF_PPP_L2TPV2 | IFF_PPP_L2TPV3 |
+				      IFF_PPP_PPTP)) {
+			dev_put(in);
+			return true;
+		}
+	}
+
+	dev_put(in);
 	return false;
+
 }
 #endif
 
@@ -2200,7 +2147,7 @@ identifier_update:
 
 #ifndef ECM_INTERFACE_PPP_ENABLE
 	/*
-	 * PPP support is NOT provided for.
+	 * PPP Support is NOT provided for.
 	 * Interface is therefore unknown
 	 */
 	DEBUG_TRACE("Net device: %p is UNKNOWN (PPP Unsupported) type: %d\n", dev, dev_type);
@@ -2219,8 +2166,8 @@ identifier_update:
 	 * direction. we need to check for l2tp packet and avoid calls to
 	 * ppp_is_multilink() and ppp_hold_channels() which acquire same lock
 	 */
-	if (skb && skb->sk && (skb->sk->sk_protocol == IPPROTO_UDP)
-	    && (udp_sk(skb->sk)->encap_type == UDP_ENCAP_L2TPINUDP)) {
+
+	if ((dev->priv_flags & IFF_PPP_L2TPV2) && ppp_is_xmit_locked(dev)) {
 		if (skb->skb_iif == dev->ifindex) {
 			struct pppol2tp_common_addr info;
 
@@ -3442,10 +3389,11 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 	}
 
 #ifdef ECM_INTERFACE_L2TPV2_ENABLE
+
 	/*
 	 * if the address is a local address and indev=l2tp.
 	 */
-	if (skb && skb->sk && (skb->sk->sk_protocol == IPPROTO_UDP) && (udp_sk(skb->sk)->encap_type == UDP_ENCAP_L2TPINUDP)) {
+	if ((given_src_dev->type == ARPHRD_PPP) && (given_src_dev->priv_flags & IFF_PPP_L2TPV2) && ppp_is_xmit_locked(given_src_dev)) {
 		dev_put(dest_dev);
 		dest_dev = given_dest_dev;
 		if (dest_dev) {
@@ -3943,7 +3891,7 @@ lag_success:
 			DEBUG_TRACE("Net device: %p is PPP\n", dest_dev);
 
 #ifdef ECM_INTERFACE_L2TPV2_ENABLE
-			if (skb && skb->sk && (skb->sk->sk_protocol == IPPROTO_UDP) && (udp_sk(skb->sk)->encap_type == UDP_ENCAP_L2TPINUDP)) {
+			if ((given_src_dev->priv_flags & IFF_PPP_L2TPV2) && ppp_is_xmit_locked(given_src_dev)) {
 				if (skb->skb_iif == dest_dev->ifindex) {
 					DEBUG_TRACE("Net device: %p PPP channel is PPPoL2TPV2\n", dest_dev);
 					break;
@@ -4218,7 +4166,7 @@ int32_t ecm_interface_multicast_from_heirarchy_construct(struct ecm_front_end_co
 	/*
 	 * if the address is a local address and indev=l2tp.
 	 */
-	if (skb && skb->sk && (skb->sk->sk_protocol == IPPROTO_UDP) && (udp_sk(skb->sk)->encap_type == UDP_ENCAP_L2TPINUDP)) {
+	if ((given_src_dev->type == ARPHRD_PPP) && (given_src_dev->priv_flags & IFF_PPP_L2TPV2) && ppp_is_xmit_locked(given_src_dev)) {
 		dev_put(dest_dev);
 		dest_dev = given_dest_dev;
 		if (dest_dev) {
@@ -4685,7 +4633,7 @@ int32_t ecm_interface_multicast_from_heirarchy_construct(struct ecm_front_end_co
 			DEBUG_TRACE("Net device: %p is PPP\n", dest_dev);
 
 #ifdef ECM_INTERFACE_L2TPV2_ENABLE
-			if (skb && skb->sk && (skb->sk->sk_protocol == IPPROTO_UDP) && (udp_sk(skb->sk)->encap_type == UDP_ENCAP_L2TPINUDP)) {
+			if ((given_src_dev->priv_flags & IFF_PPP_L2TPV2) && ppp_is_xmit_locked(given_src_dev)) {
 				if (skb->skb_iif == dest_dev->ifindex) {
 					DEBUG_TRACE("Net device: %p PPP channel is PPPoL2TPV2\n", dest_dev);
 					break;

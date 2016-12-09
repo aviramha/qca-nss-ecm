@@ -1789,16 +1789,9 @@ unsigned int ecm_sfe_ported_ipv6_process(struct net_device *out_dev,
 		/*
 		 * Deny acceleration for L2TP-over-UDP tunnel
 		 */
-		if (skb->sk) {
-			if(skb->sk->sk_protocol == IPPROTO_UDP) {
-				struct udp_sock *usk = udp_sk(skb->sk);
-				if (usk) {
-					if (unlikely(usk->encap_type == UDP_ENCAP_L2TPINUDP)) {
-						DEBUG_TRACE("Skip packets for L2TP tunnel in skb %p\n", skb);
-						can_accel = false;
-					}
-				}
-			}
+		if ((in_dev->priv_flags & IFF_PPP_L2TPV2) && ppp_is_xmit_locked(in_dev)) {
+			DEBUG_TRACE("Skip packets for L2TP tunnel in skb %p\n", skb);
+			can_accel = false;
 		}
 
 		/*
@@ -2333,4 +2326,3 @@ bool ecm_sfe_ported_ipv6_debugfs_init(struct dentry *dentry)
 
 	return true;
 }
-
