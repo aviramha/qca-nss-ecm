@@ -187,9 +187,7 @@ ccflags-$(ECM_CLASSIFIER_NL_ENABLE) += -DECM_CLASSIFIER_NL_ENABLE
 # #############################################################################
 # Define ECM_CLASSIFIER_DSCP_ENABLE=y in order to enable DSCP classifier.
 # #############################################################################
-ifeq ($(findstring 4.4., $(KERNELVERSION)),)
 ECM_CLASSIFIER_DSCP_ENABLE=y
-endif
 ecm-$(ECM_CLASSIFIER_DSCP_ENABLE) += ecm_classifier_dscp.o
 ccflags-$(ECM_CLASSIFIER_DSCP_ENABLE) += -DECM_CLASSIFIER_DSCP_ENABLE
 
