@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2014-2016 The Linux Foundation.  All rights reserved.
+ * Copyright (c) 2014-2017 The Linux Foundation.  All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -1040,6 +1040,20 @@ static unsigned int ecm_nss_ipv4_ip_process(struct net_device *out_dev, struct n
 		 * Bridged
 		 */
 		ecm_dir = ECM_DB_DIRECTION_BRIDGED;
+	}
+
+	/*
+	 * Is ecm_dir consistent with is_routed flag?
+	 * In SNAT and hairpin NAT scenario, while accessing the LAN side server with its private
+	 * IP address from another client in the same LAN, the packets come through the bridge post routing hook
+	 * have the WAN interface IP address as the SNAT address. Then in the above ecm_dir calculation,
+	 * it is calculated as ECM_DB_DIRECTION_EGRESS_NAT. So, we shouldn't accelerate the flow this time
+	 * and wait for the packet to pass through the post routing hook.
+	 *
+	 */
+	if (!is_routed && (ecm_dir != ECM_DB_DIRECTION_BRIDGED)) {
+		DEBUG_TRACE("Packet comes from bridge post routing hook but ecm_dir is not bridge\n");
+		return NF_ACCEPT;
 	}
 
 	DEBUG_TRACE("IP Packet ORIGINAL src: %pI4 ORIGINAL dst: %pI4 protocol: %u, sender: %d ecm_dir: %d\n", &orig_tuple.src.u3.ip, &orig_tuple.dst.u3.ip, orig_tuple.dst.protonum, sender, ecm_dir);
