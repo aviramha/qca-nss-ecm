@@ -691,7 +691,7 @@ static ssize_t ecm_state_char_device_read(struct file *file,	/* see include/linu
 
 	sfi = (struct ecm_state_file_instance *)file->private_data;
 	DEBUG_CHECK_MAGIC(sfi, ECM_STATE_FILE_INSTANCE_MAGIC, "%p: magic failed", sfi);
-	DEBUG_TRACE("%p: State read up to length %d bytes\n", sfi, length);
+	DEBUG_TRACE("%p: State read up to length %d bytes\n", sfi, (int)length);
 
 	/*
 	 * If there is still some message remaining to be output then complete that first

@@ -132,7 +132,7 @@ extern int nf_ct_tcp_be_liberal;
 static void ecm_nss_ported_ipv6_connection_callback(void *app_data, struct nss_ipv6_msg *nim)
 {
 	struct nss_ipv6_rule_create_msg *nircm = &nim->msg.rule_create;
-	uint32_t serial = (uint32_t)app_data;
+	uint32_t serial = (uint32_t)(ecm_ptr_t)app_data;
 	struct ecm_db_connection_instance *ci;
 	struct ecm_front_end_connection_instance *feci;
 	struct ecm_nss_ported_ipv6_connection_instance *npci;
@@ -337,7 +337,7 @@ static void ecm_nss_ported_ipv6_connection_accelerate(struct ecm_front_end_conne
 	int32_t to_nss_iface_id;
 	uint8_t from_nss_iface_address[ETH_ALEN];
 	uint8_t to_nss_iface_address[ETH_ALEN];
-	struct nss_ipv6_msg nim;
+	struct nss_ipv6_msg *nim;
 	struct nss_ipv6_rule_create_msg *nircm;
 	struct ecm_classifier_instance *assignments[ECM_CLASSIFIER_TYPES];
 	int aci_index;
@@ -367,19 +367,25 @@ static void ecm_nss_ported_ipv6_connection_accelerate(struct ecm_front_end_conne
 		return;
 	}
 
+	nim = (struct nss_ipv6_msg *)kzalloc(sizeof(struct nss_ipv6_msg), GFP_ATOMIC | __GFP_NOWARN);
+	if (!nim) {
+		DEBUG_WARN("%p: no memory for nss ipv6 message structure instance: %p\n", feci, feci->ci);
+		ecm_nss_ipv6_accel_pending_clear(feci, ECM_FRONT_END_ACCELERATION_MODE_DECEL);
+		return;
+	}
+
 	/*
 	 * Okay construct an accel command.
 	 * Initialise creation structure.
 	 * NOTE: We leverage the app_data void pointer to be our 32 bit connection serial number.
 	 * When we get it back we re-cast it to a uint32 and do a faster connection lookup.
 	 */
-	memset(&nim, 0, sizeof(struct nss_ipv6_msg));
-	nss_ipv6_msg_init(&nim, NSS_IPV6_RX_INTERFACE, NSS_IPV6_TX_CREATE_RULE_MSG,
+	nss_ipv6_msg_init(nim, NSS_IPV6_RX_INTERFACE, NSS_IPV6_TX_CREATE_RULE_MSG,
 			sizeof(struct nss_ipv6_rule_create_msg),
 			ecm_nss_ported_ipv6_connection_callback,
-			(void *)ecm_db_connection_serial_get(feci->ci));
+			(void *)(ecm_ptr_t)ecm_db_connection_serial_get(feci->ci));
 
-	nircm = &nim.msg.rule_create;
+	nircm = &nim->msg.rule_create;
 	nircm->valid_flags = 0;
 	nircm->rule_flags = 0;
 
@@ -1041,7 +1047,7 @@ static void ecm_nss_ported_ipv6_connection_accelerate(struct ecm_front_end_conne
 	/*
 	 * Call the rule create function
 	 */
-	nss_tx_status = nss_ipv6_tx(ecm_nss_ipv6_nss_ipv6_mgr, &nim);
+	nss_tx_status = nss_ipv6_tx(ecm_nss_ipv6_nss_ipv6_mgr, nim);
 	if (nss_tx_status == NSS_TX_SUCCESS) {
 		/*
 		 * Reset the driver_fail count - transmission was okay here.
@@ -1049,8 +1055,11 @@ static void ecm_nss_ported_ipv6_connection_accelerate(struct ecm_front_end_conne
 		spin_lock_bh(&feci->lock);
 		feci->stats.driver_fail = 0;
 		spin_unlock_bh(&feci->lock);
+		kfree(nim);
 		return;
 	}
+
+	kfree(nim);
 
 	/*
 	 * Release that ref!
@@ -1081,6 +1090,8 @@ static void ecm_nss_ported_ipv6_connection_accelerate(struct ecm_front_end_conne
 ported_accel_bad_rule:
 	;
 
+	kfree(nim);
+
 	/*
 	 * Jump to here when rule data is bad and an offload command cannot be constructed
 	 */
@@ -1095,7 +1106,7 @@ ported_accel_bad_rule:
 static void ecm_nss_ported_ipv6_connection_destroy_callback(void *app_data, struct nss_ipv6_msg *nim)
 {
 	struct nss_ipv6_rule_destroy_msg *nirdm = &nim->msg.rule_destroy;
-	uint32_t serial = (uint32_t)app_data;
+	uint32_t serial = (uint32_t)(ecm_ptr_t)app_data;
 	struct ecm_db_connection_instance *ci;
 	struct ecm_front_end_connection_instance *feci;
 	struct ecm_nss_ported_ipv6_connection_instance *npci;
@@ -1268,7 +1279,7 @@ static void ecm_nss_ported_ipv6_connection_decelerate(struct ecm_front_end_conne
 	nss_ipv6_msg_init(&nim, NSS_IPV6_RX_INTERFACE, NSS_IPV6_TX_DESTROY_RULE_MSG,
 			sizeof(struct nss_ipv6_rule_destroy_msg),
 			ecm_nss_ported_ipv6_connection_destroy_callback,
-			(void *)ecm_db_connection_serial_get(feci->ci));
+			(void *)(ecm_ptr_t)ecm_db_connection_serial_get(feci->ci));
 
 	nirdm = &nim.msg.rule_destroy;
 	nirdm->tuple.protocol = (int32_t)ecm_db_connection_protocol_get(feci->ci);;

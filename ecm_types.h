@@ -26,6 +26,15 @@
  */
 typedef uint32_t ip_addr_t[4];
 
+/*
+ * 32/64 bits pointer type
+ */
+#ifdef __LP64__
+typedef uint64_t ecm_ptr_t;
+#else
+typedef uint32_t ecm_ptr_t;
+#endif
+
 #define ECM_IP_ADDR_OCTAL_FMT "%04x:%04x:%04x:%04x:%04x:%04x:%04x:%04x"
 #define ECM_IP_ADDR_DOT_FMT "%u.%u.%u.%u"
 

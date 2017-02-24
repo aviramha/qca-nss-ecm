@@ -184,7 +184,7 @@ static void ecm_nss_non_ported_ipv4_sit_set_peer(struct ecm_nss_non_ported_ipv4_
 static void ecm_nss_non_ported_ipv4_connection_callback(void *app_data, struct nss_ipv4_msg *nim)
 {
 	struct nss_ipv4_rule_create_msg *__attribute__((unused))nircm = &nim->msg.rule_create;
-	uint32_t serial = (uint32_t)app_data;
+	uint32_t serial = (uint32_t)(ecm_ptr_t)app_data;
 	struct ecm_db_connection_instance *ci;
 	struct ecm_front_end_connection_instance *feci;
 	struct ecm_nss_non_ported_ipv4_connection_instance *nnpci;
@@ -452,7 +452,7 @@ static void ecm_nss_non_ported_ipv4_connection_accelerate(struct ecm_front_end_c
 	nss_ipv4_msg_init(nim, NSS_IPV4_RX_INTERFACE, NSS_IPV4_TX_CREATE_RULE_MSG,
 			sizeof(struct nss_ipv4_rule_create_msg),
 			ecm_nss_non_ported_ipv4_connection_callback,
-			(void *)ecm_db_connection_serial_get(feci->ci));
+			(void *)(ecm_ptr_t)ecm_db_connection_serial_get(feci->ci));
 
 	nircm = &nim->msg.rule_create;
 	nircm->valid_flags = 0;
@@ -1195,7 +1195,7 @@ non_ported_accel_bad_rule:
 static void ecm_nss_non_ported_ipv4_connection_destroy_callback(void *app_data, struct nss_ipv4_msg *nim)
 {
 	struct nss_ipv4_rule_destroy_msg *__attribute__((unused))nirdm = &nim->msg.rule_destroy;
-	uint32_t serial = (uint32_t)app_data;
+	uint32_t serial = (uint32_t)(ecm_ptr_t)app_data;
 	struct ecm_db_connection_instance *ci;
 	struct ecm_front_end_connection_instance *feci;
 	struct ecm_nss_non_ported_ipv4_connection_instance *nnpci;
@@ -1372,7 +1372,7 @@ static void ecm_nss_non_ported_ipv4_connection_decelerate(struct ecm_front_end_c
 	nss_ipv4_msg_init(&nim, NSS_IPV4_RX_INTERFACE, NSS_IPV4_TX_DESTROY_RULE_MSG,
 			sizeof(struct nss_ipv4_rule_destroy_msg),
 			ecm_nss_non_ported_ipv4_connection_destroy_callback,
-			(void *)ecm_db_connection_serial_get(feci->ci));
+			(void *)(ecm_ptr_t)ecm_db_connection_serial_get(feci->ci));
 
 	nirdm = &nim.msg.rule_destroy;
 	nirdm->tuple.protocol = (int32_t)protocol;
