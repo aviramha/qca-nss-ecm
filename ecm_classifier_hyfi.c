@@ -70,6 +70,7 @@
 #include "ecm_db.h"
 #include "ecm_classifier_hyfi.h"
 #include "ecm_front_end_ipv4.h"
+#include "ecm_interface.h"
 /*
  * Magic numbers
  */
@@ -102,6 +103,7 @@ struct ecm_classifier_hyfi_instance {
 #if (DEBUG_LEVEL > 0)
 	uint16_t magic;
 #endif
+	bool multi_bridge_flow;
 	char bridge_name[IFNAMSIZ]; /* Destination bridge device of this hyfi instance */
 };
 
@@ -410,6 +412,51 @@ static int32_t ecm_classifier_hyfi_get_intf_id(struct ecm_db_connection_instance
 	ecm_db_connection_interfaces_deref(interfaces, intf_first);
 
 	return system_index;
+}
+
+
+/* ecm_classifier_hyfi_get_bridge_name()
+ *	Get the bridge name from the connection hierarchy
+ */
+static void ecm_classifier_hyfi_get_bridge_name(struct ecm_db_connection_instance *ci,
+		char *name_buffer, bool direction_to)
+{
+	int32_t intf_first;
+	struct ecm_db_iface_instance *interfaces[ECM_DB_IFACE_HEIRARCHY_MAX];
+	int32_t i;
+
+	if (direction_to) {
+		intf_first = ecm_db_connection_to_interfaces_get_and_ref(
+						ci, interfaces);
+	} else {
+		intf_first = ecm_db_connection_from_interfaces_get_and_ref(
+						ci, interfaces);
+	}
+
+	if (intf_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
+		DEBUG_WARN("%p: Error fetching bridge name\n", ci);
+		return;
+	}
+
+	for (i = intf_first; i < ECM_DB_IFACE_HEIRARCHY_MAX; i++) {
+		struct net_device *dev;
+		dev = dev_get_by_index(&init_net, ecm_db_iface_interface_identifier_get(interfaces[i]));
+
+		if (dev && ecm_front_end_is_bridge_port(dev)) {
+			struct net_device *master;
+			master = ecm_interface_get_and_hold_dev_master(dev);
+			if (master) {
+				strlcpy(name_buffer, master->name, IFNAMSIZ);
+				dev_put(master);
+				dev_put(dev);
+				break;
+			}
+		}
+		if (dev)
+			dev_put(dev);
+	}
+
+	ecm_db_connection_interfaces_deref(interfaces, intf_first);
 }
 
 /*
@@ -750,9 +797,8 @@ static bool ecm_classifier_hyfi_should_keep_connection(
 struct ecm_classifier_hyfi_instance *ecm_classifier_hyfi_instance_alloc(struct ecm_db_connection_instance *ci)
 {
 	struct ecm_classifier_hyfi_instance *chfi;
-	int32_t to_iface_first;
-	struct ecm_db_iface_instance *to_ifaces[ECM_DB_IFACE_HEIRARCHY_MAX];
-	int i;
+	char to_bridge[IFNAMSIZ];
+	char from_bridge[IFNAMSIZ];
 
 	/*
 	 * Allocate the instance
@@ -788,14 +834,30 @@ struct ecm_classifier_hyfi_instance *ecm_classifier_hyfi_instance_alloc(struct e
 	/*
 	 * Find and save the bridge name. This will be passed to hyfi module later
 	 */
-	to_iface_first = ecm_db_connection_to_interfaces_get_and_ref(ci, to_ifaces);
-	for (i = to_iface_first; i < ECM_DB_IFACE_HEIRARCHY_MAX; i++) {
-		if (ecm_db_connection_iface_type_get(to_ifaces[i]) == ECM_DB_IFACE_TYPE_BRIDGE) {
-			ecm_db_iface_interface_name_get(to_ifaces[i], chfi->bridge_name);
-			break;
+	to_bridge[0] = 0;
+	from_bridge[0] = 0;
+	ecm_classifier_hyfi_get_bridge_name(ci, to_bridge, true);
+	ecm_classifier_hyfi_get_bridge_name(ci, from_bridge, false);
+
+	if (!strlen(to_bridge) || !strlen(from_bridge)) {
+		/* one of the bridge name is null, typical
+		 * routed connection. Consider valid bridge*/
+		if (strlen(to_bridge)) {
+			strlcpy(chfi->bridge_name, to_bridge, IFNAMSIZ);
+		} else if (strlen(from_bridge)) {
+			strlcpy(chfi->bridge_name, from_bridge, IFNAMSIZ);
 		}
+	} else if (!strncmp(to_bridge, from_bridge, IFNAMSIZ)) {
+		/* Pure bridge connection. Consider any one bridge */
+		strlcpy(chfi->bridge_name, to_bridge, IFNAMSIZ);
+	} else {
+		/* multi-bridge connection */
+		chfi->multi_bridge_flow = true;
+
+		/* TODO: Currently we are not supporting
+		 * multi-bridge connection, stats wont be
+		 * updated for multi-bridge flow */
 	}
-	ecm_db_connection_interfaces_deref(to_ifaces, to_iface_first);
 
 	/*
 	 * Init Hy-Fi state
